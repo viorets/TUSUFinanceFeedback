@@ -42,9 +42,18 @@ Files are stored as JSON `{ id, name }`. Tabs are created by `setup()` / on firs
 - Uploads: .docx or PDF only, 25 MB max (Apps Script limit), saved to the organization's subfolder. A save only accepts files inside that subfolder.
 - Re-submission tab is a prototype: the resubmission website is not built yet, so its fields show "No data submitted yet". The decision saves.
 
+- Pitching phases (v2.1): Admins and Chiefs switch Pre-pitch, Pitching and Re-submission On / Off in the admin console (`Settings` key `Phases`, default all On). An Off phase shows "Pending Phase" on every organization page and in print, and its writes and uploads are refused.
+
+## Design
+
+v2.1 follows Apple's newest look: a floating translucent ("glass") top bar, rounder layered cards, filled fields,
+iOS switches and short spring animations, in the TUSU teal. The v2.1 block at the end of `public/css/app.css`
+overrides the earlier styles. Glass turns solid for reduced transparency; motion stops for reduced motion.
+
 ## Versions
 
-- `v2` (tag): this version.
+- `v2.1` (tag, `main`): pitching phases and the design refresh.
+- `v2` (branch and tag): save window, closed organizations, Owner control tab, print. Kept unchanged.
 - `v1-prototype` (branch and tag): the first prototype, kept unchanged.
 
 ## Setup

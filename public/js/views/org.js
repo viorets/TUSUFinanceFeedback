@@ -5,7 +5,7 @@ import { tr, getLang } from '../i18n.js';
 import { $, esc, icon, phoneFmt, dateTimeFmt, toast, num2 } from '../ui.js';
 import { cached, peek, remember } from '../api.js';
 import { CAMPUSES, CATEGORIES, ORGS } from '../masterdata.js';
-import { UNFINISHED, projNo, slotText } from '../project.js';
+import { UNFINISHED, projNo, slotText, phaseOn, PENDING } from '../project.js';
 
 const TABS = {
   prepitch: { load: () => import('./prepitch.js'), label: () => tr('Pre-pitch', 'ก่อนการนำเสนอ') },
@@ -73,9 +73,12 @@ export const statusPill = (closed) => (closed ? `<span class="pill closed">${ico
 function paintTabs() {
   const { page, ref, data, tab } = state;
   $('#tabs', page).innerHTML = Object.entries(TABS).map(([k, t]) => {
-    const n = data.projects.filter((p) => UNFINISHED[k](data, p)).length;
+    const n = phaseOn(data, k) ? data.projects.filter((p) => UNFINISHED[k](data, p)).length : 0;
     return `<a href="#/org/${encodeURIComponent(ref)}/${k}" class="${k === tab ? 'on' : ''}">${esc(t.label())}${n ? `<span class="badge" title="${esc(tr('{n} unfinished', 'ยังไม่ครบ {n}', { n }))}">${n}</span>` : ''}</a>`;
   }).join('');
+  // Selected-tab capsule slides to the chosen tab (CSS reads --x / --w).
+  const nav = $('#tabs', page); const on = nav.querySelector('a.on');
+  if (on) { nav.style.setProperty('--x', `${on.offsetLeft}px`); nav.style.setProperty('--w', `${on.offsetWidth}px`); nav.classList.add('has-on'); }
 }
 
 export async function switchTab(tab) {
@@ -86,6 +89,12 @@ export async function switchTab(tab) {
   // A fresh element per tab: each tab module binds its own handlers on it.
   const el = document.createElement('div');
   $('#tab', page).replaceChildren(el);
+  // Phase switched off in the admin console: no cards, nothing to change.
+  if (!phaseOn(state.data, tab)) {
+    el.innerHTML = `<div class="empty pending-phase">${icon('clock', 32)}<h2>${esc(PENDING())}</h2><p>${tr('This phase has not started yet.', 'ช่วงนี้ยังไม่เริ่ม')}</p></div>`;
+    state.mod = null;
+    return;
+  }
   if (!state.data.projects.length) {
     el.innerHTML = `<div class="empty">${tr('This organization has no submitted projects yet.', 'องค์กรนี้ยังไม่มีโครงการที่ส่งเข้ามา')}</div>`;
     state.mod = null;
@@ -128,19 +137,19 @@ async function printOrg(o, ref, d) {
     [tr('Project dates', 'วันที่จัดโครงการ'), (p.dates || []).map(day).join(', ') || '—'],
     [tr('Total proposed project budget', 'งบประมาณโครงการที่เสนอ'), money(p.budget)],
   ])}
-      <h3>${tr('Pre-pitch', 'ก่อนการนำเสนอ')}</h3>${table([
+      <h3>${tr('Pre-pitch', 'ก่อนการนำเสนอ')}</h3>${!phaseOn(d, 'prepitch') ? `<p>${esc(PENDING())}</p>` : table([
     [tr('Approved budget', 'งบประมาณที่อนุมัติ'), money(pre.approvedBudget)],
     [tr('Approved project .docx?', 'อนุมัติไฟล์โครงการ .docx?'), `${yn(pre.docxOk)}${pre.docxFile ? ` · ${files([pre.docxFile])}` : ''}`],
     [tr('Approved project PDF?', 'อนุมัติไฟล์โครงการ PDF?'), `${yn(pre.pdfOk)}${pre.pdfFile ? ` · ${files([pre.pdfFile])}` : ''}`],
     [tr('Feedback note', 'บันทึกข้อเสนอแนะ'), text(pre.note)],
   ])}
-      <h3>${tr('Pitching', 'การนำเสนอ')}</h3>${table([
+      <h3>${tr('Pitching', 'การนำเสนอ')}</h3>${!phaseOn(d, 'pitching') ? `<p>${esc(PENDING())}</p>` : table([
     [tr('Pitching time', 'เวลานำเสนอ'), esc(slotText(d.slots?.[p.ref]))],
     [tr('Summary', 'สรุป'), text(pit.summary)],
     [tr('Final approved budget', 'งบประมาณอนุมัติขั้นสุดท้าย'), money(pit.finalBudget)],
     [tr('Noted documents', 'เอกสารบันทึก'), files(pit.noted)],
   ])}
-      <h3>${tr('Re-submission', 'การส่งแก้ไข')}</h3>${table([
+      <h3>${tr('Re-submission', 'การส่งแก้ไข')}</h3>${!phaseOn(d, 'resubmit') ? `<p>${esc(PENDING())}</p>` : table([
     ...RESUB_FIELDS().map((k) => [k, esc(NO_DATA())]),
     [tr('Decision', 'ผลการพิจารณา'), esc({ Approved: tr('Approved', 'อนุมัติ'), 'Not Approved': tr('Not Approved', 'ไม่อนุมัติ') }[rs.decision] || '—')],
   ])}</section>`;

@@ -91,6 +91,9 @@ export const QUESTIONS = [
   { id: 'resub.decision', tab: 'resubmit', req: true, label: () => tr('Decision', 'ผลการพิจารณา') },
 ];
 export const isReq = (d, id) => (d?.required && id in d.required ? !!d.required[id] : !!QUESTIONS.find((q) => q.id === id)?.req);
+// Pitching phases (admin console): a phase is on unless switched off. Off = its tab shows "Pending Phase".
+export const phaseOn = (d, k) => d?.phases?.[k] !== false;
+export const PENDING = () => tr('Pending Phase', 'รอเปิดช่วง');
 export const star = (d, id) => (isReq(d, id) ? `<span class="req" title="${esc(tr('Required', 'จำเป็น'))}">*</span>` : '');
 
 // Card top: name + ref, lead (e.g. the pitching slot), calendar, budget line(s), extra (download buttons).

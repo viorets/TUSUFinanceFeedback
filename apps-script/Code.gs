@@ -114,7 +114,7 @@ const ACTIONS = {
   boot: boot_, org: org_, upload: upload_, savePrePitch: savePrePitch_, savePitching: savePitching_,
   admin: admin_, saveUsers: saveUsers_, setInCharge: setInCharge_, saveResubmit: saveResubmit_,
   dashboard: dashboard_, saveAllocated: saveAllocated_,
-  setOrgStatus: setOrgStatus_, saveTexts: saveTexts_, saveRequired: saveRequired_,
+  setOrgStatus: setOrgStatus_, saveTexts: saveTexts_, saveRequired: saveRequired_, savePhases: savePhases_,
 };
 
 function doPost(e) {
@@ -151,7 +151,7 @@ function boot_(req, user) {
     });
     s.projects.forEach(function (p) { if (!finished_(pre[p['Project Ref']])) org(p['Org Ref']).pending++; });
     users_().forEach(function (u) { u.orgs.forEach(function (ref) { org(ref).people.push(u.email); }); });
-    return { orgs: orgs, removed: removed_(s.log), closed: closed_(), texts: texts_(), required: required_() };
+    return { orgs: orgs, removed: removed_(s.log), closed: closed_(), texts: texts_(), required: required_(), phases: phases_() };
   });
   // names: display name per email (set in the admin console); the site shows the email where none is set.
   const names = {};
@@ -194,7 +194,7 @@ function org_(req, user) {
         emName: o['Emergency Contact'], emPosition: o['Emergency Position'], emPhone: String(o['Emergency Phone'] || ''),
       } : null,
       projects: projects, pre: pre, pitch: pitch, resub: resub, slots: slots,
-      closed: closed_()[ref] || null, required: required_(),
+      closed: closed_()[ref] || null, required: required_(), phases: phases_(),
       people: users_().filter(function (u) { return u.orgs.indexOf(ref) >= 0; }).map(function (u) { return u.email; }),
     };
   });
@@ -213,6 +213,7 @@ function upload_(req, user) {
   if (req.only && req.only !== kind) throw new Error('Only a .' + req.only + ' file can go here');
   const purpose = { feedback: 'feedback', noted: 'noted' }[req.purpose];
   if (!purpose) throw new Error('Bad purpose');
+  phaseOn_(purpose === 'feedback' ? 'prepitch' : 'pitching');
   const bytes = Utilities.base64Decode(req.data || '');
   if (!bytes.length) throw new Error('Empty file');
   if (bytes.length > MAX_BYTES) throw new Error('File larger than 25 MB');
@@ -225,6 +226,7 @@ function savePrePitch_(req, user) {
   need_(user, 'Staff');
   const p = project_(req.ref);
   open_(p.org);
+  phaseOn_('prepitch');
   const d = req.data || {};
   const docxOk = yesNo_(d.docxOk);
   const pdfOk = yesNo_(d.pdfOk);
@@ -256,6 +258,7 @@ function savePitching_(req, user) {
   need_(user, 'Staff');
   const p = project_(req.ref);
   open_(p.org);
+  phaseOn_('pitching');
   const d = req.data || {};
   const noted = (Array.isArray(d.noted) ? d.noted : []).slice(0, 30).map(function (f) { return file_(f, p.org); }).filter(Boolean);
   const row = {
@@ -276,6 +279,7 @@ function saveResubmit_(req, user) {
   need_(user, 'Staff');
   const p = project_(req.ref);
   open_(p.org);
+  phaseOn_('resubmit');
   const decision = String(req.decision || '');
   if (decision && decision !== 'Approved' && decision !== 'Not Approved') throw new Error('Decision must be Approved or Not Approved');
   const row = { 'Project Ref': p.ref, 'Org Ref': p.org, 'Project Name': p.name, 'Decision': decision, 'Updated At': new Date(), 'Updated By': user.email };
@@ -431,12 +435,38 @@ function saveRequired_(req, user) {
   return { required: out };
 }
 
+/* ---------- pitching phases ---------- */
+
+// Pre-pitch, Pitching and Re-submission each On or Off (Settings, key "Phases"). Default: all On.
+// Off: the tab shows "Pending Phase" and its writes are refused.
+const PHASES = ['prepitch', 'pitching', 'resubmit'];
+function phases_() {
+  return memo_('phases', function () {
+    const r = rows_(tab_('Settings')).filter(function (x) { return x['Key'] === 'Phases'; })[0];
+    const saved = r ? parse_(String(r['Value'])) || {} : {};
+    const out = {};
+    PHASES.forEach(function (k) { out[k] = saved[k] !== false; });
+    return out;
+  });
+}
+function phaseOn_(k) { if (!phases_()[k]) throw new Error('This phase is not open yet.'); }
+
+// Phase switches in the admin console: Admins and Chiefs.
+function savePhases_(req, user) {
+  need_(user, 'Chief');
+  const v = req.phases || {};
+  const out = {};
+  PHASES.forEach(function (k) { out[k] = k in v ? v[k] !== false : phases_()[k]; });
+  setSetting_('Phases', JSON.stringify(out), user);
+  return { phases: out };
+}
+
 /* ---------- admin ---------- */
 
 // Admin console. The edit log goes to Admins only. Each part is cached until the next write.
 function admin_(req, user) {
   need_(user, 'Chief');
-  const out = cached_('admin', function () { return { removed: removed_(submissionLog_()), allocated: allocated_() }; });
+  const out = cached_('admin', function () { return { removed: removed_(submissionLog_()), allocated: allocated_(), phases: phases_() }; });
   out.users = users_();
   out.owner = owner_();
   if (user.role === 'Admin') out.log = cached_('log', logTail_);

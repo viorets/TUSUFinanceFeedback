@@ -101,6 +101,8 @@ function accountMenu(btn) {
   };
 }
 document.addEventListener('click', (e) => { if (!e.target.closest('.acct')) document.querySelector('.acct .menu')?.remove(); });
+// The floating top bar gets a little smaller once the page scrolls.
+addEventListener('scroll', () => document.querySelector('.chrome')?.classList.toggle('scrolled', scrollY > 24), { passive: true });
 
 async function render() {
   const route = parse(location.hash);

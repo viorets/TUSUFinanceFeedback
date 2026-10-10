@@ -1,11 +1,14 @@
 // Admin console: users and roles (with the organizations each person is in charge of), organizations removed on
-// the pitching site, and (Admins only) the Pre-pitch edit log. Admins and Chiefs; the server checks too.
+// the pitching site, pitching phases (On / Off), and (Admins only) the Pre-pitch edit log. Admins and Chiefs;
+// the server checks too.
 import { tr } from '../i18n.js';
 import { $, esc, icon, toast, dateTimeFmt, moneyBox, parseMoney, liveMoney } from '../ui.js';
 import { call, cached, forget, peek, remember } from '../api.js';
 import { ORGS } from '../masterdata.js';
+import { PENDING } from '../project.js';
 
 const ROLES = ['Admin', 'Chief', 'Staff'];
+const PHASE_LIST = [['prepitch', () => tr('Pre-pitch', 'ก่อนการนำเสนอ')], ['pitching', () => tr('Pitching', 'การนำเสนอ')], ['resubmit', () => tr('Re-submission', 'การส่งแก้ไข')]];
 const roleLabel = (r) => ({ Admin: tr('Admin', 'ผู้ดูแล'), Chief: tr('Chief', 'หัวหน้า'), Staff: tr('Staff', 'เจ้าหน้าที่') }[r] || r);
 let st = null; // { users (working copy), saved (JSON) }
 
@@ -32,6 +35,7 @@ function draw(page, ctx, d) {
   const chief = ctx.me.role !== 'Admin';
   st = { users: list, saved: JSON.stringify(list), savedAdmins: new Set(list.filter((u) => u.role === 'Admin').map((u) => u.email)) };
   const name = (ref) => ORGS.find((o) => o.code === ref)?.en || '';
+  const phases = { prepitch: true, pitching: true, resubmit: true, ...(d.phases || {}) };
 
   page.innerHTML = `<h1 class="grad">${tr('Admin console', 'คอนโซลผู้ดูแล')}</h1>
     <h2 class="section-title">${tr('Users and roles', 'ผู้ใช้และสิทธิ์')}</h2>
@@ -41,6 +45,12 @@ function draw(page, ctx, d) {
       <div class="table-actions"><button class="btn" id="add">${icon('plus', 16)}${tr('Add user', 'เพิ่มผู้ใช้')}</button><span class="grow"></span>
         <button class="btn primary" id="save">${tr('Save users', 'บันทึกผู้ใช้')}</button></div></div>
     <p class="foot">${tr('Admin: everything, including the edit log. Chief: everything except the edit log; cannot add, change or remove Admins. Staff: edit organization data, no admin console. Emails not listed, or without a role, cannot open the site.', 'ผู้ดูแล: ทำได้ทุกอย่าง รวมถึงดูบันทึกการแก้ไข หัวหน้า: ทำได้ทุกอย่างยกเว้นดูบันทึกการแก้ไข และเพิ่ม เปลี่ยน หรือลบผู้ดูแลไม่ได้ เจ้าหน้าที่: แก้ไขข้อมูลองค์กรได้ แต่เข้าคอนโซลผู้ดูแลไม่ได้ อีเมลที่ไม่อยู่ในรายชื่อหรือยังไม่มีสิทธิ์จะเข้าเว็บไซต์ไม่ได้')}</p>
+
+    <h2 class="section-title">${tr('Pitching phases', 'ช่วงการเสนองบ')}</h2>
+    <div class="group" id="phases">${PHASE_LIST.map(([k, label]) => `<label class="row switch-row"><span class="grow">${esc(label())}</span>
+      <span class="muted small" data-state="${k}">${phases[k] ? tr('On', 'เปิด') : esc(PENDING())}</span>
+      <input type="checkbox" class="switch" data-phase="${k}" ${phases[k] ? 'checked' : ''} aria-label="${esc(label())}"></label>`).join('')}</div>
+    <p class="foot">${tr('A phase that is off shows "Pending Phase" on every organization page, and nothing in it can be changed.', 'ช่วงที่ปิดอยู่จะแสดง "รอเปิดช่วง" ในทุกหน้าองค์กร และแก้ไขข้อมูลในช่วงนั้นไม่ได้')}</p>
 
     <h2 class="section-title">${tr('Allocated budget', 'กรอบงบประมาณ')}</h2>
     <div class="group alloc"><span class="muted">฿</span><input type="text" inputmode="decimal" id="alloc" value="${esc(moneyBox(d.allocated))}" placeholder="0.00" aria-label="${esc(tr('Allocated budget', 'กรอบงบประมาณ'))}">
@@ -81,6 +91,28 @@ function draw(page, ctx, d) {
   };
   paintUsers();
   if (d.log) { paintLog(); $('#lq', page).oninput = paintLog; }
+
+  // Phase switch: saves at once; on failure the switch flips back.
+  $('#phases', page).onchange = async (e) => {
+    const k = e.target.dataset.phase;
+    if (!k) return;
+    const on = e.target.checked;
+    e.target.disabled = true;
+    try {
+      const out = await call('savePhases', { phases: { ...phases, [k]: on } });
+      Object.assign(phases, out.phases);
+      d.phases = out.phases;
+      remember('admin', {}, d); forget('admin');
+      if (ctx.boot) { ctx.boot.phases = out.phases; remember('boot', {}, ctx.boot); }
+      forget('boot'); forget('org');
+      $(`[data-state="${k}"]`, page).textContent = on ? tr('On', 'เปิด') : PENDING();
+      toast(on ? tr('Phase on', 'เปิดช่วงแล้ว') : tr('Phase off — shows Pending Phase', 'ปิดช่วงแล้ว — แสดง รอเปิดช่วง'));
+    } catch (err) {
+      e.target.checked = !on;
+      toast(err.message, 'bad');
+    }
+    e.target.disabled = false;
+  };
 
   $('#alloc', page).oninput = (e) => liveMoney(e.target);
   $('#saveAlloc', page).onclick = async (e) => {
