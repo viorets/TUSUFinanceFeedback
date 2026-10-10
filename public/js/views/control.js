@@ -54,7 +54,7 @@ export async function render(page, ctx) {
   // Required questions
   const tabName = { prepitch: () => tr('Pre-pitch', 'ก่อนการนำเสนอ'), pitching: () => tr('Pitching', 'การนำเสนอ'), resubmit: () => tr('Re-submission', 'การส่งแก้ไข') };
   $('#req', page).innerHTML = QUESTIONS.map((q) => `<tr><td>${esc(tabName[q.tab]())}</td><td>${esc(q.label())}</td>
-    <td><input type="checkbox" class="switch" data-q="${q.id}" ${st.req[q.id] ? 'checked' : ''} aria-label="${esc(tr('Required', 'จำเป็น'))}"></td></tr>`).join('');
+    <td><label class="check"><input type="checkbox" data-q="${q.id}" ${st.req[q.id] ? 'checked' : ''}>${tr('Required', 'จำเป็น')}</label></td></tr>`).join('');
   $('#req', page).onchange = (e) => { const id = e.target.dataset.q; if (id) st.req[id] = e.target.checked; };
   $('#saveReq', page).onclick = async (e) => {
     e.target.disabled = true;

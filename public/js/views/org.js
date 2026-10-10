@@ -76,9 +76,6 @@ function paintTabs() {
     const n = phaseOn(data, k) ? data.projects.filter((p) => UNFINISHED[k](data, p)).length : 0;
     return `<a href="#/org/${encodeURIComponent(ref)}/${k}" class="${k === tab ? 'on' : ''}">${esc(t.label())}${n ? `<span class="badge" title="${esc(tr('{n} unfinished', 'ยังไม่ครบ {n}', { n }))}">${n}</span>` : ''}</a>`;
   }).join('');
-  // Selected-tab capsule slides to the chosen tab (CSS reads --x / --w).
-  const nav = $('#tabs', page); const on = nav.querySelector('a.on');
-  if (on) { nav.style.setProperty('--x', `${on.offsetLeft}px`); nav.style.setProperty('--w', `${on.offsetWidth}px`); nav.classList.add('has-on'); }
 }
 
 export async function switchTab(tab) {

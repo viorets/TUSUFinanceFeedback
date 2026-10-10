@@ -47,9 +47,9 @@ function draw(page, ctx, d) {
     <p class="foot">${tr('Admin: everything, including the edit log. Chief: everything except the edit log; cannot add, change or remove Admins. Staff: edit organization data, no admin console. Emails not listed, or without a role, cannot open the site.', 'ผู้ดูแล: ทำได้ทุกอย่าง รวมถึงดูบันทึกการแก้ไข หัวหน้า: ทำได้ทุกอย่างยกเว้นดูบันทึกการแก้ไข และเพิ่ม เปลี่ยน หรือลบผู้ดูแลไม่ได้ เจ้าหน้าที่: แก้ไขข้อมูลองค์กรได้ แต่เข้าคอนโซลผู้ดูแลไม่ได้ อีเมลที่ไม่อยู่ในรายชื่อหรือยังไม่มีสิทธิ์จะเข้าเว็บไซต์ไม่ได้')}</p>
 
     <h2 class="section-title">${tr('Pitching phases', 'ช่วงการเสนองบ')}</h2>
-    <div class="group" id="phases">${PHASE_LIST.map(([k, label]) => `<label class="row switch-row"><span class="grow">${esc(label())}</span>
+    <div class="group" id="phases">${PHASE_LIST.map(([k, label]) => `<label class="row phase-row"><span class="grow">${esc(label())}</span>
       <span class="muted small" data-state="${k}">${phases[k] ? tr('On', 'เปิด') : esc(PENDING())}</span>
-      <input type="checkbox" class="switch" data-phase="${k}" ${phases[k] ? 'checked' : ''} aria-label="${esc(label())}"></label>`).join('')}</div>
+      <input type="checkbox" data-phase="${k}" ${phases[k] ? 'checked' : ''} aria-label="${esc(label())}"></label>`).join('')}</div>
     <p class="foot">${tr('A phase that is off shows "Pending Phase" on every organization page, and nothing in it can be changed.', 'ช่วงที่ปิดอยู่จะแสดง "รอเปิดช่วง" ในทุกหน้าองค์กร และแก้ไขข้อมูลในช่วงนั้นไม่ได้')}</p>
 
     <h2 class="section-title">${tr('Allocated budget', 'กรอบงบประมาณ')}</h2>
