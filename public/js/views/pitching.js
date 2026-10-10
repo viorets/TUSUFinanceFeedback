@@ -1,15 +1,19 @@
 // Pitching: per project, the pitching slot (from the scheduling site, read only), the summary, the final approved
-// budget and "Noted documents" (any number of .docx / PDF). Unfinished = no final approved budget yet.
+// budget and "Noted documents" (any number of .docx / PDF). Unfinished = a required question unanswered (project.js).
 import { tr } from '../i18n.js';
 import { $, esc, icon, toast, moneyBox, parseMoney, liveMoney, dateTimeFmt } from '../ui.js';
 import { call, upload, forget } from '../api.js';
-import { cardTop, fileChip, progress, slotLine } from '../project.js';
+import { cardTop, fileChip, progress, slotLine, star } from '../project.js';
 
 let st = null; // { el, d, can, form: { ref: working copy } }
 
 const pick = (x = {}) => ({ summary: x.summary || '', finalBudget: x.finalBudget ?? null, noted: [...(x.noted || [])] });
 const dirty = (ref) => JSON.stringify(st.form[ref]) !== JSON.stringify(pick(st.d.pitch[ref]));
 export const isDirty = () => !!st && st.d.projects.some((p) => dirty(p.ref));
+// Projects with unsaved edits, for the leave window: [{ ref, name }].
+export const unsaved = () => (st ? st.d.projects.filter((p) => dirty(p.ref)).map((p) => ({ ref: p.ref, name: p.name })) : []);
+// "Save and leave": saves each unsaved project; throws at the first that fails.
+export async function saveAll() { for (const p of unsaved()) await save(p.ref); }
 
 export function render(el, d, ctx) {
   st = { el, d, ctx, can: ctx.canEdit, form: Object.fromEntries(d.projects.map((p) => [p.ref, pick(d.pitch[p.ref])])) };
@@ -26,14 +30,14 @@ function card(p) {
   return `<section class="group pcard" data-ref="${esc(p.ref)}">
     ${cardTop(p, [[tr('Total project budget', 'งบประมาณโครงการ'), p.budget]], '', slotLine(st.d.slots?.[p.ref]))}
     <div class="fb">
-      <div class="field"><label>${tr('Summary', 'สรุป')}</label><textarea data-k="summary" maxlength="20000" ${dis}>${esc(f.summary)}</textarea></div>
-      <div class="field"><label>${tr('Final approved budget', 'งบประมาณอนุมัติขั้นสุดท้าย')}</label><input type="text" inputmode="decimal" data-k="finalBudget" value="${esc(moneyBox(f.finalBudget))}" placeholder="0.00" ${dis}></div>
-      <div class="field"><label>${tr('Noted documents', 'เอกสารบันทึก')}</label><div data-noted>${noted(p.ref)}</div></div>
+      <div class="field"><label>${tr('Summary', 'สรุป')}${star(st.d, 'pitch.summary')}</label><textarea data-k="summary" maxlength="20000" ${dis}>${esc(f.summary)}</textarea></div>
+      <div class="field"><label>${tr('Final approved budget', 'งบประมาณอนุมัติขั้นสุดท้าย')}${star(st.d, 'pitch.finalBudget')}</label><input type="text" inputmode="decimal" data-k="finalBudget" value="${esc(moneyBox(f.finalBudget))}" placeholder="0.00" ${dis}></div>
+      <div class="field"><label>${tr('Noted documents', 'เอกสารบันทึก')}${star(st.d, 'pitch.noted')}</label><div data-noted>${noted(p.ref)}</div></div>
       <div class="actions"><span class="muted small" data-saved>${savedLine(st.d.pitch[p.ref])}</span>${st.can ? `<button class="btn primary" data-save>${tr('Save', 'บันทึก')}</button>` : ''}</div>
     </div></section>`;
 }
 
-const savedLine = (s) => (s?.at ? tr(`Saved ${dateTimeFmt(s.at)} by ${esc(st.ctx.nameOf(s.by))}`, `บันทึก ${dateTimeFmt(s.at)} โดย ${esc(st.ctx.nameOf(s.by))}`) : tr('Not saved yet', 'ยังไม่ได้บันทึก'));
+const savedLine = (s) => (s?.at ? tr('Saved {when} by {who}', 'บันทึก {when} โดย {who}', { when: dateTimeFmt(s.at), who: esc(st.ctx.nameOf(s.by)) }) : tr('Not saved yet', 'ยังไม่ได้บันทึก'));
 
 function noted(ref) {
   const list = st.form[ref].noted;
@@ -80,16 +84,22 @@ async function onClick(e) {
   if (!btn) return;
   btn.disabled = true;
   try {
-    const out = await call('savePitching', { ref, data: st.form[ref] });
-    st.d.pitch[ref] = out.pitch;
-    progress(st.el, st.d, 'pitching');
-    st.ctx.persist?.();
-    forget('dashboard');
-    st.form[ref] = pick(out.pitch);
-    $('[data-saved]', btn.closest('.pcard')).textContent = savedLine(out.pitch);
+    await save(ref);
     toast(tr('Saved', 'บันทึกแล้ว'));
   } catch (err) {
     toast(err.message, 'bad');
   }
   btn.disabled = false;
+}
+
+// Saves one project's form and repaints its card; throws when the save fails.
+async function save(ref) {
+  const out = await call('savePitching', { ref, data: st.form[ref] });
+  st.d.pitch[ref] = out.pitch;
+  progress(st.el, st.d, 'pitching');
+  st.ctx.persist?.();
+  forget('dashboard');
+  st.form[ref] = pick(out.pitch);
+  const sec = st.el.querySelector(`.pcard[data-ref="${CSS.escape(ref)}"]`);
+  if (sec) $('[data-saved]', sec).innerHTML = savedLine(out.pitch);
 }

@@ -54,6 +54,9 @@ const P = {
   check: '<circle cx="12" cy="12" r="9"/><path d="m8 12 3 3 5-6"/>',
   clock: '<circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/>',
   moon: '<path d="M21 13A9 9 0 1 1 11 3a7 7 0 0 0 10 10z"/>',
+  print: '<path d="M6 9V3h12v6"/><rect x="3" y="9" width="18" height="8" rx="2"/><path d="M6 14h12v7H6z"/>',
+  lock: '<rect x="4" y="11" width="16" height="10" rx="2"/><path d="M8 11V7a4 4 0 0 1 8 0v4"/>',
+  sliders: '<path d="M4 6h10M18 6h2M4 12h4M12 12h8M4 18h12M20 18h0"/><circle cx="16" cy="6" r="2"/><circle cx="10" cy="12" r="2"/><circle cx="18" cy="18" r="2"/>',
   sun: '<circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M4.9 4.9l1.4 1.4M17.7 17.7l1.4 1.4M2 12h2M20 12h2M4.9 19.1l1.4-1.4M17.7 6.3l1.4-1.4"/>',
 };
 export const icon = (name, size = 20) =>
@@ -69,21 +72,34 @@ export function toast(msg, tone = '') {
   toastTimer = setTimeout(() => { el.className = 'toast'; }, 3400);
 }
 
-// Promise<boolean>. Apple-style alert.
-export function confirmBox(title, body = '', { ok = tr('OK', 'ตกลง'), danger = false } = {}) {
+// Promise<value of the button pressed>. Apple-style alert. html = body already escaped by the caller.
+// buttons: [{ v, label, cls }], the last one is focused. sticky: Esc and a click outside do nothing (else they give `none`).
+export function dialog(title, html, buttons, { sticky = false, none = null } = {}) {
   return new Promise((resolve) => {
     const back = document.createElement('div');
     back.className = 'modal-back';
-    back.innerHTML = `<div class="modal" role="alertdialog" aria-modal="true"><h2>${esc(title)}</h2><p>${esc(body)}</p>
-      <div class="actions"><button class="btn" data-v="0">${tr('Cancel', 'ยกเลิก')}</button><button class="btn ${danger ? 'danger' : 'primary'}" data-v="1">${esc(ok)}</button></div></div>`;
+    back.innerHTML = `<div class="modal" role="alertdialog" aria-modal="true"><h2>${esc(title)}</h2>${html}
+      <div class="actions">${buttons.map((b, i) => `<button class="btn ${b.cls || ''}" data-i="${i}">${esc(b.label)}</button>`).join('')}</div></div>`;
     const done = (v) => { back.remove(); document.removeEventListener('keydown', key); resolve(v); };
-    const key = (e) => { if (e.key === 'Escape') done(false); };
-    back.addEventListener('click', (e) => { if (e.target === back) done(false); const b = e.target.closest('[data-v]'); if (b) done(b.dataset.v === '1'); });
+    const key = (e) => { if (e.key === 'Escape' && !sticky) done(none); };
+    back.addEventListener('click', (e) => {
+      if (e.target === back && !sticky) done(none);
+      const b = e.target.closest('[data-i]'); if (b) done(buttons[Number(b.dataset.i)].v);
+    });
     document.addEventListener('keydown', key);
     document.body.append(back);
-    back.querySelector('[data-v="1"]').focus();
+    back.querySelector('.actions .btn:last-child').focus();
   });
 }
+
+// Promise<boolean>.
+export function confirmBox(title, body = '', { ok = tr('OK', 'ตกลง'), danger = false } = {}) {
+  return dialog(title, `<p>${esc(body)}</p>`, [{ v: false, label: tr('Cancel', 'ยกเลิก') }, { v: true, label: ok, cls: danger ? 'danger' : 'primary' }], { none: false });
+}
+
+// Error window: stays until OK.
+export const errorBox = (msg, title = tr('Couldn’t save', 'บันทึกไม่สำเร็จ')) =>
+  dialog(title, `<p class="err">${esc(msg)}</p>`, [{ v: true, label: tr('OK', 'ตกลง'), cls: 'primary' }], { sticky: true });
 
 const sk = (w, h, extra = '') => `<div class="skel" style="width:${w};height:${h}px;${extra}"></div>`;
 export function skeleton(rows = 5) {

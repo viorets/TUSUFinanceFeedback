@@ -23,16 +23,29 @@ English by default with a Thai toggle.
 | `PrePitch` | project | Project Ref, Org Ref, Project Name, Approved Budget, Docx Approved, Docx Feedback File, PDF Approved, PDF Feedback File, Feedback Note, Updated At, Updated By |
 | `PrePitch_Log` | changed field (append-only) | Logged At, By, Project Ref, Org Ref, Field, Old, New |
 | `Pitching` | project | Project Ref, Org Ref, Project Name, Summary, Final Approved Budget, Noted Documents, Updated At, Updated By |
+| `Resubmission` | project | Project Ref, Org Ref, Project Name, Decision, Updated At, Updated By |
+| `Settings` | setting | Key, Value, Updated At, Updated By (`Allocated Budget`; `Required` = JSON of the Owner's required questions) |
+| `OrgStatus` | organization | Org Ref, Status (Closed / Unclosed), Updated At, Updated By (v2) |
+| `Texts` | changed line of site text | Key (built-in English line), EN, TH, Updated At, Updated By (v2) |
 
 Files are stored as JSON `{ id, name }`. Tabs are created by `setup()` / on first use. Rows are keyed by Project Ref
 (organization code + `-P<nn>`, position in the latest submission; see the open question in the plan).
 
 **Rules (server-side, `Code.gs`)**
 - Roles: Admin = everything (admin console + edit log). Chief = everything except the edit log, and cannot add, change or remove Admins. Staff = edit Pre-pitch and Pitching, upload; no admin console. Emails not in `Users` (or with an old Viewer role) get "No access". Old Reviewer rows count as Staff. The script owner is always Admin.
-- Approval finished (`finished_`): Approved budget filled, and .docx and PDF each Yes, or No with a feedback file uploaded in that field. Unfinished projects are counted on the list and the detail page.
+- Approval finished (`finished_`): every required Pre-pitch question answered. Defaults: Approved budget filled, and .docx and PDF each Yes, or No with a feedback file uploaded in that field. Unfinished projects are counted on the list and the detail page.
+- Closed organizations (v2): Admins and Chiefs switch Closed / Unclosed on the list. Every write to a closed organization (Pre-pitch, Pitching, Re-submission, uploads) is refused; the person in charge can still change.
+- Owner (v2) = the script owner. Only the Owner sees the Control tab: site text in English and Thai (`Texts`; the built-in English line is the key, `{n}` marks stand for values) and Required / Not required per feedback question (`QUESTIONS` in `Code.gs` and `public/js/project.js`).
+- Pre-pitch save (v2): a window confirms the organization, project number, project name and approved budget (OK and Cancel both close it); a failed save shows an error window and keeps the edits. Leaving a page with unsaved edits opens a window naming each unsaved project (Save and leave / Leave without saving / Stay). Closing the tab or refreshing is not guarded.
+- Print (v2): the organization page's Print button prints the master data and every project on all three tabs, without progress tracking, "Saved by" lines or the person in charge.
 - Organizations whose last remove/restore in `Submission_Log` is a remove are hidden from the list and shown in the admin console.
 - Uploads: .docx or PDF only, 25 MB max (Apps Script limit), saved to the organization's subfolder. A save only accepts files inside that subfolder.
-- Re-submission tab is a display-only prototype: the resubmission website is not built yet.
+- Re-submission tab is a prototype: the resubmission website is not built yet, so its fields show "No data submitted yet". The decision saves.
+
+## Versions
+
+- `v2` (tag): this version.
+- `v1-prototype` (branch and tag): the first prototype, kept unchanged.
 
 ## Setup
 

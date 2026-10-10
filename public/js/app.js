@@ -1,6 +1,6 @@
 import { firebaseConfig, SCRIPT_URL } from './config.js';
-import { tr, getLang, setLang } from './i18n.js';
-import { $, esc, icon, toast, confirmBox, skeleton } from './ui.js';
+import { tr, getLang, setLang, setTexts } from './i18n.js';
+import { $, esc, icon, toast, dialog, errorBox, skeleton } from './ui.js';
 
 const root = $('#app');
 
@@ -34,6 +34,7 @@ const VIEWS = {
   org: () => import('./views/org.js'),
   admin: () => import('./views/admin.js'),
   dashboard: () => import('./views/dashboard.js'),
+  control: () => import('./views/control.js'),
 };
 
 const ctx = {
@@ -41,6 +42,8 @@ const ctx = {
   // Admin console: Admins and Chiefs (only Admins see the edit log; the server enforces both).
   get console() { return ctx.me?.role === 'Admin' || ctx.me?.role === 'Chief'; },
   get canEdit() { return ['Admin', 'Chief', 'Staff'].includes(ctx.me?.role); },
+  // Owner = the script owner: the Control tab (site text, required questions). The server checks too.
+  get owner() { return !!ctx.me?.owner; },
   // Display name set in the admin console, else the email.
   nameOf: (email) => ctx.boot?.names?.[email] || email,
   go: (h) => { location.hash = h; },
@@ -53,6 +56,7 @@ function parse(hash) {
   if (a === 'org' && b) return { view: 'org', ref: decodeURIComponent(b), tab: c || 'prepitch' };
   if (a === 'admin') return { view: 'admin' };
   if (a === 'dashboard') return { view: 'dashboard' };
+  if (a === 'control') return { view: 'control' };
   return { view: 'list' };
 }
 
@@ -70,6 +74,7 @@ function shell(route) {
       ${tab('#/dashboard', 'chart', tr('Dashboard', 'แดชบอร์ด'), route.view === 'dashboard')}
       ${tab('#/', 'grid', tr('Organizations', 'องค์กร'), route.view === 'list' || route.view === 'org')}
       ${ctx.console ? tab('#/admin', 'shield', tr('Admin console', 'คอนโซลผู้ดูแล'), route.view === 'admin') : ''}
+      ${ctx.owner ? tab('#/control', 'sliders', tr('Control', 'ควบคุม'), route.view === 'control') : ''}
       <span class="pill blue role">${esc(roleLabel)}</span>
     </div></nav></div>
     <main class="page wide" id="page">${skeleton()}</main>`;
@@ -99,7 +104,7 @@ document.addEventListener('click', (e) => { if (!e.target.closest('.acct')) docu
 
 async function render() {
   const route = parse(location.hash);
-  if (route.view === 'admin' && !ctx.console) { ctx.go('#/'); return; }
+  if ((route.view === 'admin' && !ctx.console) || (route.view === 'control' && !ctx.owner)) { ctx.go('#/'); return; }
   root.innerHTML = shell(route);
   $('#lang').onclick = async () => { if (!(await confirmLeave())) return; setLang(getLang() === 'th' ? 'en' : 'th'); current = null; render(); };
   $('#acct').onclick = (e) => accountMenu(e.currentTarget);
@@ -116,9 +121,26 @@ async function render() {
   }
 }
 
+// Leaving a page (or tab, language, account) with unsaved edits: a window naming each unsaved project, with
+// Save and leave / Leave without saving / Stay. Closing the tab, refreshing or typing a new URL is not guarded
+// (option 2 in the plan): those edits are lost without a warning.
 async function confirmLeave() {
   if (!current?.isDirty?.()) return true;
-  return confirmBox(tr('Leave without saving?', 'ออกโดยไม่บันทึก?'), tr('Your unsaved changes will be lost.', 'การแก้ไขที่ยังไม่บันทึกจะหายไป'), { ok: tr('Leave', 'ออก'), danger: true });
+  const list = current.unsaved?.() || [];
+  const canSave = list.length > 0 && !!current.canSaveAll?.();
+  const html = list.length
+    ? `<p>${tr('These projects have unsaved changes:', 'โครงการเหล่านี้มีการแก้ไขที่ยังไม่ได้บันทึก:')}</p>
+      <ul class="unsaved">${list.map((p) => `<li><span class="code">${esc(p.ref)}</span><span>${esc(p.name || '—')}</span></li>`).join('')}</ul>`
+    : `<p>${tr('Your unsaved changes will be lost.', 'การแก้ไขที่ยังไม่บันทึกจะหายไป')}</p>`;
+  const buttons = [
+    { v: 'leave', label: tr('Leave without saving', 'ออกโดยไม่บันทึก'), cls: 'danger' },
+    { v: 'stay', label: tr('Stay', 'อยู่ต่อ'), cls: canSave ? '' : 'primary' },
+  ];
+  if (canSave) buttons.push({ v: 'save', label: tr('Save and leave', 'บันทึกแล้วออก'), cls: 'primary' });
+  const v = await dialog(tr('Unsaved changes', 'มีการแก้ไขที่ยังไม่บันทึก'), html, buttons, { none: 'stay' });
+  if (v === 'leave') return true;
+  if (v !== 'save') return false;
+  try { await current.saveAll(); return true; } catch (e) { await errorBox(e.message); return false; }
 }
 
 window.addEventListener('hashchange', async () => {
@@ -136,7 +158,6 @@ window.addEventListener('hashchange', async () => {
   lastHash = location.hash;
   render();
 });
-window.addEventListener('beforeunload', (e) => { if (current?.isDirty?.()) e.preventDefault(); });
 
 const signInError = (e) => { if (e.code !== 'auth/popup-closed-by-user') toast(e.message, 'bad'); };
 
@@ -158,18 +179,21 @@ onUser(async (user) => {
   api.setWho(user.email);
   // Show this device's last copy at once; the fresh answer follows (views repaint from it).
   const kept = api.peek('boot');
-  if (kept) { ctx.boot = kept; ctx.me = kept.me; lastHash = location.hash; render(); }
+  if (kept) { ctx.boot = kept; ctx.me = kept.me; setTexts(kept.texts); lastHash = location.hash; render(); }
   else root.innerHTML = `<div class="page">${skeleton()}</div>`;
   try {
     ctx.boot = await api.cached('boot');
-    const roleChanged = ctx.boot.me.role !== kept?.me.role;
+    const textsChanged = JSON.stringify(ctx.boot.texts || {}) !== JSON.stringify(kept?.texts || {});
+    setTexts(ctx.boot.texts);
+    const roleChanged = ctx.boot.me.role !== kept?.me.role || !!ctx.boot.me.owner !== !!kept?.me.owner;
     ctx.me = ctx.boot.me;
-    if (!roleChanged) return;
+    // Same role: repaint only for new site text, and never over unsaved edits.
+    if (!roleChanged && (!textsChanged || current?.isDirty?.())) return;
   } catch (e) {
     api.clearKept();
     const none = e.code === 'NO_ACCESS';
     card(`<h2 style="margin-top:14px">${none ? tr('No access yet', 'ยังไม่มีสิทธิ์เข้าใช้') : tr('Couldn’t connect', 'เชื่อมต่อไม่ได้')}</h2>
-      <p class="muted">${none ? tr(`${esc(user.email)} is not on the user list. Ask an Admin to add you.`, `${esc(user.email)} ยังไม่อยู่ในรายชื่อผู้ใช้ กรุณาขอให้ผู้ดูแลเพิ่มสิทธิ์`) : esc(e.message)}</p>
+      <p class="muted">${none ? tr('{email} is not on the user list. Ask an Admin to add you.', '{email} ยังไม่อยู่ในรายชื่อผู้ใช้ กรุณาขอให้ผู้ดูแลเพิ่มสิทธิ์', { email: esc(user.email) }) : esc(e.message)}</p>
       <div style="display:flex;gap:10px;justify-content:center;margin-top:14px"><button class="btn" id="retry">${tr('Try again', 'ลองใหม่')}</button><button class="btn danger" id="out">${tr('Sign out', 'ออกจากระบบ')}</button></div>`);
     $('#retry').onclick = () => location.reload();
     $('#out').onclick = () => logOut();

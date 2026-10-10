@@ -12,7 +12,9 @@
  *        PrePitch_Log  append-only: one row per changed field on every Pre-pitch save (Admins only)
  *        Pitching      one row per project: summary, final approved budget, Noted documents
  *        Resubmission  one row per project: Approved / Not Approved for the resubmitted project
- *        Settings      Key | Value: site-wide values set in the admin console (Allocated Budget)
+ *        Settings      Key | Value: site-wide values (Allocated Budget; Required = the Owner's required questions, JSON)
+ *        OrgStatus     Org Ref | Status (Closed / Unclosed) | ...: a closed organization's data cannot be changed
+ *        Texts         Key (built-in English line) | EN | TH | ...: the Owner's replacements for site text
  *   and uploaded files into DRIVE_FOLDER_ID / <Org Ref> / "<Project Ref> <purpose> — <file name>".
  *   Files inherit the folder's sharing; they are never deleted (old log rows still point at them).
  *   In the Sheet a file cell shows the file name linked to the file in Drive (one per line for Noted Documents).
@@ -57,6 +59,14 @@ const TABS = {
     'Updated At', 'Updated By'],
   Resubmission: ['Project Ref', 'Org Ref', 'Project Name', 'Decision', 'Updated At', 'Updated By'],
   Settings: ['Key', 'Value', 'Updated At', 'Updated By'],
+  OrgStatus: ['Org Ref', 'Status', 'Updated At', 'Updated By'],
+  Texts: ['Key', 'EN', 'TH', 'Updated At', 'Updated By'],
+};
+// Feedback questions the Owner can mark Required / Not required, with their defaults (= the rules before v2).
+// Keep in step with QUESTIONS in public/js/project.js.
+const QUESTIONS = {
+  'pre.approvedBudget': true, 'pre.docx': true, 'pre.pdf': true, 'pre.note': false,
+  'pitch.summary': false, 'pitch.finalBudget': true, 'pitch.noted': false, 'resub.decision': true,
 };
 // Cells that hold files: written as file names linked to Drive, read back from those links (filesIn_).
 const FILE_COLS = ['Docx Feedback File', 'PDF Feedback File', 'Noted Documents'];
@@ -104,6 +114,7 @@ const ACTIONS = {
   boot: boot_, org: org_, upload: upload_, savePrePitch: savePrePitch_, savePitching: savePitching_,
   admin: admin_, saveUsers: saveUsers_, setInCharge: setInCharge_, saveResubmit: saveResubmit_,
   dashboard: dashboard_, saveAllocated: saveAllocated_,
+  setOrgStatus: setOrgStatus_, saveTexts: saveTexts_, saveRequired: saveRequired_,
 };
 
 function doPost(e) {
@@ -140,12 +151,13 @@ function boot_(req, user) {
     });
     s.projects.forEach(function (p) { if (!finished_(pre[p['Project Ref']])) org(p['Org Ref']).pending++; });
     users_().forEach(function (u) { u.orgs.forEach(function (ref) { org(ref).people.push(u.email); }); });
-    return { orgs: orgs, removed: removed_(s.log) };
+    return { orgs: orgs, removed: removed_(s.log), closed: closed_(), texts: texts_(), required: required_() };
   });
   // names: display name per email (set in the admin console); the site shows the email where none is set.
   const names = {};
   users_().forEach(function (u) { if (u.name) names[u.email] = u.name; });
-  const out = { me: { email: user.email, role: user.role }, orgs: core.orgs, removed: core.removed, names: names };
+  const out = { me: { email: user.email, role: user.role, owner: user.email === owner_() }, orgs: core.orgs, removed: core.removed,
+    closed: core.closed, texts: core.texts, required: core.required, names: names };
   if (RANK[user.role] >= RANK.Chief) out.users = users_().filter(function (u) { return u.role; }).map(function (u) { return u.email; });
   return out;
 }
@@ -182,6 +194,7 @@ function org_(req, user) {
         emName: o['Emergency Contact'], emPosition: o['Emergency Position'], emPhone: String(o['Emergency Phone'] || ''),
       } : null,
       projects: projects, pre: pre, pitch: pitch, resub: resub, slots: slots,
+      closed: closed_()[ref] || null, required: required_(),
       people: users_().filter(function (u) { return u.orgs.indexOf(ref) >= 0; }).map(function (u) { return u.email; }),
     };
   });
@@ -193,6 +206,7 @@ function org_(req, user) {
 function upload_(req, user) {
   need_(user, 'Staff');
   const p = project_(req.ref);
+  open_(p.org);
   const name = String(req.name || '').replace(/[\\/:*?"<>|]/g, '_').slice(0, 180);
   const kind = ((name.match(/\.([a-z0-9]+)$/i) || [])[1] || '').toLowerCase();
   if (!KINDS[kind] || req.mime !== KINDS[kind]) throw new Error('Only .docx or .pdf files');
@@ -210,6 +224,7 @@ function upload_(req, user) {
 function savePrePitch_(req, user) {
   need_(user, 'Staff');
   const p = project_(req.ref);
+  open_(p.org);
   const d = req.data || {};
   const docxOk = yesNo_(d.docxOk);
   const pdfOk = yesNo_(d.pdfOk);
@@ -240,6 +255,7 @@ function savePrePitch_(req, user) {
 function savePitching_(req, user) {
   need_(user, 'Staff');
   const p = project_(req.ref);
+  open_(p.org);
   const d = req.data || {};
   const noted = (Array.isArray(d.noted) ? d.noted : []).slice(0, 30).map(function (f) { return file_(f, p.org); }).filter(Boolean);
   const row = {
@@ -259,6 +275,7 @@ function savePitching_(req, user) {
 function saveResubmit_(req, user) {
   need_(user, 'Staff');
   const p = project_(req.ref);
+  open_(p.org);
   const decision = String(req.decision || '');
   if (decision && decision !== 'Approved' && decision !== 'Not Approved') throw new Error('Decision must be Approved or Not Approved');
   const row = { 'Project Ref': p.ref, 'Org Ref': p.org, 'Project Name': p.name, 'Decision': decision, 'Updated At': new Date(), 'Updated By': user.email };
@@ -311,14 +328,107 @@ function allocated_() {
 function saveAllocated_(req, user) {
   need_(user, 'Chief');
   const v = money_(req.allocated);
+  setSetting_('Allocated Budget', v, user);
+  return { allocated: v === '' ? null : v };
+}
+
+// One Settings row (Key | Value | Updated At | Updated By), written over the same key or appended.
+function setSetting_(key, value, user) {
   locked_(function () {
     const sh = tab_('Settings');
     const keys = sh.getLastRow() > 1 ? sh.getRange(2, 1, sh.getLastRow() - 1, 1).getValues().map(function (x) { return x[0]; }) : [];
-    const i = keys.indexOf('Allocated Budget');
-    sh.getRange(i >= 0 ? i + 2 : sh.getLastRow() + 1, 1, 1, 4).setValues([['Allocated Budget', v, new Date(), user.email]]);
+    const i = keys.indexOf(key);
+    sh.getRange(i >= 0 ? i + 2 : sh.getLastRow() + 1, 1, 1, 4).setValues([[key, value, new Date(), user.email]]);
     bump_();
   });
-  return { allocated: v === '' ? null : v };
+}
+
+/* ---------- closed organizations ---------- */
+
+// Closed organizations: { 'RS-ART-03': { at, by } }. No row, or Status other than Closed = Unclosed.
+function closed_() {
+  return memo_('closed', function () {
+    const out = {};
+    rows_(tab_('OrgStatus')).forEach(function (r) { if (r['Status'] === 'Closed') out[r['Org Ref']] = { at: iso_(r['Updated At']), by: r['Updated By'] || '' }; });
+    return out;
+  });
+}
+// Writes to a closed organization's projects are refused, whoever asks.
+function open_(orgRef) { if (closed_()[orgRef]) throw new Error('This organization is closed. Its data cannot be changed.'); }
+
+// Closed / Unclosed switch on the organization list: Admins and Chiefs.
+function setOrgStatus_(req, user) {
+  need_(user, 'Chief');
+  const ref = String(req.ref || '');
+  if (!ORG_REF.test(ref)) throw new Error('Bad organization code');
+  const closing = req.closed === true;
+  const now = new Date();
+  locked_(function () {
+    const sh = tab_('OrgStatus');
+    const refs = sh.getLastRow() > 1 ? sh.getRange(2, 1, sh.getLastRow() - 1, 1).getValues().map(function (x) { return x[0]; }) : [];
+    const i = refs.indexOf(ref);
+    sh.getRange(i >= 0 ? i + 2 : sh.getLastRow() + 1, 1, 1, 4).setValues([[ref, closing ? 'Closed' : 'Unclosed', now, user.email]]);
+    bump_();
+  });
+  return { closed: closing ? { at: now.toISOString(), by: user.email } : null };
+}
+
+/* ---------- Owner: site text and required questions ---------- */
+
+function needOwner_(user) { if (user.email !== owner_()) throw new Error('Only the Owner can do this'); }
+
+// The Owner's site text: { 'Built-in English line': { en, th } } (empty = keep the built-in line).
+function texts_() {
+  const out = {};
+  rows_(tab_('Texts')).forEach(function (r) {
+    const en = String(r['EN'] || ''); const th = String(r['TH'] || '');
+    if (en || th) out[String(r['Key'])] = { en: en, th: th };
+  });
+  return out;
+}
+
+// Replaces the whole Texts tab with the lines sent. No < or > (the site puts these lines into its pages).
+function saveTexts_(req, user) {
+  needOwner_(user);
+  const list = Array.isArray(req.texts) ? req.texts : [];
+  if (list.length > 3000) throw new Error('Too many lines');
+  const now = new Date();
+  const seen = {};
+  const rows = list.map(function (t) {
+    const key = text_(t.key, 1000); const en = text_(t.en, 2000).trim(); const th = text_(t.th, 2000).trim();
+    if (!key || seen[key]) throw new Error('Bad or repeated line: ' + key);
+    seen[key] = true;
+    if (/[<>]/.test(en + th)) throw new Error('Text cannot contain < or >: ' + key);
+    return [cell_(key), cell_(en), cell_(th), now, user.email];
+  }).filter(function (r) { return r[1] !== '' || r[2] !== ''; });
+  locked_(function () {
+    const sh = tab_('Texts');
+    if (sh.getLastRow() > 1) sh.getRange(2, 1, sh.getLastRow() - 1, TABS.Texts.length).clearContent();
+    if (rows.length) sh.getRange(2, 1, rows.length, TABS.Texts.length).setValues(rows);
+    bump_();
+  });
+  return { texts: texts_() };
+}
+
+// Required / Not required per question: the defaults overlaid with the Owner's choices (Settings, key "Required").
+function required_() {
+  return memo_('required', function () {
+    const r = rows_(tab_('Settings')).filter(function (x) { return x['Key'] === 'Required'; })[0];
+    const saved = r ? parse_(String(r['Value'])) || {} : {};
+    const out = {};
+    Object.keys(QUESTIONS).forEach(function (k) { out[k] = k in saved ? saved[k] === true : QUESTIONS[k]; });
+    return out;
+  });
+}
+function isReq_(id) { return required_()[id]; }
+
+function saveRequired_(req, user) {
+  needOwner_(user);
+  const v = req.required || {};
+  const out = {};
+  Object.keys(QUESTIONS).forEach(function (k) { out[k] = k in v ? v[k] === true : QUESTIONS[k]; });
+  setSetting_('Required', JSON.stringify(out), user);
+  return { required: out };
 }
 
 /* ---------- admin ---------- */
@@ -429,12 +539,16 @@ function schedule_() {
 
 /* ---------- rules ---------- */
 
-// Finished = Approved budget filled, and .docx and PDF each Yes, or No with a feedback file in that field.
+// Finished = every required Pre-pitch question answered (Owner's choices, required_()). Defaults: Approved budget
+// filled, and .docx and PDF each Yes, or No with a feedback file in that field.
 function finished_(r) {
-  if (!r || r['Approved Budget'] === '' || r['Approved Budget'] == null) return false;
-  return ['Docx', 'PDF'].every(function (k) {
-    const a = r[k + ' Approved'];
-    return a === 'Yes' || (a === 'No' && files_(r[k + ' Feedback File']).length > 0);
+  r = r || {};
+  if (isReq_('pre.approvedBudget') && (r['Approved Budget'] === '' || r['Approved Budget'] == null)) return false;
+  if (isReq_('pre.note') && !String(r['Feedback Note'] || '').trim()) return false;
+  return [['Docx', 'pre.docx'], ['PDF', 'pre.pdf']].every(function (x) {
+    if (!isReq_(x[1])) return true;
+    const a = r[x[0] + ' Approved'];
+    return a === 'Yes' || (a === 'No' && files_(r[x[0] + ' Feedback File']).length > 0);
   });
 }
 
@@ -566,7 +680,7 @@ function bump_() {
   CacheService.getScriptCache().put('ver', v, 21600);
   // Keep the open spreadsheets and the Submissions rows (not changed by our writes); drop everything read from our tabs.
   const keep = { ver: v };
-  ['owner', 'ours', 'subs'].forEach(function (k) { if (MEMO_[k] !== undefined) keep[k] = MEMO_[k]; });
+  ['owner', 'ours', 'subs'].forEach(function (k) { if (MEMO_[k] !== undefined) keep[k] = MEMO_[k]; }); // closed / required re-read
   MEMO_ = keep;
 }
 

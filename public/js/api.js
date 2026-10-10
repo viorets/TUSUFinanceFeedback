@@ -60,7 +60,7 @@ export async function upload(file, { ref, purpose, only = '' }) {
       : only === 'pdf' ? tr('Only a PDF file can go here', 'ช่องนี้รับเฉพาะไฟล์ PDF')
         : tr('Only .docx or PDF files', 'รับเฉพาะไฟล์ .docx หรือ PDF'));
   }
-  if (file.size > MAX_MB * 1048576) throw new Error(tr(`File is larger than ${MAX_MB} MB`, `ไฟล์ใหญ่เกิน ${MAX_MB} MB`));
+  if (file.size > MAX_MB * 1048576) throw new Error(tr('File is larger than {mb} MB', 'ไฟล์ใหญ่เกิน {mb} MB', { mb: MAX_MB }));
   const out = await call('upload', { ref, purpose, only, name: file.name, mime: MIME[kind], data: await toBase64(file) });
   return out.file;
 }

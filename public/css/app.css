@@ -358,3 +358,44 @@ input[inputmode=decimal] { max-width: 240px; text-align: right; font-variant-num
 .budgets-table tr.grp th { background: var(--bg3); color: var(--ink); font-size: 15px; text-transform: none; letter-spacing: 0; padding: 10px 16px; }
 .budgets-table tr.total th { font-size: 16px; color: var(--text); text-transform: none; letter-spacing: 0; border-top: 2px solid var(--sep); border-bottom: 0; padding: 14px 16px; }
 .budgets-table th.r, .budgets-table td.r { min-width: 120px; }
+
+/* ---------- v2: required mark, closed organizations, windows, Control tab ---------- */
+.req { color: var(--red); margin-left: 4px; font-weight: 700; }
+.pill.closed { background: rgba(110, 110, 115, .16); color: var(--text); }
+.pill .ic { display: inline-block; }
+button.btn-pill { border: 0; cursor: pointer; font: inherit; font-size: 14px; font-weight: 600; padding: 5px 12px; }
+button.btn-pill:hover { filter: brightness(.95); box-shadow: 0 0 0 2px var(--fill2); }
+button.btn-pill:disabled { opacity: .5; cursor: default; }
+.oh-top { display: flex; align-items: center; gap: 10px; margin-bottom: 6px; }
+.notice.closed { background: var(--bg2); border: 1px solid var(--sep); color: var(--text); margin: 16px 0 0; }
+.modal .kv { grid-template-columns: 140px 1fr; margin: 12px 0 20px; }
+.modal .kv dd { font-weight: 500; }
+.modal .err { color: var(--red); }
+.unsaved { list-style: none; padding: 0; margin: 0 0 20px; display: grid; gap: 8px; max-height: 40dvh; overflow: auto; }
+.unsaved li { display: flex; gap: 10px; align-items: baseline; }
+.modal .actions { flex-wrap: wrap; }
+.kv.nodata { margin: 0; }
+.kv.nodata dd { font-style: italic; }
+.texts td { vertical-align: top; }
+.texts td:first-child { min-width: 140px; max-width: 180px; }
+.texts td:nth-child(2), .texts td:nth-child(3) { min-width: 280px; }
+.texts textarea { min-height: 44px; padding: 8px 12px; font-size: 15px; }
+.texts tr.changed td:first-child { box-shadow: inset 4px 0 0 var(--cyan); }
+
+/* ---------- print (Print button on an organization page) ---------- */
+.print-sheet { display: none; }
+@media print {
+  @page { size: A4; margin: 16mm 14mm; }
+  body.printing { background: #fff; color: #000; font-size: 11pt; }
+  body.printing > :not(.print-sheet) { display: none !important; }
+  body.printing .print-sheet { display: block; }
+  .print-sheet h1 { font-size: 20pt; margin: 0 0 2mm; color: #000; }
+  .print-sheet .p-sub { margin: 0 0 6mm; color: #444; }
+  .print-sheet h2 { font-size: 14pt; margin: 6mm 0 2mm; color: #000; }
+  .print-sheet h3 { font-size: 11.5pt; margin: 4mm 0 1.5mm; color: #006371; }
+  .print-sheet table { width: 100%; border-collapse: collapse; }
+  .print-sheet th, .print-sheet td { text-align: left; vertical-align: top; padding: 1.6mm 2mm; border: 0.3mm solid #bbb; }
+  .print-sheet th { width: 34%; font-weight: 600; background: #f2f6f7; }
+  .print-sheet .p-proj { break-before: page; }
+  .print-sheet tr { break-inside: avoid; }
+}

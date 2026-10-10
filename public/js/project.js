@@ -34,7 +34,7 @@ export function calendar(dates) {
     months.push(`<div class="month"><div class="mname">${esc(new Date(y, m - 1, 1).toLocaleDateString(locale(), { month: 'long', year: 'numeric' }))}</div>
       <div class="days">${wk.map((w) => `<span class="wd">${esc(w)}</span>`).join('')}${cells.join('')}</div></div>`);
   }
-  return `<div class="cal">${months.join('')}</div><p class="cal-sum"><b>${tr(`${ds.length} day${ds.length > 1 ? 's' : ''}`, `${ds.length} วัน`)}</b></p>`;
+  return `<div class="cal">${months.join('')}</div><p class="cal-sum"><b>${(ds.length > 1 ? tr('{n} days', '{n} วัน', { n: ds.length }) : tr('{n} day', '{n} วัน', { n: ds.length }))}</b></p>`;
 }
 
 // File button for a Drive link or a { id } file: the label opens a preview, the arrow downloads at once.
@@ -42,7 +42,7 @@ export function calendar(dates) {
 export const dlBtn = (src, label) => {
   const u = downloadUrl(src);
   if (!u) return `<span class="btn split" aria-disabled="true">${icon('eye', 16)}${esc(label)}</span>`;
-  return `<span class="split"><button type="button" class="btn" data-preview="${esc(previewUrl(src))}" data-view="${esc(viewUrl(src))}" data-dl="${esc(u)}" data-title="${esc(label)}">${icon('eye', 16)}${esc(label)}</button><a class="btn" href="${esc(u)}" download rel="noopener" title="${esc(tr('Download', 'ดาวน์โหลด'))}" aria-label="${esc(tr(`Download ${label}`, `ดาวน์โหลด ${label}`))}">${icon('download', 16)}</a></span>`;
+  return `<span class="split"><button type="button" class="btn" data-preview="${esc(previewUrl(src))}" data-view="${esc(viewUrl(src))}" data-dl="${esc(u)}" data-title="${esc(label)}">${icon('eye', 16)}${esc(label)}</button><a class="btn" href="${esc(u)}" download rel="noopener" title="${esc(tr('Download', 'ดาวน์โหลด'))}" aria-label="${esc(tr('Download {file}', 'ดาวน์โหลด {file}', { file: label }))}">${icon('download', 16)}</a></span>`;
 };
 
 // Preview window: Drive's viewer in an iframe, with Open in Drive, Download and Close. Esc or a click outside closes.
@@ -76,12 +76,27 @@ export const fileChip = (f) => (f?.id ? `<span class="fchip">${icon('file', 16)}
   <a class="icon-btn" href="${esc(downloadUrl(f))}" download title="${esc(tr('Download', 'ดาวน์โหลด'))}">${icon('download', 16)}</a></span>` : '');
 
 // Number = the project's position in the submission (the -P<nn> end of its code).
-const projNo = (ref) => Number(String(ref).match(/-P(\d+)$/)?.[1]) || '';
+export const projNo = (ref) => Number(String(ref).match(/-P(\d+)$/)?.[1]) || '';
+
+// Feedback questions the Owner can mark Required / Not required (Control tab). d.required (from the org call)
+// holds the Owner's choices; a question not in it keeps its default. Keep in step with QUESTIONS in Code.gs.
+export const QUESTIONS = [
+  { id: 'pre.approvedBudget', tab: 'prepitch', req: true, label: () => tr('Approved budget', 'งบประมาณที่อนุมัติ') },
+  { id: 'pre.docx', tab: 'prepitch', req: true, label: () => tr('Approved project .docx? (feedback file when No)', 'อนุมัติไฟล์โครงการ .docx? (ไฟล์ข้อเสนอแนะเมื่อไม่อนุมัติ)') },
+  { id: 'pre.pdf', tab: 'prepitch', req: true, label: () => tr('Approved project PDF? (feedback file when No)', 'อนุมัติไฟล์โครงการ PDF? (ไฟล์ข้อเสนอแนะเมื่อไม่อนุมัติ)') },
+  { id: 'pre.note', tab: 'prepitch', req: false, label: () => tr('Feedback note', 'บันทึกข้อเสนอแนะ') },
+  { id: 'pitch.summary', tab: 'pitching', req: false, label: () => tr('Summary', 'สรุป') },
+  { id: 'pitch.finalBudget', tab: 'pitching', req: true, label: () => tr('Final approved budget', 'งบประมาณอนุมัติขั้นสุดท้าย') },
+  { id: 'pitch.noted', tab: 'pitching', req: false, label: () => tr('Noted documents', 'เอกสารบันทึก') },
+  { id: 'resub.decision', tab: 'resubmit', req: true, label: () => tr('Decision', 'ผลการพิจารณา') },
+];
+export const isReq = (d, id) => (d?.required && id in d.required ? !!d.required[id] : !!QUESTIONS.find((q) => q.id === id)?.req);
+export const star = (d, id) => (isReq(d, id) ? `<span class="req" title="${esc(tr('Required', 'จำเป็น'))}">*</span>` : '');
 
 // Card top: name + ref, lead (e.g. the pitching slot), calendar, budget line(s), extra (download buttons).
 export function cardTop(p, budgets, extra = '', lead = '') {
   const n = projNo(p.ref);
-  return `<header class="pcard-head"><span class="eyebrow">${esc(tr(`Project ${n}`, `โครงการที่ ${n}`))}</span><h3>${esc(p.name || '—')}</h3><span class="code">${esc(p.ref)}</span></header>
+  return `<header class="pcard-head"><span class="eyebrow">${esc(tr('Project {n}', 'โครงการที่ {n}', { n }))}</span><h3>${esc(p.name || '—')}</h3><span class="code">${esc(p.ref)}</span></header>
     <div class="pcard-body">${lead}${calendar(p.dates)}
       <dl class="budgets">${budgets.map(([k, v]) => `<div><dt>${esc(k)}</dt><dd class="num">${v == null || v === '' ? '—' : num2(v)}</dd></div>`).join('')}</dl>
       ${extra ? `<div class="dl-row">${extra}</div>` : ''}</div>`;
@@ -96,15 +111,27 @@ export function slotLine(s) {
   return `<p class="slot">${icon('clock', 18)}<span class="muted">${tr('Pitching', 'นำเสนอ')}</span><b>${esc(day)}</b><b class="num">${esc(s.start)}${s.end ? `–${esc(s.end)}` : ''}</b>${room ? `<span>${room}</span>` : ''}</p>`;
 }
 
-// What "unfinished" means on each tab. Pre-pitch: decided by the server (Code.gs finished_).
+// The same slot as plain text (print).
+export function slotText(s) {
+  if (!s?.date) return tr('Pitching time not scheduled yet', 'ยังไม่มีกำหนดเวลานำเสนอ');
+  const d = new Date(`${s.date}T00:00`);
+  const day = Number.isNaN(+d) ? s.date : d.toLocaleDateString(locale(), { weekday: 'short', day: 'numeric', month: 'short', year: 'numeric' });
+  return [day, `${s.start || ''}${s.end ? `–${s.end}` : ''}`, s.room].filter(Boolean).join(' · ');
+}
+
+// What "unfinished" means on each tab: a required question unanswered. Pre-pitch: decided by the server (Code.gs finished_).
 export const UNFINISHED = {
   prepitch: (d, p) => !d.pre[p.ref]?.finished,
-  pitching: (d, p) => d.pitch[p.ref]?.finalBudget == null,
-  resubmit: (d, p) => !d.resub?.[p.ref]?.decision,
+  pitching: (d, p) => {
+    const x = d.pitch[p.ref] || {};
+    return (isReq(d, 'pitch.summary') && !String(x.summary || '').trim()) || (isReq(d, 'pitch.finalBudget') && x.finalBudget == null)
+      || (isReq(d, 'pitch.noted') && !(x.noted || []).length);
+  },
+  resubmit: (d, p) => isReq(d, 'resub.decision') && !d.resub?.[p.ref]?.decision,
 };
 const DONE = {
   prepitch: () => tr('All approvals finished', 'อนุมัติครบทุกโครงการ'),
-  pitching: () => tr('Every project has a final approved budget', 'ทุกโครงการมีงบประมาณอนุมัติขั้นสุดท้ายแล้ว'),
+  pitching: () => tr('Every project has its required answers', 'ทุกโครงการตอบคำถามที่จำเป็นครบแล้ว'),
   resubmit: () => tr('Every project has a decision', 'ทุกโครงการตัดสินแล้ว'),
 };
 let onlyOpen = false; // "Unfinished only": kept while moving between tabs and organizations
@@ -118,10 +145,10 @@ export function progress(el, d, tab) {
   host.className = `progress ${n ? 'open' : 'done'}`;
   host.refresh = () => progress(el, d, tab);
   host.innerHTML = `<div class="pg-main">${icon(n ? 'alert' : 'check', 28)}
-      <div class="grow"><b>${n ? tr(`${n} of ${all} projects unfinished`, `ยังไม่ครบ ${n} จาก ${all} โครงการ`) : esc(DONE[tab]())}</b>
+      <div class="grow"><b>${n ? tr('{n} of {all} projects unfinished', 'ยังไม่ครบ {n} จาก {all} โครงการ', { n, all }) : esc(DONE[tab]())}</b>
         <div class="meter" role="meter" aria-valuemin="0" aria-valuemax="${all}" aria-valuenow="${all - n}" aria-label="${esc(tr('Finished projects', 'โครงการที่ครบแล้ว'))}"><i style="width:${all ? ((all - n) / all) * 100 : 100}%"></i></div></div>
       ${n ? `<label class="check"><input type="checkbox" data-only ${onlyOpen ? 'checked' : ''}>${tr('Unfinished only', 'เฉพาะที่ยังไม่ครบ')}</label>` : ''}</div>
-    ${n ? `<div class="pg-jump">${open.map((p) => `<a href="#" data-jump="${esc(p.ref)}" title="${esc(p.name || '')}">${esc(tr(`Project ${projNo(p.ref)}`, `โครงการที่ ${projNo(p.ref)}`))}</a>`).join('')}</div>` : ''}`;
+    ${n ? `<div class="pg-jump">${open.map((p) => `<a href="#" data-jump="${esc(p.ref)}" title="${esc(p.name || '')}">${esc(tr('Project {n}', 'โครงการที่ {n}', { n: projNo(p.ref) }))}</a>`).join('')}</div>` : ''}`;
   const keep = new Set(open.map((p) => p.ref));
   el.querySelectorAll('.pcard[data-ref]').forEach((c) => { c.hidden = onlyOpen && n > 0 && !keep.has(c.dataset.ref); });
 }

@@ -2,9 +2,10 @@
 // A No on .docx / PDF asks for a feedback file, uploaded straight to Drive when picked; Save writes the row and
 // the server logs every changed field in PrePitch_Log. "Finished" is decided by the server (Code.gs finished_).
 import { tr } from '../i18n.js';
-import { $, esc, icon, toast, moneyBox, parseMoney, liveMoney, dateTimeFmt } from '../ui.js';
+import { $, esc, icon, toast, moneyBox, parseMoney, liveMoney, dateTimeFmt, num2, dialog, errorBox } from '../ui.js';
 import { call, upload, forget } from '../api.js';
-import { cardTop, dlBtn, fileChip, progress } from '../project.js';
+import { cardTop, dlBtn, fileChip, progress, star } from '../project.js';
+import { ORGS } from '../masterdata.js';
 
 let st = null; // { el, d, can, form: { ref: working copy } }
 
@@ -12,6 +13,10 @@ const blank = { approvedBudget: null, docxOk: '', docxFile: null, pdfOk: '', pdf
 const pick = (x) => ({ approvedBudget: x.approvedBudget ?? null, docxOk: x.docxOk || '', docxFile: x.docxFile || null, pdfOk: x.pdfOk || '', pdfFile: x.pdfFile || null, note: x.note || '' });
 const dirty = (ref) => JSON.stringify(st.form[ref]) !== JSON.stringify(pick(st.d.pre[ref] || blank));
 export const isDirty = () => !!st && st.d.projects.some((p) => dirty(p.ref));
+// Projects with unsaved edits, for the leave window: [{ ref, name }].
+export const unsaved = () => (st ? st.d.projects.filter((p) => dirty(p.ref)).map((p) => ({ ref: p.ref, name: p.name })) : []);
+// "Save and leave": saves each unsaved project; throws at the first that fails (the rest stay unsaved).
+export async function saveAll() { for (const p of unsaved()) await save(p.ref); }
 
 export function render(el, d, ctx) {
   st = { el, d, ctx, can: ctx.canEdit, form: Object.fromEntries(d.projects.map((p) => [p.ref, pick(d.pre[p.ref] || blank)])) };
@@ -30,17 +35,17 @@ function card(p) {
   return `<section class="group pcard" data-ref="${esc(p.ref)}">
     ${cardTop(p, [[tr('Total proposed project budget', 'งบประมาณโครงการที่เสนอ'), p.budget]], `${dlBtn(p.pdf, tr('Project PDF', 'โครงการ PDF'))}${dlBtn(p.docx, tr('Project .docx', 'โครงการ .docx'))}`)}
     <div class="fb"><h4>${tr('Feedback', 'ข้อเสนอแนะ')} <span data-status>${status(saved)}</span></h4>
-      <div class="field"><label>${tr('Approved budget', 'งบประมาณที่อนุมัติ')}</label><input type="text" inputmode="decimal" data-k="approvedBudget" value="${esc(moneyBox(f.approvedBudget))}" placeholder="0.00" ${dis}></div>
-      <div class="field"><label>${tr('Approved project .docx?', 'อนุมัติไฟล์โครงการ .docx?')}</label><div>${yn('docx')}<div data-slot="docx">${slot(p.ref, 'docx')}</div></div></div>
-      <div class="field"><label>${tr('Approved project PDF?', 'อนุมัติไฟล์โครงการ PDF?')}</label><div>${yn('pdf')}<div data-slot="pdf">${slot(p.ref, 'pdf')}</div></div></div>
-      <div class="field"><label>${tr('Feedback note', 'บันทึกข้อเสนอแนะ')}</label><textarea data-k="note" maxlength="5000" ${dis}>${esc(f.note)}</textarea></div>
+      <div class="field"><label>${tr('Approved budget', 'งบประมาณที่อนุมัติ')}${star(st.d, 'pre.approvedBudget')}</label><input type="text" inputmode="decimal" data-k="approvedBudget" value="${esc(moneyBox(f.approvedBudget))}" placeholder="0.00" ${dis}></div>
+      <div class="field"><label>${tr('Approved project .docx?', 'อนุมัติไฟล์โครงการ .docx?')}${star(st.d, 'pre.docx')}</label><div>${yn('docx')}<div data-slot="docx">${slot(p.ref, 'docx')}</div></div></div>
+      <div class="field"><label>${tr('Approved project PDF?', 'อนุมัติไฟล์โครงการ PDF?')}${star(st.d, 'pre.pdf')}</label><div>${yn('pdf')}<div data-slot="pdf">${slot(p.ref, 'pdf')}</div></div></div>
+      <div class="field"><label>${tr('Feedback note', 'บันทึกข้อเสนอแนะ')}${star(st.d, 'pre.note')}</label><textarea data-k="note" maxlength="5000" ${dis}>${esc(f.note)}</textarea></div>
       ${st.can ? `<div class="actions"><span class="muted small" data-saved>${savedLine(saved)}</span><button class="btn primary" data-save>${tr('Save', 'บันทึก')}</button></div>`
     : `<div class="actions"><span class="muted small">${savedLine(saved)}</span></div>`}
     </div></section>`;
 }
 
 const status = (s) => (s?.finished ? `<span class="pill green">${tr('Finished', 'ครบแล้ว')}</span>` : `<span class="pill orange">${tr('Unfinished', 'ยังไม่ครบ')}</span>`);
-const savedLine = (s) => (s?.at ? tr(`Saved ${dateTimeFmt(s.at)} by ${esc(st.ctx.nameOf(s.by))}`, `บันทึก ${dateTimeFmt(s.at)} โดย ${esc(st.ctx.nameOf(s.by))}`) : tr('Not saved yet', 'ยังไม่ได้บันทึก'));
+const savedLine = (s) => (s?.at ? tr('Saved {when} by {who}', 'บันทึก {when} โดย {who}', { when: dateTimeFmt(s.at), who: esc(st.ctx.nameOf(s.by)) }) : tr('Not saved yet', 'ยังไม่ได้บันทึก'));
 
 // Upload area under a Yes/No: shown only for No.
 function slot(ref, k) {
@@ -86,25 +91,50 @@ async function onChange(e) {
   box.innerHTML = slot(ref, kind);
 }
 
+// Saves one project's form and repaints its card. Returns the server's answer; throws when the save fails.
+async function save(ref) {
+  const out = await call('savePrePitch', { ref, data: st.form[ref] });
+  const sec = st.el.querySelector(`.pcard[data-ref="${CSS.escape(ref)}"]`);
+  st.d.pre[ref] = out.pre;
+  st.form[ref] = pick(out.pre);
+  if (sec) {
+    $('[data-status]', sec).innerHTML = status(out.pre);
+    $('[data-saved]', sec).innerHTML = savedLine(out.pre);
+  }
+  progress(st.el, st.d, 'prepitch');
+  forget('boot'); // list counts
+  forget('dashboard');
+  st.ctx.persist?.();
+  return out;
+}
+
+// Shown after a save that changed something; stays until OK or Cancel (both just close it).
+function savedWindow(ref) {
+  const p = st.d.projects.find((x) => x.ref === ref);
+  const code = ref.replace(/-P\d+$/, '');
+  const org = ORGS.find((o) => o.code === code);
+  const v = st.d.pre[ref]?.approvedBudget;
+  const kv = [
+    [tr('Organization', 'องค์กร'), org?.en || code],
+    [tr('Project number', 'รหัสโครงการ'), ref],
+    [tr('Project name', 'ชื่อโครงการ'), p?.name || '—'],
+    [tr('Approved budget', 'งบประมาณที่อนุมัติ'), v == null ? '—' : `฿${num2(v)}`],
+  ];
+  return dialog(tr('Saved', 'บันทึกแล้ว'), `<dl class="kv saved-kv">${kv.map(([k, x]) => `<dt>${esc(k)}</dt><dd>${esc(x)}</dd>`).join('')}</dl>`,
+    [{ v: false, label: tr('Cancel', 'ยกเลิก') }, { v: true, label: tr('OK', 'ตกลง'), cls: 'primary' }], { sticky: true });
+}
+
 async function onClick(e) {
   const btn = e.target.closest('[data-save]');
   if (!btn) return;
   const ref = refOf(e);
-  const sec = btn.closest('.pcard');
   btn.disabled = true;
   try {
-    const out = await call('savePrePitch', { ref, data: st.form[ref] });
-    st.d.pre[ref] = out.pre;
-    st.form[ref] = pick(out.pre);
-    $('[data-status]', sec).innerHTML = status(out.pre);
-    $('[data-saved]', sec).textContent = savedLine(out.pre);
-    progress(st.el, st.d, 'prepitch');
-    forget('boot'); // list counts
-    forget('dashboard');
-    st.ctx.persist?.();
-    toast(out.changed ? tr('Saved', 'บันทึกแล้ว') : tr('Nothing changed', 'ไม่มีการเปลี่ยนแปลง'));
+    const out = await save(ref);
+    if (out.changed) await savedWindow(ref);
+    else toast(tr('Nothing changed', 'ไม่มีการเปลี่ยนแปลง'));
   } catch (err) {
-    toast(err.message, 'bad');
+    await errorBox(err.message); // the edits stay on screen
   }
   btn.disabled = false;
 }
