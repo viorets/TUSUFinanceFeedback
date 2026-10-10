@@ -89,6 +89,8 @@ h2 { font-size: 24px; font-weight: 600; letter-spacing: -0.02em; margin: 0 0 4px
   display: flex; align-items: center; gap: 10px; min-height: 68px;
   padding: 6px max(22px, env(safe-area-inset-left)); padding-top: max(6px, env(safe-area-inset-top));
   background: var(--bar); backdrop-filter: saturate(180%) blur(20px); -webkit-backdrop-filter: saturate(180%) blur(20px);
+  /* v2.3.3: the blur makes each bar its own layer; keep this one (and its account menu) above the tabs bar. */
+  position: relative; z-index: 2;
 }
 .brand { display: flex; align-items: center; gap: 10px; color: var(--text); min-width: 0; }
 .brand:hover { text-decoration: none; }

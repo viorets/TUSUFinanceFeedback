@@ -54,7 +54,8 @@ overrides the earlier styles. Glass turns solid for reduced transparency; motion
 
 ## Versions
 
-- `v2.3.2` (tag, `main`): blue-and-white page background (soft blue glows on white; navy at night), whiter top bar.
+- `v2.3.3` (tag, `main`): the account menu opens above the tabs bar (its name and email were hidden).
+- `v2.3.2` (tag): blue-and-white page background (soft blue glows on white; navy at night), whiter top bar.
 - `v2.3.1` (tag): the organization list page is wider (up to 1600 px).
 - `v2.3` (tag): a closed case counts as Done on the list (filter, counts, Unfinished column) and its tabs show no unfinished badges; each campus is its own card on the list, with space between.
 - `v2.2.1` (tag): budget totals on the organization page; the list fits the page width.
