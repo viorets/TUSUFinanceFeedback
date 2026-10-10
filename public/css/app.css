@@ -173,6 +173,8 @@ input[inputmode=decimal] { max-width: 240px; text-align: right; font-variant-num
 .quotes { table-layout: fixed; min-width: 960px; }
 .quotes td { overflow-wrap: anywhere; }
 .quotes select.pic { width: 100%; min-width: 0; }
+/* The organization list page uses more of the screen width. */
+.page.wide:has(.org-list) { max-width: 1600px; }
 /* One card per campus, with space between them. */
 .campus-card + .campus-card { margin-top: 28px; }
 /* Budget totals in the organization page header. */

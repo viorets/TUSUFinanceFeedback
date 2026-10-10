@@ -18,7 +18,7 @@ export async function render(page, ctx) {
   page.innerHTML = `<h1 class="grad">${tr('Organizations', 'องค์กร')}</h1><p class="muted" id="sum">&nbsp;</p>
     <div class="toolbar"><input type="search" id="q" placeholder="${esc(tr('Search name, RefCode or person in charge', 'ค้นหาชื่อ รหัส หรือผู้รับผิดชอบ'))}" value="${esc(query)}">
       <div class="seg filter" role="radiogroup" aria-label="${esc(tr('Show', 'แสดง'))}" id="show"></div></div>
-    <div id="rows"></div>`;
+    <div id="rows" class="org-list"></div>`;
   const COLS = '<colgroup><col style="width:7%"><col style="width:22%"><col style="width:10%"><col style="width:7%"><col style="width:12%"><col style="width:11%"><col style="width:15%"><col style="width:8%"><col style="width:8%"></colgroup>';
   const HEAD = `<tr><th>${tr('Category', 'หมวด')}</th><th>${tr('Name', 'ชื่อ')}</th><th>${tr('RefCode', 'รหัส')}</th>
         <th class="r">${tr('Projects', 'โครงการ')}</th><th class="r">${tr('Total proposed project budget', 'งบประมาณโครงการที่เสนอรวม')}</th><th class="r">${tr('Total approved budget', 'งบประมาณที่อนุมัติรวม')}</th>
