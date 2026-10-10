@@ -50,11 +50,12 @@ v2.1 follows Apple's newest look: a floating translucent ("glass") top bar, roun
 iOS switches and short spring animations, in the TUSU teal. The v2.1 block at the end of `public/css/app.css`
 overrides the earlier styles. Glass turns solid for reduced transparency; motion stops for reduced motion.
 
-- v2.2: Pre-pitch is for self-noting ("Note"; nothing required, no tracking). Unfinished counts and filters cover Pitching and Re-submission only. Pitching has a "Correct Excel file" upload (.xlsx or .xls, column `Correct Excel File`). The list shows Total proposed project budget and Total approved budget (Pitching final approved budgets).
+- v2.2: Pre-pitch is for self-noting ("Note"; nothing required, no tracking). Unfinished counts and filters cover Pitching and Re-submission only. Pitching has a "Correct Excel file" upload (.xlsx or .xls, column `Correct Excel File`). The list and each organization page's header show Total proposed project budget and Total approved budget (Pitching final approved budgets); the list's long headings wrap so it fits without sideways scrolling.
 
 ## Versions
 
-- `v2.2` (tag, `main`): v2.0 look, v2.1 features, and the v2.2 changes above.
+- `v2.2.1` (tag, `main`): budget totals on the organization page; the list fits the page width.
+- `v2.2` (tag): v2.0 look, v2.1 features, and the v2.2 changes above.
 - `v2.1` (tag): pitching phases and the glass design refresh (design later reverted).
 - `v2` (branch and tag): save window, closed organizations, Owner control tab, print. Kept unchanged.
 - `v1-prototype` (branch and tag): the first prototype, kept unchanged.

@@ -1,6 +1,8 @@
 // Organization detail: compact master-data header (with Closed / Unclosed and Print), then three tabs
 // (Pre-pitch · Pitching · Re-submission). One `org` call loads everything; each tab's code is imported only when that
 // tab is opened. A closed organization's tabs are read-only for everyone (the server refuses its writes too).
+// The header also shows the budget totals, as on the list: proposed (projects' budgets) and approved (Pitching final
+// approved budgets); they repaint after each save.
 import { tr, getLang } from '../i18n.js';
 import { $, esc, icon, phoneFmt, dateTimeFmt, toast, num2 } from '../ui.js';
 import { cached, peek, remember } from '../api.js';
@@ -53,6 +55,7 @@ async function draw(page, ctx, route, data) {
       <div class="oh-top">${statusPill(closed)}<span class="grow"></span><button class="btn" id="print">${icon('print', 16)}${tr('Print', 'พิมพ์')}</button></div>
       <div class="oh-line"><span class="code ref">${esc(route.ref)}</span><h1>${esc(o?.en || route.ref)}</h1></div>
       <div class="oh-line muted">${esc(label(CAMPUSES, o?.campus))} · ${esc(label(CATEGORIES, o?.category))}${ORGS.includes(o) ? '' : ` · ${tr('not in the masterfile', 'ไม่อยู่ในรายชื่อหลัก')}`}</div>
+      <dl class="oh-totals" id="totals"></dl>
       <details><summary>${tr('More information', 'ข้อมูลเพิ่มเติม')}</summary>
         <dl class="kv">
           <dt>${tr('Submitter', 'ผู้ส่ง')}</dt><dd>${s ? contact(s.name, s.position, s.phone) : '—'}${s?.phone ? ` <span class="pill blue">Telegram</span>` : ''}</dd>
@@ -74,6 +77,10 @@ export const statusPill = (closed) => (closed ? `<span class="pill closed">${ico
 // Tab strip; each tab shows how many projects are still unfinished there.
 function paintTabs() {
   const { page, ref, data, tab } = state;
+  const fins = data.projects.map((p) => data.pitch?.[p.ref]?.finalBudget).filter((v) => v != null && v !== '' && Number.isFinite(+v));
+  const money = (v) => (v == null ? '—' : `฿${num2(v)}`);
+  $('#totals', page).innerHTML = `<div><dt>${tr('Total proposed project budget', 'งบประมาณโครงการที่เสนอรวม')}</dt><dd>${data.projects.length ? money(data.projects.reduce((t, p) => t + (+p.budget || 0), 0)) : '—'}</dd></div>
+    <div><dt>${tr('Total approved budget', 'งบประมาณที่อนุมัติรวม')}</dt><dd>${money(fins.length ? fins.reduce((t, v) => t + +v, 0) : null)}</dd></div>`;
   $('#tabs', page).innerHTML = Object.entries(TABS).map(([k, t]) => {
     const n = phaseOn(data, k) ? data.projects.filter((p) => UNFINISHED[k](data, p)).length : 0;
     return `<a href="#/org/${encodeURIComponent(ref)}/${k}" class="${k === tab ? 'on' : ''}">${esc(t.label())}${n ? `<span class="badge" title="${esc(tr('{n} unfinished', 'ยังไม่ครบ {n}', { n }))}">${n}</span>` : ''}</a>`;

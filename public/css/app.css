@@ -166,7 +166,15 @@ input[inputmode=decimal] { max-width: 240px; text-align: right; font-variant-num
 .quotes td.mono { white-space: nowrap; font-size: 15px; }
 .quotes td.small { font-size: 15px; }
 .quotes td .pill { font-size: 14px; padding: 5px 12px; }
-.quotes select.pic { min-height: 38px; padding: 6px 10px; font-size: 15px; min-width: 190px; max-width: 260px; cursor: pointer; }
+.quotes select.pic { min-height: 38px; padding: 6px 10px; font-size: 15px; min-width: 150px; max-width: 220px; cursor: pointer; }
+/* Organization list fits the page width (no sideways scroll): long headings wrap, cells are a little tighter. */
+.quotes thead th, .quotes thead th.r { white-space: normal; vertical-align: bottom; padding-left: 12px; padding-right: 12px; }
+.quotes td { padding-left: 12px; padding-right: 12px; }
+.quotes td:nth-child(2) { min-width: 200px; }
+/* Budget totals in the organization page header. */
+.oh-totals { display: flex; flex-wrap: wrap; gap: 10px 32px; margin: 12px 0 0; }
+.oh-totals dt { font-size: 13px; color: var(--text2); }
+.oh-totals dd { margin: 0; font-size: 21px; font-weight: 600; font-variant-numeric: tabular-nums; }
 .grid-table.edit td:first-child { min-width: 180px; } .grid-table.edit td:nth-child(2) { min-width: 220px; } .grid-table.edit td:nth-child(4) { min-width: 240px; }
 .table-actions { display: flex; gap: 10px; padding: 14px 16px; border-top: 1px solid var(--sep); align-items: center; }
 
