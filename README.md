@@ -54,7 +54,8 @@ overrides the earlier styles. Glass turns solid for reduced transparency; motion
 
 ## Versions
 
-- `v2.2.1` (tag, `main`): budget totals on the organization page; the list fits the page width.
+- `v2.3` (tag, `main`): a closed case counts as Done on the list (filter, counts, Unfinished column) and its tabs show no unfinished badges; each campus is its own card on the list, with space between.
+- `v2.2.1` (tag): budget totals on the organization page; the list fits the page width.
 - `v2.2` (tag): v2.0 look, v2.1 features, and the v2.2 changes above.
 - `v2.1` (tag): pitching phases and the glass design refresh (design later reverted).
 - `v2` (branch and tag): save window, closed organizations, Owner control tab, print. Kept unchanged.

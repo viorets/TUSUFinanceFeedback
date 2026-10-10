@@ -74,7 +74,7 @@ async function draw(page, ctx, route, data) {
 export const statusPill = (closed) => (closed ? `<span class="pill closed">${icon('lock', 13)}${tr('Closed', 'ปิดแล้ว')}</span>`
   : `<span class="pill green">${tr('Open', 'เปิด')}</span>`);
 
-// Tab strip; each tab shows how many projects are still unfinished there.
+// Tab strip; each tab shows how many projects are still unfinished there (none once the case is closed).
 function paintTabs() {
   const { page, ref, data, tab } = state;
   const fins = data.projects.map((p) => data.pitch?.[p.ref]?.finalBudget).filter((v) => v != null && v !== '' && Number.isFinite(+v));
@@ -82,7 +82,7 @@ function paintTabs() {
   $('#totals', page).innerHTML = `<div><dt>${tr('Total proposed project budget', 'งบประมาณโครงการที่เสนอรวม')}</dt><dd>${data.projects.length ? money(data.projects.reduce((t, p) => t + (+p.budget || 0), 0)) : '—'}</dd></div>
     <div><dt>${tr('Total approved budget', 'งบประมาณที่อนุมัติรวม')}</dt><dd>${money(fins.length ? fins.reduce((t, v) => t + +v, 0) : null)}</dd></div>`;
   $('#tabs', page).innerHTML = Object.entries(TABS).map(([k, t]) => {
-    const n = phaseOn(data, k) ? data.projects.filter((p) => UNFINISHED[k](data, p)).length : 0;
+    const n = phaseOn(data, k) && !data.closed ? data.projects.filter((p) => UNFINISHED[k](data, p)).length : 0;
     return `<a href="#/org/${encodeURIComponent(ref)}/${k}" class="${k === tab ? 'on' : ''}">${esc(t.label())}${n ? `<span class="badge" title="${esc(tr('{n} unfinished', 'ยังไม่ครบ {n}', { n }))}">${n}</span>` : ''}</a>`;
   }).join('');
 }

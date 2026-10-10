@@ -170,7 +170,11 @@ input[inputmode=decimal] { max-width: 240px; text-align: right; font-variant-num
 /* Organization list fits the page width (no sideways scroll): long headings wrap, cells are a little tighter. */
 .quotes thead th, .quotes thead th.r { white-space: normal; vertical-align: bottom; padding-left: 12px; padding-right: 12px; }
 .quotes td { padding-left: 12px; padding-right: 12px; }
-.quotes td:nth-child(2) { min-width: 200px; }
+.quotes { table-layout: fixed; min-width: 960px; }
+.quotes td { overflow-wrap: anywhere; }
+.quotes select.pic { width: 100%; min-width: 0; }
+/* One card per campus, with space between them. */
+.campus-card + .campus-card { margin-top: 28px; }
 /* Budget totals in the organization page header. */
 .oh-totals { display: flex; flex-wrap: wrap; gap: 10px 32px; margin: 12px 0 0; }
 .oh-totals dt { font-size: 13px; color: var(--text2); }
