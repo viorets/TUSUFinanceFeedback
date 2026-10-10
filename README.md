@@ -34,7 +34,7 @@ Files are stored as JSON `{ id, name }`. Tabs are created by `setup()` / on firs
 **Rules (server-side, `Code.gs`)**
 - Roles: Admin = everything (admin console + edit log). Chief = everything except the edit log, and cannot add, change or remove Admins. Staff = edit Pre-pitch and Pitching, upload; no admin console. Emails not in `Users` (or with an old Viewer role) get "No access". Old Reviewer rows count as Staff. The script owner is always Admin.
 - Approval finished (`finished_`): every required Pre-pitch question answered. Defaults: Approved budget filled, and .docx and PDF each Yes, or No with a feedback file uploaded in that field. Unfinished projects are counted on the list and the detail page.
-- Closed organizations (v2): Admins and Chiefs switch Closed / Unclosed on the list. Every write to a closed organization (Pre-pitch, Pitching, Re-submission, uploads) is refused; the person in charge can still change.
+- Closed cases (v2, moved in v2.2): Admins and Chiefs close or open an organization's case at the top of its Re-submission tab; the list shows Open / Closed. Every write to a closed organization (Pre-pitch, Pitching, Re-submission, uploads) is refused; the person in charge can still change.
 - Owner (v2) = the script owner. Only the Owner sees the Control tab: site text in English and Thai (`Texts`; the built-in English line is the key, `{n}` marks stand for values) and Required / Not required per feedback question (`QUESTIONS` in `Code.gs` and `public/js/project.js`).
 - Pre-pitch save (v2): a window confirms the organization, project number, project name and approved budget (OK and Cancel both close it); a failed save shows an error window and keeps the edits. Leaving a page with unsaved edits opens a window naming each unsaved project (Save and leave / Leave without saving / Stay). Closing the tab or refreshing is not guarded.
 - Print (v2): the organization page's Print button prints the master data and every project on all three tabs, without progress tracking, "Saved by" lines or the person in charge.
@@ -50,9 +50,12 @@ v2.1 follows Apple's newest look: a floating translucent ("glass") top bar, roun
 iOS switches and short spring animations, in the TUSU teal. The v2.1 block at the end of `public/css/app.css`
 overrides the earlier styles. Glass turns solid for reduced transparency; motion stops for reduced motion.
 
+- v2.2: Pre-pitch is for self-noting ("Note"; nothing required, no tracking). Unfinished counts and filters cover Pitching and Re-submission only. Pitching has a "Correct Excel file" upload (.xlsx or .xls, column `Correct Excel File`). The list shows Total proposed project budget and Total approved budget (Pitching final approved budgets).
+
 ## Versions
 
-- `v2.1` (tag, `main`): pitching phases and the design refresh.
+- `v2.2` (tag, `main`): v2.0 look, v2.1 features, and the v2.2 changes above.
+- `v2.1` (tag): pitching phases and the glass design refresh (design later reverted).
 - `v2` (branch and tag): save window, closed organizations, Owner control tab, print. Kept unchanged.
 - `v1-prototype` (branch and tag): the first prototype, kept unchanged.
 

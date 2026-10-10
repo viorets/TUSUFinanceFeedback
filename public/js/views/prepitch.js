@@ -1,10 +1,10 @@
-// Pre-pitch: each project as submitted, then the feedback form (every role can edit).
-// A No on .docx / PDF asks for a feedback file, uploaded straight to Drive when picked; Save writes the row and
-// the server logs every changed field in PrePitch_Log. "Finished" is decided by the server (Code.gs finished_).
+// Pre-pitch: each project as submitted, then a Note form for self-noting (every role can edit; nothing is
+// required and nothing is tracked since v2.2). A No on .docx / PDF offers a feedback file, uploaded straight to
+// Drive when picked; Save writes the row and the server logs every changed field in PrePitch_Log.
 import { tr } from '../i18n.js';
 import { $, esc, icon, toast, moneyBox, parseMoney, liveMoney, dateTimeFmt, num2, dialog, errorBox } from '../ui.js';
 import { call, upload, forget } from '../api.js';
-import { cardTop, dlBtn, fileChip, progress, star } from '../project.js';
+import { cardTop, dlBtn, fileChip } from '../project.js';
 import { ORGS } from '../masterdata.js';
 
 let st = null; // { el, d, can, form: { ref: working copy } }
@@ -20,8 +20,7 @@ export async function saveAll() { for (const p of unsaved()) await save(p.ref); 
 
 export function render(el, d, ctx) {
   st = { el, d, ctx, can: ctx.canEdit, form: Object.fromEntries(d.projects.map((p) => [p.ref, pick(d.pre[p.ref] || blank)])) };
-  el.innerHTML = `<div data-progress></div>${d.projects.map(card).join('')}`;
-  progress(el, d, 'prepitch');
+  el.innerHTML = `<div class="notice blue">${icon('alert', 18)}<span>${tr('This section is for your own notes. You don’t have to fill it in.', 'ส่วนนี้มีไว้สำหรับจดบันทึกของคุณเอง ไม่จำเป็นต้องกรอก')}</span></div>${d.projects.map(card).join('')}`;
   el.oninput = onInput;
   el.onchange = onChange;
   el.onclick = onClick;
@@ -34,17 +33,16 @@ function card(p) {
   const yn = (k) => `<div class="seg" role="radiogroup">${['Yes', 'No'].map((v) => `<label><input type="radio" name="${k}-${esc(p.ref)}" value="${v}" data-k="${k}Ok" ${f[`${k}Ok`] === v ? 'checked' : ''} ${dis}><span>${v === 'Yes' ? tr('Yes', 'ใช่') : tr('No', 'ไม่')}</span></label>`).join('')}</div>`;
   return `<section class="group pcard" data-ref="${esc(p.ref)}">
     ${cardTop(p, [[tr('Total proposed project budget', 'งบประมาณโครงการที่เสนอ'), p.budget]], `${dlBtn(p.pdf, tr('Project PDF', 'โครงการ PDF'))}${dlBtn(p.docx, tr('Project .docx', 'โครงการ .docx'))}`)}
-    <div class="fb"><h4>${tr('Feedback', 'ข้อเสนอแนะ')} <span data-status>${status(saved)}</span></h4>
-      <div class="field"><label>${tr('Approved budget', 'งบประมาณที่อนุมัติ')}${star(st.d, 'pre.approvedBudget')}</label><input type="text" inputmode="decimal" data-k="approvedBudget" value="${esc(moneyBox(f.approvedBudget))}" placeholder="0.00" ${dis}></div>
-      <div class="field"><label>${tr('Approved project .docx?', 'อนุมัติไฟล์โครงการ .docx?')}${star(st.d, 'pre.docx')}</label><div>${yn('docx')}<div data-slot="docx">${slot(p.ref, 'docx')}</div></div></div>
-      <div class="field"><label>${tr('Approved project PDF?', 'อนุมัติไฟล์โครงการ PDF?')}${star(st.d, 'pre.pdf')}</label><div>${yn('pdf')}<div data-slot="pdf">${slot(p.ref, 'pdf')}</div></div></div>
-      <div class="field"><label>${tr('Feedback note', 'บันทึกข้อเสนอแนะ')}${star(st.d, 'pre.note')}</label><textarea data-k="note" maxlength="5000" ${dis}>${esc(f.note)}</textarea></div>
+    <div class="fb"><h4>${tr('Note', 'บันทึก')}</h4>
+      <div class="field"><label>${tr('Approved budget', 'งบประมาณที่อนุมัติ')}</label><input type="text" inputmode="decimal" data-k="approvedBudget" value="${esc(moneyBox(f.approvedBudget))}" placeholder="0.00" ${dis}></div>
+      <div class="field"><label>${tr('Approved project .docx?', 'อนุมัติไฟล์โครงการ .docx?')}</label><div>${yn('docx')}<div data-slot="docx">${slot(p.ref, 'docx')}</div></div></div>
+      <div class="field"><label>${tr('Approved project PDF?', 'อนุมัติไฟล์โครงการ PDF?')}</label><div>${yn('pdf')}<div data-slot="pdf">${slot(p.ref, 'pdf')}</div></div></div>
+      <div class="field"><label>${tr('Note', 'บันทึก')}</label><textarea data-k="note" maxlength="5000" ${dis}>${esc(f.note)}</textarea></div>
       ${st.can ? `<div class="actions"><span class="muted small" data-saved>${savedLine(saved)}</span><button class="btn primary" data-save>${tr('Save', 'บันทึก')}</button></div>`
     : `<div class="actions"><span class="muted small">${savedLine(saved)}</span></div>`}
     </div></section>`;
 }
 
-const status = (s) => (s?.finished ? `<span class="pill green">${tr('Finished', 'ครบแล้ว')}</span>` : `<span class="pill orange">${tr('Unfinished', 'ยังไม่ครบ')}</span>`);
 const savedLine = (s) => (s?.at ? tr('Saved {when} by {who}', 'บันทึก {when} โดย {who}', { when: dateTimeFmt(s.at), who: esc(st.ctx.nameOf(s.by)) }) : tr('Not saved yet', 'ยังไม่ได้บันทึก'));
 
 // Upload area under a Yes/No: shown only for No.
@@ -55,7 +53,7 @@ function slot(ref, k) {
   const label = k === 'docx' ? tr('Upload feedback .docx', 'อัปโหลดไฟล์ข้อเสนอแนะ .docx') : tr('Upload feedback PDF', 'อัปโหลดไฟล์ข้อเสนอแนะ PDF');
   return `<div class="upl">${fileChip(file)}${st.can ? `<label class="btn">${icon('upload', 16)}${file ? tr('Replace', 'เปลี่ยนไฟล์') : esc(label)}
     <input type="file" hidden accept="${k === 'docx' ? '.docx' : '.pdf'}" data-up="${k}"></label>` : ''}
-    ${!file ? `<span class="small warn">${tr('Required to finish', 'ต้องมีไฟล์จึงจะครบ')}</span>` : ''}</div>`;
+    </div>`;
 }
 
 const refOf = (e) => e.target.closest('[data-ref]')?.dataset.ref;
@@ -97,11 +95,7 @@ async function save(ref) {
   const sec = st.el.querySelector(`.pcard[data-ref="${CSS.escape(ref)}"]`);
   st.d.pre[ref] = out.pre;
   st.form[ref] = pick(out.pre);
-  if (sec) {
-    $('[data-status]', sec).innerHTML = status(out.pre);
-    $('[data-saved]', sec).innerHTML = savedLine(out.pre);
-  }
-  progress(st.el, st.d, 'prepitch');
+  if (sec) $('[data-saved]', sec).innerHTML = savedLine(out.pre);
   forget('boot'); // list counts
   forget('dashboard');
   st.ctx.persist?.();

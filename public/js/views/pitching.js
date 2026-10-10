@@ -1,5 +1,5 @@
 // Pitching: per project, the pitching slot (from the scheduling site, read only), the summary, the final approved
-// budget and "Noted documents" (any number of .docx / PDF). Unfinished = a required question unanswered (project.js).
+// budget, "Noted documents" (any number of .docx / PDF) and the "Correct Excel file" (one .xlsx / .xls). Unfinished = a required question unanswered (project.js).
 import { tr } from '../i18n.js';
 import { $, esc, icon, toast, moneyBox, parseMoney, liveMoney, dateTimeFmt } from '../ui.js';
 import { call, upload, forget } from '../api.js';
@@ -7,7 +7,7 @@ import { cardTop, fileChip, progress, slotLine, star } from '../project.js';
 
 let st = null; // { el, d, can, form: { ref: working copy } }
 
-const pick = (x = {}) => ({ summary: x.summary || '', finalBudget: x.finalBudget ?? null, noted: [...(x.noted || [])] });
+const pick = (x = {}) => ({ summary: x.summary || '', finalBudget: x.finalBudget ?? null, noted: [...(x.noted || [])], excel: x.excel || null });
 const dirty = (ref) => JSON.stringify(st.form[ref]) !== JSON.stringify(pick(st.d.pitch[ref]));
 export const isDirty = () => !!st && st.d.projects.some((p) => dirty(p.ref));
 // Projects with unsaved edits, for the leave window: [{ ref, name }].
@@ -33,6 +33,7 @@ function card(p) {
       <div class="field"><label>${tr('Summary', 'สรุป')}${star(st.d, 'pitch.summary')}</label><textarea data-k="summary" maxlength="20000" ${dis}>${esc(f.summary)}</textarea></div>
       <div class="field"><label>${tr('Final approved budget', 'งบประมาณอนุมัติขั้นสุดท้าย')}${star(st.d, 'pitch.finalBudget')}</label><input type="text" inputmode="decimal" data-k="finalBudget" value="${esc(moneyBox(f.finalBudget))}" placeholder="0.00" ${dis}></div>
       <div class="field"><label>${tr('Noted documents', 'เอกสารบันทึก')}${star(st.d, 'pitch.noted')}</label><div data-noted>${noted(p.ref)}</div></div>
+      <div class="field"><label>${tr('Correct Excel file', 'ไฟล์ Excel ฉบับแก้ไข')}${star(st.d, 'pitch.excel')}</label><div data-excel>${excel(p.ref)}</div></div>
       <div class="actions"><span class="muted small" data-saved>${savedLine(st.d.pitch[p.ref])}</span>${st.can ? `<button class="btn primary" data-save>${tr('Save', 'บันทึก')}</button>` : ''}</div>
     </div></section>`;
 }
@@ -46,6 +47,13 @@ function noted(ref) {
     ${st.can ? `<label class="btn">${icon('upload', 16)}${tr('Upload .docx or PDF', 'อัปโหลด .docx หรือ PDF')}<input type="file" hidden multiple accept=".docx,.pdf" data-up></label>` : ''}</div>`;
 }
 
+// One Excel file (.xlsx / .xls): name with preview + download, and Upload / Replace.
+function excel(ref) {
+  const f = st.form[ref].excel;
+  return `<div class="upl">${fileChip(f)}${!f && !st.can ? '<span class="muted">—</span>' : ''}
+    ${st.can ? `<label class="btn">${icon('upload', 16)}${f ? tr('Replace', 'เปลี่ยนไฟล์') : tr('Upload Excel', 'อัปโหลด Excel')}<input type="file" hidden accept=".xlsx,.xls" data-xl></label>` : ''}</div>`;
+}
+
 const refOf = (e) => e.target.closest('[data-ref]')?.dataset.ref;
 
 function onInput(e) {
@@ -57,6 +65,18 @@ function onInput(e) {
 
 async function onChange(e) {
   const ref = refOf(e);
+  if (ref && e.target.hasAttribute('data-xl') && e.target.files?.[0]) {
+    const box = e.target.closest('[data-excel]');
+    box.querySelector('.upl')?.classList.add('busy');
+    try {
+      st.form[ref].excel = await upload(e.target.files[0], { ref, purpose: 'excel', only: 'excel' });
+      toast(tr('Uploaded to Drive — press Save to keep it', 'อัปโหลดไปยัง Drive แล้ว — กดบันทึกเพื่อเก็บ'));
+    } catch (err) {
+      toast(err.message, 'bad');
+    }
+    box.innerHTML = excel(ref);
+    return;
+  }
   if (!ref || !e.target.hasAttribute('data-up')) return;
   const box = e.target.closest('[data-noted]');
   box.querySelector('.upl')?.classList.add('busy');

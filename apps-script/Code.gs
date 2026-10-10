@@ -41,7 +41,10 @@ const CACHE_SECONDS = 60;
 const KINDS = {
   docx: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
   pdf: 'application/pdf',
+  xlsx: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+  xls: 'application/vnd.ms-excel',
 };
+const EXCEL = ['xlsx', 'xls'];
 // Staff: edit organization data. Chief: + admin console (users, persons in charge, removed organizations), no edit log.
 // Admin: everything. A role not listed here (e.g. the retired Viewer) gives no access.
 const RANK = { Staff: 1, Chief: 2, Admin: 3 };
@@ -56,7 +59,7 @@ const TABS = {
     'PDF Approved', 'PDF Feedback File', 'Feedback Note', 'Updated At', 'Updated By'],
   PrePitch_Log: ['Logged At', 'By', 'Project Ref', 'Org Ref', 'Field', 'Old', 'New'],
   Pitching: ['Project Ref', 'Org Ref', 'Project Name', 'Summary', 'Final Approved Budget', 'Noted Documents',
-    'Updated At', 'Updated By'],
+    'Updated At', 'Updated By', 'Correct Excel File'],
   Resubmission: ['Project Ref', 'Org Ref', 'Project Name', 'Decision', 'Updated At', 'Updated By'],
   Settings: ['Key', 'Value', 'Updated At', 'Updated By'],
   OrgStatus: ['Org Ref', 'Status', 'Updated At', 'Updated By'],
@@ -64,12 +67,12 @@ const TABS = {
 };
 // Feedback questions the Owner can mark Required / Not required, with their defaults (= the rules before v2).
 // Keep in step with QUESTIONS in public/js/project.js.
+// Pre-pitch is for self-noting since v2.2: nothing there is required or tracked.
 const QUESTIONS = {
-  'pre.approvedBudget': true, 'pre.docx': true, 'pre.pdf': true, 'pre.note': false,
-  'pitch.summary': false, 'pitch.finalBudget': true, 'pitch.noted': false, 'resub.decision': true,
+  'pitch.summary': false, 'pitch.finalBudget': true, 'pitch.noted': false, 'pitch.excel': false, 'resub.decision': true,
 };
 // Cells that hold files: written as file names linked to Drive, read back from those links (filesIn_).
-const FILE_COLS = ['Docx Feedback File', 'PDF Feedback File', 'Noted Documents'];
+const FILE_COLS = ['Docx Feedback File', 'PDF Feedback File', 'Noted Documents', 'Correct Excel File'];
 // Pre-pitch fields that are logged.
 const PRE_FIELDS = ['Approved Budget', 'Docx Approved', 'Docx Feedback File', 'PDF Approved', 'PDF Feedback File', 'Feedback Note'];
 
@@ -141,15 +144,25 @@ function doGet() { return json_({ ok: true, service: 'TUSU Budget Pitching — F
 function boot_(req, user) {
   const core = cached_('boot', function () {
     const s = subs_();
-    const pre = byKey_(feedbackRows_('PrePitch'), 'Project Ref');
+    const pitch = byKey_(feedbackRows_('Pitching'), 'Project Ref');
+    const resub = byKey_(rows_(tab_('Resubmission')), 'Project Ref');
+    const ph = phases_();
     const orgs = {};
-    const org = function (ref) { return orgs[ref] || (orgs[ref] = { count: 0, pending: 0, at: '', people: [] }); };
+    // pending = projects unfinished on Pitching or Re-submission; proposed / approved = budget totals (approved:
+    // the Pitching tab's final approved budgets, null while none is set).
+    const org = function (ref) { return orgs[ref] || (orgs[ref] = { count: 0, pending: 0, at: '', people: [], proposed: 0, approved: null }); };
     s.orgs.forEach(function (o) {
       const x = org(o['Org Ref']);
       x.count = Number(o['Project Count']) || 0;
       x.at = iso_(o['Submitted At']);
     });
-    s.projects.forEach(function (p) { if (!finished_(pre[p['Project Ref']])) org(p['Org Ref']).pending++; });
+    s.projects.forEach(function (p) {
+      const x = org(p['Org Ref']); const ref = p['Project Ref'];
+      if ((ph.pitching && !pitchDone_(pitch[ref])) || (ph.resubmit && !resubDone_(resub[ref]))) x.pending++;
+      x.proposed += num_(p['Budget']) || 0;
+      const fin = pitch[ref] ? num_(pitch[ref]['Final Approved Budget']) : null;
+      if (fin != null) x.approved = (x.approved || 0) + fin;
+    });
     users_().forEach(function (u) { u.orgs.forEach(function (ref) { org(ref).people.push(u.email); }); });
     return { orgs: orgs, removed: removed_(s.log), closed: closed_(), texts: texts_(), required: required_(), phases: phases_() };
   });
@@ -157,7 +170,7 @@ function boot_(req, user) {
   const names = {};
   users_().forEach(function (u) { if (u.name) names[u.email] = u.name; });
   const out = { me: { email: user.email, role: user.role, owner: user.email === owner_() }, orgs: core.orgs, removed: core.removed,
-    closed: core.closed, texts: core.texts, required: core.required, names: names };
+    closed: core.closed, texts: core.texts, required: core.required, phases: core.phases, names: names };
   if (RANK[user.role] >= RANK.Chief) out.users = users_().filter(function (u) { return u.role; }).map(function (u) { return u.email; });
   return out;
 }
@@ -209,10 +222,11 @@ function upload_(req, user) {
   open_(p.org);
   const name = String(req.name || '').replace(/[\\/:*?"<>|]/g, '_').slice(0, 180);
   const kind = ((name.match(/\.([a-z0-9]+)$/i) || [])[1] || '').toLowerCase();
-  if (!KINDS[kind] || req.mime !== KINDS[kind]) throw new Error('Only .docx or .pdf files');
-  if (req.only && req.only !== kind) throw new Error('Only a .' + req.only + ' file can go here');
-  const purpose = { feedback: 'feedback', noted: 'noted' }[req.purpose];
+  if (!KINDS[kind] || req.mime !== KINDS[kind]) throw new Error('Only .docx, .pdf, .xlsx or .xls files');
+  const purpose = { feedback: 'feedback', noted: 'noted', excel: 'excel' }[req.purpose];
   if (!purpose) throw new Error('Bad purpose');
+  if (purpose === 'excel' ? EXCEL.indexOf(kind) < 0 : EXCEL.indexOf(kind) >= 0) throw new Error(purpose === 'excel' ? 'Only an Excel file (.xlsx or .xls) can go here' : 'Only .docx or .pdf files');
+  if (req.only && req.only !== 'excel' && req.only !== kind) throw new Error('Only a .' + req.only + ' file can go here');
   phaseOn_(purpose === 'feedback' ? 'prepitch' : 'pitching');
   const bytes = Utilities.base64Decode(req.data || '');
   if (!bytes.length) throw new Error('Empty file');
@@ -261,10 +275,12 @@ function savePitching_(req, user) {
   phaseOn_('pitching');
   const d = req.data || {};
   const noted = (Array.isArray(d.noted) ? d.noted : []).slice(0, 30).map(function (f) { return file_(f, p.org); }).filter(Boolean);
+  const excel = file_(d.excel, p.org);
+  if (excel && [KINDS.xlsx, KINDS.xls].indexOf(DriveApp.getFileById(excel.id).getMimeType()) < 0) throw new Error('Correct Excel file must be .xlsx or .xls');
   const row = {
     'Project Ref': p.ref, 'Org Ref': p.org, 'Project Name': p.name, 'Summary': text_(d.summary, 20000),
     'Final Approved Budget': money_(d.finalBudget), 'Noted Documents': noted,
-    'Updated At': new Date(), 'Updated By': user.email,
+    'Updated At': new Date(), 'Updated By': user.email, 'Correct Excel File': one_(excel),
   };
   locked_(function () {
     const sh = tab_('Pitching');
@@ -569,18 +585,26 @@ function schedule_() {
 
 /* ---------- rules ---------- */
 
-// Finished = every required Pre-pitch question answered (Owner's choices, required_()). Defaults: Approved budget
-// filled, and .docx and PDF each Yes, or No with a feedback file in that field.
+// Pre-pitch "finished" (kept for the row data; not tracked since v2.2): Approved budget filled, and .docx and PDF
+// each Yes, or No with a feedback file in that field.
 function finished_(r) {
-  r = r || {};
-  if (isReq_('pre.approvedBudget') && (r['Approved Budget'] === '' || r['Approved Budget'] == null)) return false;
-  if (isReq_('pre.note') && !String(r['Feedback Note'] || '').trim()) return false;
-  return [['Docx', 'pre.docx'], ['PDF', 'pre.pdf']].every(function (x) {
-    if (!isReq_(x[1])) return true;
-    const a = r[x[0] + ' Approved'];
-    return a === 'Yes' || (a === 'No' && files_(r[x[0] + ' Feedback File']).length > 0);
+  if (!r || r['Approved Budget'] === '' || r['Approved Budget'] == null) return false;
+  return ['Docx', 'PDF'].every(function (k) {
+    const a = r[k + ' Approved'];
+    return a === 'Yes' || (a === 'No' && files_(r[k + ' Feedback File']).length > 0);
   });
 }
+// Pitching / Re-submission done = every required question answered (Owner's choices; keep in step with
+// UNFINISHED in public/js/project.js).
+function pitchDone_(r) {
+  r = r || {};
+  if (isReq_('pitch.summary') && !String(r['Summary'] || '').trim()) return false;
+  if (isReq_('pitch.finalBudget') && num_(r['Final Approved Budget']) == null) return false;
+  if (isReq_('pitch.noted') && !files_(r['Noted Documents']).length) return false;
+  if (isReq_('pitch.excel') && !files_(r['Correct Excel File']).length) return false;
+  return true;
+}
+function resubDone_(r) { return !isReq_('resub.decision') || !!(r && r['Decision']); }
 
 // Organizations whose latest remove / restore in Submission_Log is a remove (the pitching site hides them).
 function removed_(log) {
@@ -686,7 +710,8 @@ function preOut_(r) {
 function pitchOut_(r) {
   return {
     summary: String(r['Summary'] || ''), finalBudget: num_(r['Final Approved Budget']),
-    noted: files_(r['Noted Documents']), at: iso_(r['Updated At']), by: r['Updated By'] || '',
+    noted: files_(r['Noted Documents']), excel: files_(r['Correct Excel File'])[0] || null,
+    at: iso_(r['Updated At']), by: r['Updated By'] || '',
   };
 }
 

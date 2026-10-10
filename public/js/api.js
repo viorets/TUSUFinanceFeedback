@@ -44,7 +44,10 @@ export function clearKept() { try { Object.keys(localStorage).filter((k) => k.st
 const MIME = {
   docx: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
   pdf: 'application/pdf',
+  xlsx: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+  xls: 'application/vnd.ms-excel',
 };
+const EXCEL = ['xlsx', 'xls'];
 const toBase64 = (blob) => new Promise((res, rej) => {
   const r = new FileReader();
   r.onload = () => res(String(r.result).split(',')[1]);
@@ -52,13 +55,16 @@ const toBase64 = (blob) => new Promise((res, rej) => {
   r.readAsDataURL(blob);
 });
 
-// Upload one file straight to Drive. only = 'docx' | 'pdf' | '' (either). Resolves { id, name }.
+// Upload one file straight to Drive. only = 'docx' | 'pdf' | 'excel' (.xlsx or .xls) | '' (.docx or PDF).
+// Resolves { id, name }.
 export async function upload(file, { ref, purpose, only = '' }) {
   const kind = (String(file.name).match(/\.([a-z0-9]+)$/i) || [])[1]?.toLowerCase();
-  if (!MIME[kind] || (only && kind !== only)) {
+  const fits = only === 'excel' ? EXCEL.includes(kind) : MIME[kind] && !EXCEL.includes(kind) && (!only || kind === only);
+  if (!fits) {
     throw new Error(only === 'docx' ? tr('Only a Word file (.docx) can go here', 'ช่องนี้รับเฉพาะไฟล์ Word (.docx)')
       : only === 'pdf' ? tr('Only a PDF file can go here', 'ช่องนี้รับเฉพาะไฟล์ PDF')
-        : tr('Only .docx or PDF files', 'รับเฉพาะไฟล์ .docx หรือ PDF'));
+        : only === 'excel' ? tr('Only an Excel file (.xlsx or .xls) can go here', 'ช่องนี้รับเฉพาะไฟล์ Excel (.xlsx หรือ .xls)')
+          : tr('Only .docx or PDF files', 'รับเฉพาะไฟล์ .docx หรือ PDF'));
   }
   if (file.size > MAX_MB * 1048576) throw new Error(tr('File is larger than {mb} MB', 'ไฟล์ใหญ่เกิน {mb} MB', { mb: MAX_MB }));
   const out = await call('upload', { ref, purpose, only, name: file.name, mime: MIME[kind], data: await toBase64(file) });

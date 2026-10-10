@@ -81,13 +81,10 @@ export const projNo = (ref) => Number(String(ref).match(/-P(\d+)$/)?.[1]) || '';
 // Feedback questions the Owner can mark Required / Not required (Control tab). d.required (from the org call)
 // holds the Owner's choices; a question not in it keeps its default. Keep in step with QUESTIONS in Code.gs.
 export const QUESTIONS = [
-  { id: 'pre.approvedBudget', tab: 'prepitch', req: true, label: () => tr('Approved budget', 'งบประมาณที่อนุมัติ') },
-  { id: 'pre.docx', tab: 'prepitch', req: true, label: () => tr('Approved project .docx? (feedback file when No)', 'อนุมัติไฟล์โครงการ .docx? (ไฟล์ข้อเสนอแนะเมื่อไม่อนุมัติ)') },
-  { id: 'pre.pdf', tab: 'prepitch', req: true, label: () => tr('Approved project PDF? (feedback file when No)', 'อนุมัติไฟล์โครงการ PDF? (ไฟล์ข้อเสนอแนะเมื่อไม่อนุมัติ)') },
-  { id: 'pre.note', tab: 'prepitch', req: false, label: () => tr('Feedback note', 'บันทึกข้อเสนอแนะ') },
   { id: 'pitch.summary', tab: 'pitching', req: false, label: () => tr('Summary', 'สรุป') },
   { id: 'pitch.finalBudget', tab: 'pitching', req: true, label: () => tr('Final approved budget', 'งบประมาณอนุมัติขั้นสุดท้าย') },
   { id: 'pitch.noted', tab: 'pitching', req: false, label: () => tr('Noted documents', 'เอกสารบันทึก') },
+  { id: 'pitch.excel', tab: 'pitching', req: false, label: () => tr('Correct Excel file', 'ไฟล์ Excel ฉบับแก้ไข') },
   { id: 'resub.decision', tab: 'resubmit', req: true, label: () => tr('Decision', 'ผลการพิจารณา') },
 ];
 export const isReq = (d, id) => (d?.required && id in d.required ? !!d.required[id] : !!QUESTIONS.find((q) => q.id === id)?.req);
@@ -124,11 +121,11 @@ export function slotText(s) {
 
 // What "unfinished" means on each tab: a required question unanswered. Pre-pitch: decided by the server (Code.gs finished_).
 export const UNFINISHED = {
-  prepitch: (d, p) => !d.pre[p.ref]?.finished,
+  prepitch: () => false, // Pre-pitch is for self-noting: not tracked (v2.2)
   pitching: (d, p) => {
     const x = d.pitch[p.ref] || {};
     return (isReq(d, 'pitch.summary') && !String(x.summary || '').trim()) || (isReq(d, 'pitch.finalBudget') && x.finalBudget == null)
-      || (isReq(d, 'pitch.noted') && !(x.noted || []).length);
+      || (isReq(d, 'pitch.noted') && !(x.noted || []).length) || (isReq(d, 'pitch.excel') && !x.excel);
   },
   resubmit: (d, p) => isReq(d, 'resub.decision') && !d.resub?.[p.ref]?.decision,
 };

@@ -24,6 +24,8 @@ export async function render(page, ctx, route) {
   const body = { ref: route.ref };
   // Tabs call ctx.persist() after a save so this device keeps the changed copy.
   ctx.persist = () => { remember('org', body, state.data); paintTabs(); };
+  // After the case is closed or opened (Re-submission tab): repaint the header and lock / unlock every tab.
+  ctx.redraw = () => draw(page, ctx, { ...route, tab: state.tab }, state.data);
   // This device's last copy first (instant), then the fresh one — unless edits are in progress.
   const kept = peek('org', body);
   if (kept) await draw(page, ctx, route, kept);
@@ -67,7 +69,7 @@ async function draw(page, ctx, route, data) {
 }
 
 export const statusPill = (closed) => (closed ? `<span class="pill closed">${icon('lock', 13)}${tr('Closed', 'ปิดแล้ว')}</span>`
-  : `<span class="pill green">${tr('Unclosed', 'ยังไม่ปิด')}</span>`);
+  : `<span class="pill green">${tr('Open', 'เปิด')}</span>`);
 
 // Tab strip; each tab shows how many projects are still unfinished there.
 function paintTabs() {
@@ -138,13 +140,14 @@ async function printOrg(o, ref, d) {
     [tr('Approved budget', 'งบประมาณที่อนุมัติ'), money(pre.approvedBudget)],
     [tr('Approved project .docx?', 'อนุมัติไฟล์โครงการ .docx?'), `${yn(pre.docxOk)}${pre.docxFile ? ` · ${files([pre.docxFile])}` : ''}`],
     [tr('Approved project PDF?', 'อนุมัติไฟล์โครงการ PDF?'), `${yn(pre.pdfOk)}${pre.pdfFile ? ` · ${files([pre.pdfFile])}` : ''}`],
-    [tr('Feedback note', 'บันทึกข้อเสนอแนะ'), text(pre.note)],
+    [tr('Note', 'บันทึก'), text(pre.note)],
   ])}
       <h3>${tr('Pitching', 'การนำเสนอ')}</h3>${!phaseOn(d, 'pitching') ? `<p>${esc(PENDING())}</p>` : table([
     [tr('Pitching time', 'เวลานำเสนอ'), esc(slotText(d.slots?.[p.ref]))],
     [tr('Summary', 'สรุป'), text(pit.summary)],
     [tr('Final approved budget', 'งบประมาณอนุมัติขั้นสุดท้าย'), money(pit.finalBudget)],
     [tr('Noted documents', 'เอกสารบันทึก'), files(pit.noted)],
+    [tr('Correct Excel file', 'ไฟล์ Excel ฉบับแก้ไข'), files([pit.excel])],
   ])}
       <h3>${tr('Re-submission', 'การส่งแก้ไข')}</h3>${!phaseOn(d, 'resubmit') ? `<p>${esc(PENDING())}</p>` : table([
     ...RESUB_FIELDS().map((k) => [k, esc(NO_DATA())]),
