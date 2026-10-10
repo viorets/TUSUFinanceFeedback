@@ -10,8 +10,14 @@
   --bg2: #ffffff; --bg3: #ecfcff;
   --ink: var(--teal); /* teal used as text */
   --c0: #2a78d6; --c1: #eb6834; --c2: #1baf7a; --c3: #eda100; --c4: #e87ba4; --c5: #008300; /* chart slots */
-  --field: #fff; --bar: rgba(222, 232, 235, .85); --bar2: rgba(222, 232, 235, .8);
-  --page: linear-gradient(180deg, #dfe9ec 0, #d6e2e6 420px, #cddbe0 100%); --pearl: #d6e2e6; /* sea-glass page (cool grey from the CI teal), white cards */
+  --field: #fff; --bar: rgba(255, 255, 255, .72); --bar2: rgba(255, 255, 255, .62);
+  /* Blue-and-white page: soft blue glows on white, fixed behind the content (like thammasat-public-policy-pm.web.app). */
+  --page: radial-gradient(45% 40% at 8% 8%, rgba(10, 132, 255, .30), transparent 70%),
+    radial-gradient(40% 35% at 92% 12%, rgba(90, 200, 250, .32), transparent 70%),
+    radial-gradient(45% 45% at 85% 92%, rgba(0, 94, 184, .22), transparent 70%),
+    radial-gradient(40% 40% at 12% 90%, rgba(120, 180, 255, .28), transparent 70%),
+    linear-gradient(180deg, #f8fbff, #eef5fd);
+  --pearl: #f2f7fd;
   --text: #1d1d1f; --text2: #6e6e73; --text3: #a1a1a6;
   --sep: rgba(0, 99, 113, .14); --fill: rgba(43, 171, 194, .10); --fill2: rgba(43, 171, 194, .18);
   --green: #1f9d55; --orange: #c46a00; --red: #d70015;
@@ -26,7 +32,11 @@
     --teal: #0b7f8f; --cyan: #4cc6d9; --mid: #5ccfe0; --pale: #2c4a50; --ice: #0d1214; --mist: #161c1f;
     --grad: linear-gradient(90deg, #4cc6d9, #a6e8f0); --ink: #7fd8e5; --c0: #2a78d6; --c1: #d65a26; --c2: #1baf7a; --c3: #b87c00; --c4: #d0628e; --c5: #2e9a2e;
     --bg2: #1b2124; --bg3: #1f2b2e; --field: #12171a; --bar: rgba(20, 25, 28, .82); --bar2: rgba(20, 25, 28, .76);
-    --page: linear-gradient(180deg, #111416 0, #0f1416 320px, #0d1214 100%); --pearl: #0d1214;
+    --page: radial-gradient(45% 40% at 8% 8%, rgba(10, 132, 255, .22), transparent 70%),
+      radial-gradient(40% 35% at 92% 12%, rgba(90, 200, 250, .14), transparent 70%),
+      radial-gradient(45% 45% at 85% 92%, rgba(0, 94, 184, .24), transparent 70%),
+      radial-gradient(40% 40% at 12% 90%, rgba(60, 120, 220, .16), transparent 70%),
+      linear-gradient(180deg, #0c1220, #0a0f1a); --pearl: #0a0f1a;
     --text: #eef2f3; --text2: #a3adb1; --text3: #6c777b;
     --sep: rgba(140, 200, 210, .14); --fill: rgba(76, 198, 217, .12); --fill2: rgba(76, 198, 217, .22);
     --green: #4fd18a; --orange: #ffad4d; --red: #ff6b6b;
@@ -38,7 +48,11 @@
   --teal: #0b7f8f; --cyan: #4cc6d9; --mid: #5ccfe0; --pale: #2c4a50; --ice: #0d1214; --mist: #161c1f;
   --grad: linear-gradient(90deg, #4cc6d9, #a6e8f0); --ink: #7fd8e5; --c0: #2a78d6; --c1: #d65a26; --c2: #1baf7a; --c3: #b87c00; --c4: #d0628e; --c5: #2e9a2e;
   --bg2: #1b2124; --bg3: #1f2b2e; --field: #12171a; --bar: rgba(20, 25, 28, .82); --bar2: rgba(20, 25, 28, .76);
-  --page: linear-gradient(180deg, #111416 0, #0f1416 320px, #0d1214 100%); --pearl: #0d1214;
+  --page: radial-gradient(45% 40% at 8% 8%, rgba(10, 132, 255, .22), transparent 70%),
+    radial-gradient(40% 35% at 92% 12%, rgba(90, 200, 250, .14), transparent 70%),
+    radial-gradient(45% 45% at 85% 92%, rgba(0, 94, 184, .24), transparent 70%),
+    radial-gradient(40% 40% at 12% 90%, rgba(60, 120, 220, .16), transparent 70%),
+    linear-gradient(180deg, #0c1220, #0a0f1a); --pearl: #0a0f1a;
   --text: #eef2f3; --text2: #a3adb1; --text3: #6c777b;
   --sep: rgba(140, 200, 210, .14); --fill: rgba(76, 198, 217, .12); --fill2: rgba(76, 198, 217, .22);
   --green: #4fd18a; --orange: #ffad4d; --red: #ff6b6b;
@@ -50,7 +64,7 @@
 html, body { margin: 0; }
 body {
   font-family: var(--font); font-size: 17px; line-height: 1.47; color: var(--text); letter-spacing: -0.022em;
-  background: var(--page) fixed; background-color: var(--pearl);
+  background: var(--page); background-color: var(--pearl); background-attachment: fixed;
   -webkit-font-smoothing: antialiased; min-height: 100dvh;
 }
 button, input, select, textarea { font: inherit; color: inherit; letter-spacing: inherit; }
