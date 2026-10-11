@@ -77,6 +77,7 @@ function shell(route) {
       ${tab('#/', 'grid', tr('Organizations', 'องค์กร'), route.view === 'list' || route.view === 'org')}
       ${ctx.adminTab ? tab('#/admin', 'shield', tr('Admin console', 'คอนโซลผู้ดูแล'), route.view === 'admin') : ''}
       ${ctx.control ? tab('#/control', 'sliders', tr('Control', 'ควบคุม'), route.view === 'control') : ''}
+      ${ctx.boot?.link ? `<a href="${esc(ctx.boot.link.url)}" target="_blank" rel="noopener">${icon('ext', 18)}<span>${esc(ctx.boot.link.label || tr('Schedule', 'ตารางเวลา'))}</span></a>` : ''}
       <span class="pill blue role">${esc(roleLabel)}</span>
     </div></nav></div>
     <main class="page wide" id="page">${skeleton()}</main>`;

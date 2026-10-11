@@ -412,22 +412,66 @@ button.btn-pill:disabled { opacity: .5; cursor: default; }
 .texts textarea { min-height: 44px; padding: 8px 12px; font-size: 15px; }
 .texts tr.changed td:first-child { box-shadow: inset 4px 0 0 var(--cyan); }
 
-/* ---------- print (Print button on an organization page) ---------- */
+/* ---------- print (v2.6): cover + one page per phase, styled like the site, light colours whatever the theme ---------- */
 .print-sheet { display: none; }
+.print-opts { display: grid; gap: 10px; margin: 6px 0 4px; text-align: left; }
+.print-opts .check { margin-left: 0; }
 @media print {
-  @page { size: A4; margin: 16mm 14mm; }
-  body.printing { background: #fff; color: #000; font-size: 11pt; }
+  @page { size: A4; margin: 14mm 13mm 16mm; @bottom-right { content: counter(page); font: 8pt sans-serif; color: #6e6e73; } }
+  body.printing { background: #fff !important; color: #1d1d1f; font-size: 10pt; }
   body.printing > :not(.print-sheet) { display: none !important; }
   body.printing .print-sheet { display: block; }
-  .print-sheet h1 { font-size: 20pt; margin: 0 0 2mm; color: #000; }
-  .print-sheet .p-sub { margin: 0 0 6mm; color: #444; }
-  .print-sheet h2 { font-size: 14pt; margin: 6mm 0 2mm; color: #000; }
-  .print-sheet h3 { font-size: 11.5pt; margin: 4mm 0 1.5mm; color: #006371; }
-  .print-sheet table { width: 100%; border-collapse: collapse; }
-  .print-sheet th, .print-sheet td { text-align: left; vertical-align: top; padding: 1.6mm 2mm; border: 0.3mm solid #bbb; }
-  .print-sheet th { width: 34%; font-weight: 600; background: #f2f6f7; }
-  .print-sheet .p-proj { break-before: page; }
-  .print-sheet tr { break-inside: avoid; }
+  .print-sheet { font-family: var(--font); color: #1d1d1f; -webkit-print-color-adjust: exact; print-color-adjust: exact; }
+  .print-sheet * { box-shadow: none !important; }
+  .print-sheet .p-orgdoc + .p-orgdoc { break-before: page; }
+  .print-sheet .p-phase { break-before: page; }
+
+  /* cover */
+  .print-sheet .p-top { display: flex; justify-content: space-between; align-items: center; padding: 4mm 5mm; border-radius: 3mm;
+    background: linear-gradient(90deg, #006371, #2babc2); color: #fff; font-size: 9pt; }
+  .print-sheet .p-top b { display: block; font-size: 12pt; }
+  .print-sheet .p-title { margin: 7mm 0 5mm; }
+  .print-sheet h1 { font-size: 22pt; line-height: 1.15; margin: 0 0 2.5mm; color: #006371; letter-spacing: -0.01em; }
+  .print-sheet .p-tags { display: flex; gap: 2mm; }
+  .print-sheet .p-sub { margin: 2mm 0 0; color: #6e6e73; }
+  .print-sheet .p-kpis { display: grid; grid-template-columns: repeat(3, 1fr); gap: 3mm; margin-bottom: 4mm; }
+  .print-sheet .p-kpis div { border: .3mm solid #b2dce1; border-radius: 3mm; padding: 3mm 4mm; background: #f8fdfd; }
+  .print-sheet .p-kpis span { display: block; font-size: 8.5pt; color: #6e6e73; }
+  .print-sheet .p-kpis b { display: block; font-size: 14pt; margin-top: 1mm; color: #006371; }
+
+  /* phase band */
+  .print-sheet .p-band { display: flex; align-items: center; gap: 3mm; padding: 3mm 4mm; margin-bottom: 4mm; border-radius: 3mm;
+    background: #e8f9ff; border-left: 2mm solid #006371; }
+  .print-sheet .p-band h2 { margin: 0; font-size: 15pt; color: #006371; }
+  .print-sheet .p-step { width: 7mm; height: 7mm; border-radius: 50%; display: grid; place-items: center; background: #006371; color: #fff; font-weight: 700; font-size: 10pt; }
+  .print-sheet .p-grow { flex: 1; }
+  .print-sheet .p-org-tag { font-size: 8.5pt; color: #6e6e73; }
+
+  /* cards, key/value, tables */
+  .print-sheet .p-card { border: .3mm solid #b2dce1; border-radius: 3mm; padding: 3mm 4mm; margin-bottom: 3.5mm; break-inside: avoid; }
+  .print-sheet .p-card h3 { margin: 0 0 2mm; font-size: 11pt; color: #006371; }
+  .print-sheet .p-kv { display: grid; grid-template-columns: 36% 1fr; gap: 1.5mm 4mm; margin: 0; }
+  .print-sheet .p-kv dt { color: #6e6e73; }
+  .print-sheet .p-kv dd { margin: 0; }
+  .print-sheet .p-table { width: 100%; border-collapse: collapse; margin-bottom: 4mm; font-size: 9.5pt; }
+  .print-sheet .p-table th { text-align: left; font-weight: 600; font-size: 8.5pt; color: #006371; background: #e8f9ff; padding: 2mm; }
+  .print-sheet .p-table td { padding: 2mm; border-bottom: .2mm solid #dbe9ec; vertical-align: top; }
+  .print-sheet .p-table tr { break-inside: avoid; }
+  .print-sheet .p-table .r { text-align: right; white-space: nowrap; }
+  .print-sheet .num { font-variant-numeric: tabular-nums; }
+  .print-sheet .p-table b { display: block; font-weight: 600; }
+  .print-sheet .p-table small, .print-sheet .p-table td small { display: block; color: #6e6e73; font-size: 8pt; }
+
+  /* pills, links, notes */
+  .print-sheet .p-pill { display: inline-block; padding: .6mm 2.4mm; border-radius: 10mm; font-size: 8.5pt; font-weight: 600; }
+  .print-sheet .p-pill.ok { background: #e3f5eb; color: #1f7a45; }
+  .print-sheet .p-pill.bad { background: #fde8ea; color: #b0001a; }
+  .print-sheet .p-pill.none { background: #eef1f2; color: #6e6e73; }
+  .print-sheet .p-pill.ref { background: #e8f9ff; color: #006371; font-family: var(--mono); }
+  .print-sheet .p-pill.closed { background: #2f3a3d; color: #fff; }
+  .print-sheet .p-link { color: #006371; text-decoration: underline; text-underline-offset: .6mm; word-break: break-word; }
+  .print-sheet .p-muted { color: #6e6e73; }
+  .print-sheet .p-case, .print-sheet .p-pending { margin: 0 0 3mm; }
 }
 
 /* ---------- v2.1 features in the v2.0 look: pitching phases ---------- */
@@ -466,3 +510,9 @@ button.btn-pill:disabled { opacity: .5; cursor: default; }
 .text-tabs a { padding: 6px 14px; font-size: 14px; }
 .text-tabs a .small { opacity: .7; margin-left: 2px; }
 .casebar .case-why { display: block; margin-top: 4px; }
+
+/* ---------- v2.6: campus print button, Control extra tab ---------- */
+.quotes tr.grp .campus-print { float: right; padding: 4px 12px; font-size: 13px; letter-spacing: 0; text-transform: none; }
+.link-row { gap: 14px; flex-wrap: wrap; align-items: flex-end; }
+.link-row label { display: grid; gap: 6px; font-size: 14px; color: var(--text2); min-width: 200px; }
+.link-row .grow2 { flex: 2; }

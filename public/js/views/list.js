@@ -6,6 +6,8 @@
 // Status: Open / Closed, shown here; Admins and Chiefs change it at the top of the Re-submission tab.
 // A closed case counts as Done whatever its projects' progress (v2.3).
 // Each campus is its own card; fixed column widths keep the cards lined up.
+// "Mine only" (v2.6) keeps the organizations I'm in charge of; it combines with the filter and is kept on this device.
+// "Print campus" (v2.6) prints every submitted organization of that campus in one go (print.js, one printData call).
 import { tr, getLang } from '../i18n.js';
 import { $, esc, icon, toast, num2 } from '../ui.js';
 import { cached, call, peek, remember, forget } from '../api.js';
@@ -13,11 +15,14 @@ import { CAMPUSES, CATEGORIES, ORGS } from '../masterdata.js';
 
 let query = '';
 let show = 'all';
+let mine = false;
+try { mine = localStorage.getItem('mineOnly') === '1'; } catch { /* private mode */ }
 
 export async function render(page, ctx) {
   page.innerHTML = `<h1 class="grad">${tr('Organizations', 'องค์กร')}</h1><p class="muted" id="sum">&nbsp;</p>
     <div class="toolbar"><input type="search" id="q" placeholder="${esc(tr('Search name, RefCode or person in charge', 'ค้นหาชื่อ รหัส หรือผู้รับผิดชอบ'))}" value="${esc(query)}">
-      <div class="seg filter" role="radiogroup" aria-label="${esc(tr('Show', 'แสดง'))}" id="show"></div></div>
+      <div class="seg filter" role="radiogroup" aria-label="${esc(tr('Show', 'แสดง'))}" id="show"></div>
+      <label class="check"><input type="checkbox" id="mine" ${mine ? 'checked' : ''}>${tr('Mine only', 'เฉพาะของฉัน')} <small class="muted" id="mineN"></small></label></div>
     <div id="rows" class="org-list"></div>`;
   const COLS = '<colgroup><col style="width:7%"><col style="width:22%"><col style="width:10%"><col style="width:7%"><col style="width:12%"><col style="width:11%"><col style="width:15%"><col style="width:8%"><col style="width:8%"></colgroup>';
   const HEAD = `<tr><th>${tr('Category', 'หมวด')}</th><th>${tr('Name', 'ชื่อ')}</th><th>${tr('RefCode', 'รหัส')}</th>
@@ -58,13 +63,16 @@ export async function render(page, ctx) {
     $('#show', page).innerHTML = Object.entries(SHOW).map(([k, f]) => `<label><input type="radio" name="show" value="${k}" ${show === k ? 'checked' : ''}><span>${esc(f.label())}
       <small>${rows.filter((o) => f.keep(o)).length}</small></span></label>`).join('');
     const q = query.trim().toLowerCase();
-    const hit = (o) => SHOW[show].keep(o) && (!q || `${o.en} ${o.code} ${stat(o.code).people.map((p) => `${p} ${ctx.nameOf(p)}`).join(' ')}`.toLowerCase().includes(q));
-    const narrowed = q || show !== 'all';
+    const isMine = (o) => stat(o.code).people.includes(ctx.me.email);
+    $('#mineN', page).textContent = rows.filter(isMine).length;
+    const hit = (o) => SHOW[show].keep(o) && (!mine || isMine(o)) && (!q || `${o.en} ${o.code} ${stat(o.code).people.map((p) => `${p} ${ctx.nameOf(p)}`).join(' ')}`.toLowerCase().includes(q));
+    const narrowed = q || show !== 'all' || mine;
     $('#rows', page).innerHTML = CAMPUSES.map((c) => {
       const list = rows.filter((o) => o.campus === c.code && hit(o)).sort((a, b) => a.code.localeCompare(b.code));
       const pend = list.filter((o) => left(o.code) > 0).length;
       const head = `<tr class="grp"><th colspan="9">${esc(c.en.toUpperCase())}<span class="muted"> · ${esc(c.th)} · ${list.length}</span>
-        ${pend ? `<span class="pill orange">${tr('{n} pending', 'รอ {n}', { n: pend })}</span>` : ''}</th></tr>`;
+        ${pend ? `<span class="pill orange">${tr('{n} pending', 'รอ {n}', { n: pend })}</span>` : ''}
+        ${rows.some((o) => o.campus === c.code && stat(o.code).count) ? `<button class="btn plain campus-print" data-print-campus="${esc(c.code)}">${icon('print', 15)}${tr('Print campus', 'พิมพ์ทั้งวิทยาเขต')}</button>` : ''}</th></tr>`;
       // Searching or filtering: campuses with no match are left out.
       if (!list.length) return narrowed ? '' : card(head, `<tr class="none"><td colspan="9" class="muted">${tr('No organizations', 'ไม่มีองค์กร')}</td></tr>`);
       return card(head, list.map((o) => {
@@ -94,13 +102,39 @@ export async function render(page, ctx) {
 
   $('#q', page).oninput = (e) => { query = e.target.value; paint(); };
   $('#show', page).onchange = (e) => { show = e.target.value; paint(); };
+  $('#mine', page).onchange = (e) => {
+    mine = e.target.checked;
+    try { localStorage.setItem('mineOnly', mine ? '1' : '0'); } catch { /* this visit only */ }
+    paint();
+  };
   const rowsEl = $('#rows', page);
   const open = (e) => {
     if (e.target.closest('select')) return;
     const r = e.target.closest('tr[data-ref]');
     if (r) ctx.go(`#/org/${encodeURIComponent(r.dataset.ref)}`);
   };
-  rowsEl.onclick = open;
+  rowsEl.onclick = (e) => {
+    const b = e.target.closest('[data-print-campus]');
+    if (b) { printCampus(b); return; }
+    open(e);
+  };
+  // Print campus: pick the phases, load every organization of the campus in one call, print them one after another.
+  const printCampus = async (b) => {
+    const c = CAMPUSES.find((x) => x.code === b.dataset.printCampus);
+    const { askPhases, printSheet, printNow } = await import('../print.js');
+    const pick = await askPhases(tr('Print {campus}', 'พิมพ์ {campus}', { campus: label(CAMPUSES, c.code) }));
+    if (!pick) return;
+    b.disabled = true;
+    toast(tr('Preparing the print…', 'กำลังเตรียมการพิมพ์…'));
+    try {
+      const out = await call('printData', { campus: c.code });
+      const html = out.orgs.filter((x) => x.data.org).map((x) => printSheet(x.ref, x.data, pick, ctx.nameOf)).join('');
+      if (html) printNow(html); else toast(tr('No submitted organizations in this campus', 'ไม่มีองค์กรที่ส่งข้อมูลในวิทยาเขตนี้'), 'bad');
+    } catch (err) {
+      toast(err.message, 'bad');
+    }
+    b.disabled = false;
+  };
   rowsEl.onkeydown = (e) => { if (e.key === 'Enter') open(e); };
 
   // Hovering a row for a moment starts loading that organization, so the click opens it faster.

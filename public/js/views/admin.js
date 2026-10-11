@@ -207,8 +207,13 @@ function drawLog(page, ctx, d) {
   paintLogRows(page, ctx, d);
 }
 
-const logSection = () => `<h2 class="section-title">${tr('Pre-pitch edit log', 'บันทึกการแก้ไขก่อนการนำเสนอ')} <span class="muted">${tr('latest 500', '500 รายการล่าสุด')}</span></h2>
-    <div class="toolbar"><input type="search" id="lq" placeholder="${esc(tr('Filter by RefCode, person or field', 'กรองตามรหัส ผู้แก้ไข หรือช่อง'))}"></div>
+// Edit logs (v2.6): Pre-pitch (every changed field) and Re-submission (decisions, case close / open).
+let logKind = 'pre';
+const logSection = () => `<h2 class="section-title">${tr('Edit log', 'บันทึกการแก้ไข')} <span class="muted">${tr('latest 500', '500 รายการล่าสุด')}</span></h2>
+    <div class="toolbar"><div class="seg" role="radiogroup" id="logKind" aria-label="${esc(tr('Log', 'บันทึก'))}">
+      <label><input type="radio" name="logKind" value="pre" ${logKind === 'pre' ? 'checked' : ''}><span>${tr('Pre-pitch', 'ก่อนการนำเสนอ')}</span></label>
+      <label><input type="radio" name="logKind" value="resub" ${logKind === 'resub' ? 'checked' : ''}><span>${tr('Re-submission', 'การส่งแก้ไข')}</span></label></div>
+      <input type="search" id="lq" placeholder="${esc(tr('Filter by RefCode, person or field', 'กรองตามรหัส ผู้แก้ไข หรือช่อง'))}"></div>
     <div class="group scroll-x"><table class="grid-table static"><thead><tr><th>${tr('When', 'เวลา')}</th><th>${tr('By', 'โดย')}</th><th>${tr('Project', 'โครงการ')}</th>
       <th>${tr('Field', 'ช่อง')}</th><th>${tr('Old', 'เดิม')}</th><th>${tr('New', 'ใหม่')}</th></tr></thead><tbody id="log"></tbody></table></div>`;
 
@@ -216,13 +221,16 @@ function paintLogRows(page, ctx, d) {
   const cell = (s) => { const f = /^\{"id"/.test(s) ? (() => { try { return JSON.parse(s).name; } catch { return s; } })() : s; return esc(f); };
   const paint = () => {
     const q = $('#lq', page).value.trim().toLowerCase();
-    const rows = d.log.filter((r) => !q || `${r.ref} ${r.by} ${ctx.nameOf(r.by)} ${r.field}`.toLowerCase().includes(q));
-    $('#log', page).innerHTML = rows.map((r) => `<tr><td class="small">${dateTimeFmt(r.at)}</td><td class="small">${esc(ctx.nameOf(r.by))}</td><td class="mono">${esc(r.ref)}</td>
+    const list = (logKind === 'resub' ? d.resubLog : d.log) || [];
+    const rows = list.filter((r) => !q || `${r.ref} ${r.org} ${r.by} ${ctx.nameOf(r.by)} ${r.field}`.toLowerCase().includes(q));
+    // A case row has no project: it shows the organization's RefCode.
+    $('#log', page).innerHTML = rows.map((r) => `<tr><td class="small">${dateTimeFmt(r.at)}</td><td class="small">${esc(ctx.nameOf(r.by))}</td><td class="mono">${esc(r.ref || r.org)}</td>
       <td>${esc(r.field)}</td><td class="small">${cell(r.old)}</td><td class="small">${cell(r.now)}</td></tr>`).join('')
       || `<tr><td colspan="6" class="muted">${tr('No edits yet', 'ยังไม่มีการแก้ไข')}</td></tr>`;
   };
   paint();
   $('#lq', page).oninput = paint;
+  $('#logKind', page).onchange = (e) => { logKind = e.target.value; paint(); };
 }
 
 /* ---------- export files ---------- */

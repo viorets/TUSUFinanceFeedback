@@ -7,7 +7,8 @@ import { tr, getLang } from '../i18n.js';
 import { $, esc, icon, phoneFmt, dateTimeFmt, toast, num2 } from '../ui.js';
 import { cached, peek, remember } from '../api.js';
 import { CAMPUSES, CATEGORIES, ORGS } from '../masterdata.js';
-import { UNFINISHED, projNo, slotText, phaseOn, PENDING } from '../project.js';
+import { UNFINISHED, phaseOn, PENDING } from '../project.js';
+import { askPhases, printSheet, printNow } from '../print.js';
 
 const TABS = {
   prepitch: { load: () => import('./prepitch.js'), label: () => tr('Pre-pitch', 'ก่อนการนำเสนอ') },
@@ -67,7 +68,8 @@ async function draw(page, ctx, route, data) {
     ${closed ? `<div class="notice closed">${icon('lock', 18)}<span>${tr('Closed by {who} on {when}. Its data cannot be changed.', 'ปิดโดย {who} เมื่อ {when} ไม่สามารถแก้ไขข้อมูลได้', { who: esc(ctx.nameOf(closed.by)), when: dateTimeFmt(closed.at) })}</span></div>` : ''}
     <nav class="seg-tabs" id="tabs"></nav>
     <div id="tab"></div>`;
-  $('#print', page).onclick = () => printOrg(o, route.ref, data);
+  // Print: pick the phases, then the cover + one page per phase (print.js).
+  $('#print', page).onclick = async () => { const show = await askPhases(tr('Print', 'พิมพ์')); if (show) printNow(printSheet(route.ref, data, show, ctx.nameOf)); };
   await switchTab(route.tab);
 }
 
@@ -111,63 +113,4 @@ export async function switchTab(tab) {
   state.mod = mod;
   // Closed: the tab sees canEdit = false, so every field, upload and Save is off.
   mod.render(el, state.data, state.data.closed ? Object.create(state.ctx, { canEdit: { value: false } }) : state.ctx);
-}
-
-/* ---------- print: master data + every project, without tracking or the person in charge ---------- */
-
-async function printOrg(o, ref, d) {
-  const { NO_DATA, RESUB_FIELDS } = await import('./resubmit.js');
-  const name = (list, code) => { const x = list.find((i) => i.code === code); return x ? (getLang() === 'th' ? x.th : x.en) : code || ''; };
-  const s = d.org;
-  const money = (v) => (v == null || v === '' ? '—' : `฿${num2(v)}`);
-  const yn = (v) => ({ Yes: tr('Yes', 'ใช่'), No: tr('No', 'ไม่') }[v] || '—');
-  const files = (list) => (list || []).filter(Boolean).map((x) => esc(x.name || x.id)).join('<br>') || '—';
-  const text = (v) => (String(v || '').trim() ? esc(v).replace(/\n/g, '<br>') : '—');
-  const day = (iso) => new Date(`${iso}T00:00`).toLocaleDateString(getLang() === 'th' ? 'th-TH' : 'en-GB', { day: 'numeric', month: 'short', year: 'numeric' });
-  const contact = (n, p, ph) => [n, p, phoneFmt(ph)].filter(Boolean).map(esc).join(' · ') || '—';
-  const table = (rows) => `<table>${rows.map(([k, v]) => `<tr><th>${esc(k)}</th><td>${v}</td></tr>`).join('')}</table>`;
-  const head = table([
-    [tr('RefCode', 'รหัส'), esc(ref)],
-    [tr('Name', 'ชื่อ'), esc(o?.en || ref)],
-    [tr('Campus', 'วิทยาเขต'), esc(name(CAMPUSES, o?.campus))],
-    [tr('Category', 'หมวด'), esc(name(CATEGORIES, o?.category))],
-    [tr('Submitter', 'ผู้ส่ง'), s ? contact(s.name, s.position, s.phone) : '—'],
-    [tr('Emergency contact', 'ผู้ติดต่อกรณีฉุกเฉิน'), s ? contact(s.emName, s.emPosition, s.emPhone) : '—'],
-    [tr('Latest submission', 'ส่งล่าสุด'), s ? `${dateTimeFmt(s.at)} · ${tr('version {n}', 'ครั้งที่ {n}', { n: s.version })}` : tr('Not submitted yet', 'ยังไม่ได้ส่ง')],
-  ]);
-  const projects = d.projects.map((p) => {
-    const pre = d.pre[p.ref] || {}; const pit = d.pitch[p.ref] || {}; const rs = d.resub?.[p.ref] || {};
-    return `<section class="p-proj"><h2>${esc(tr('Project {n}', 'โครงการที่ {n}', { n: projNo(p.ref) }))} · ${esc(p.name || '—')}</h2>
-      ${table([
-    [tr('Project number', 'รหัสโครงการ'), esc(p.ref)],
-    [tr('Project dates', 'วันที่จัดโครงการ'), (p.dates || []).map(day).join(', ') || '—'],
-    [tr('Total proposed project budget', 'งบประมาณโครงการที่เสนอ'), money(p.budget)],
-  ])}
-      <h3>${tr('Pre-pitch', 'ก่อนการนำเสนอ')}</h3>${!phaseOn(d, 'prepitch') ? `<p>${esc(PENDING())}</p>` : table([
-    [tr('Estimated Approved budget', 'งบประมาณที่คาดว่าจะได้รับอนุมัติ'), money(pre.approvedBudget)],
-    [tr('Approved project .docx?', 'อนุมัติไฟล์โครงการ .docx?'), `${yn(pre.docxOk)}${pre.docxFile ? ` · ${files([pre.docxFile])}` : ''}`],
-    [tr('Approved project PDF?', 'อนุมัติไฟล์โครงการ PDF?'), `${yn(pre.pdfOk)}${pre.pdfFile ? ` · ${files([pre.pdfFile])}` : ''}`],
-    [tr('Note', 'บันทึก'), text(pre.note)],
-  ])}
-      <h3>${tr('Pitching', 'การนำเสนอ')}</h3>${!phaseOn(d, 'pitching') ? `<p>${esc(PENDING())}</p>` : table([
-    [tr('Pitching time', 'เวลานำเสนอ'), esc(slotText(d.slots?.[p.ref]))],
-    [tr('Summary', 'สรุป'), text(pit.summary)],
-    [tr('Final approved budget', 'งบประมาณอนุมัติขั้นสุดท้าย'), money(pit.finalBudget)],
-    [tr('Noted documents', 'เอกสารบันทึก'), files(pit.noted)],
-    [tr('Correct Excel file', 'ไฟล์ Excel ฉบับแก้ไข'), files([pit.excel])],
-  ])}
-      <h3>${tr('Re-submission', 'การส่งแก้ไข')}</h3>${!phaseOn(d, 'resubmit') ? `<p>${esc(PENDING())}</p>` : table([
-    ...RESUB_FIELDS().map((k) => [k, esc(NO_DATA())]),
-    [tr('Decision', 'ผลการพิจารณา'), esc({ Approved: tr('Approved', 'อนุมัติ'), 'Not Approved': tr('Not Approved', 'ไม่อนุมัติ') }[rs.decision] || '—')],
-  ])}</section>`;
-  }).join('') || `<p>${tr('This organization has no submitted projects yet.', 'องค์กรนี้ยังไม่มีโครงการที่ส่งเข้ามา')}</p>`;
-  const sheet = document.createElement('div');
-  sheet.className = 'print-sheet';
-  sheet.innerHTML = `<h1>${esc(o?.en || ref)}</h1><p class="p-sub">${esc(ref)} · ${tr('Printed {when}', 'พิมพ์เมื่อ {when}', { when: dateTimeFmt(new Date().toISOString()) })}</p>
-    <h2>${tr('Master data', 'ข้อมูลหลัก')}</h2>${head}${projects}`;
-  document.body.append(sheet);
-  document.body.classList.add('printing');
-  const done = () => { sheet.remove(); document.body.classList.remove('printing'); window.removeEventListener('afterprint', done); };
-  window.addEventListener('afterprint', done);
-  window.print();
 }

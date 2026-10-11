@@ -1,4 +1,6 @@
 // Control (the script owner and Data team staff; Code.gs checks too):
+// 0. The extra top tab (v2.6): a label and an https:// link to another website, opened in a new browser tab.
+//    Empty link = no tab.
 // 1. Required / Not required for each feedback question (Settings tab, key "Required"). Required questions get a *
 //    on the form and decide when a project counts as finished.
 // 2. Every line of site text in English and Thai (Texts tab). The list is read from the site's own code: each
@@ -23,6 +25,7 @@ const SOURCES = [
   ['js/views/admin.js', () => tr('Admin console', 'คอนโซลผู้ดูแล')],
   ['js/views/control.js', () => tr('Control', 'ควบคุม')],
   ['js/ui.js', () => tr('Windows and messages', 'หน้าต่างและข้อความ')],
+  ['js/print.js', () => tr('Print', 'พิมพ์')],
   ['js/api.js', () => tr('Uploads', 'การอัปโหลด')],
 ];
 const TR = /\btr\(\s*'((?:[^'\\]|\\.)*)'\s*,\s*'((?:[^'\\]|\\.)*)'/g;
@@ -33,11 +36,13 @@ let st = null; // { lines: [{ key, th, pages }], edit: { key: { en, th } }, save
 let tab = ''; // site-text tab: a page name, '' = all (kept while moving around the site)
 
 const reqDirty = () => !!st && JSON.stringify(st.req) !== st.reqSaved;
+const linkDirty = () => !!st && JSON.stringify(st.link) !== st.linkSaved;
 const textsDirty = () => !!st && JSON.stringify(st.edit) !== st.saved;
-export const isDirty = () => reqDirty() || textsDirty();
+export const isDirty = () => reqDirty() || textsDirty() || linkDirty();
 // Unsaved-changes window: Save and leave saves both parts (throws if a line lost its {marks}).
 export const canSaveAll = () => isDirty();
 export async function saveAll() {
+  if (linkDirty()) await st.save.link();
   if (reqDirty()) await st.save.req();
   if (textsDirty()) await st.save.texts();
 }
@@ -45,6 +50,11 @@ export async function saveAll() {
 export async function render(page, ctx) {
   page.innerHTML = `<h1 class="grad">${tr('Control', 'ควบคุม')}</h1>
     <p class="muted">${tr('Owner and Data team staff. Changes show for everyone on their next page load.', 'สำหรับเจ้าของและเจ้าหน้าที่ทีมข้อมูล การเปลี่ยนแปลงจะแสดงให้ทุกคนเห็นเมื่อโหลดหน้าใหม่')}</p>
+    <h2 class="section-title">${tr('Extra tab', 'แท็บเพิ่มเติม')}</h2>
+    <div class="group"><div class="row link-row">
+      <label class="grow">${tr('Tab name', 'ชื่อแท็บ')}<input type="text" id="linkLabel" maxlength="40" placeholder="${esc(tr('Schedule', 'ตารางเวลา'))}"></label>
+      <label class="grow2">${tr('Website link', 'ลิงก์เว็บไซต์')}<input type="url" id="linkUrl" maxlength="500" placeholder="https://"></label></div>
+      <div class="table-actions"><span class="grow muted small">${tr('Shown in the top bar for everyone; opens in a new browser tab. Leave the link empty to hide the tab.', 'แสดงที่แถบด้านบนสำหรับทุกคน และเปิดในแท็บใหม่ของเบราว์เซอร์ เว้นลิงก์ว่างไว้เพื่อซ่อนแท็บ')}</span><button class="btn primary" id="saveLink">${tr('Save', 'บันทึก')}</button></div></div>
     <h2 class="section-title">${tr('Required questions', 'คำถามที่จำเป็น')}</h2>
     <div class="group scroll-x"><table class="grid-table static"><thead><tr><th>${tr('Tab', 'แท็บ')}</th><th>${tr('Question', 'คำถาม')}</th><th>${tr('Required', 'จำเป็น')}</th></tr></thead>
       <tbody id="req"></tbody></table>
@@ -61,6 +71,31 @@ export async function render(page, ctx) {
   const required = { ...(ctx.boot?.required || {}) };
   st = { lines: [], edit: {}, saved: '{}', req: Object.fromEntries(QUESTIONS.map((q) => [q.id, isReq({ required }, q.id)])), reqSaved: '', save: {} };
   st.reqSaved = JSON.stringify(st.req);
+  st.link = { label: ctx.boot?.link?.label || '', url: ctx.boot?.link?.url || '' };
+  st.linkSaved = JSON.stringify(st.link);
+
+  // Extra tab
+  $('#linkLabel', page).value = st.link.label;
+  $('#linkUrl', page).value = st.link.url;
+  $('#linkLabel', page).oninput = (e) => { st.link.label = e.target.value.trim(); };
+  $('#linkUrl', page).oninput = (e) => { st.link.url = e.target.value.trim(); };
+  st.save.link = async () => {
+    const out = await call('saveExternalLink', st.link);
+    st.link = { label: out.link?.label || '', url: out.link?.url || '' };
+    st.linkSaved = JSON.stringify(st.link);
+    if (ctx.boot) { ctx.boot.link = out.link; remember('boot', {}, ctx.boot); }
+    forget('boot');
+  };
+  $('#saveLink', page).onclick = async (e) => {
+    e.target.disabled = true;
+    try {
+      await st.save.link();
+      toast(tr('Extra tab saved — it shows on the next page load', 'บันทึกแท็บเพิ่มเติมแล้ว — จะแสดงเมื่อโหลดหน้าใหม่'));
+    } catch (err) {
+      await errorBox(err.message);
+    }
+    e.target.disabled = false;
+  };
 
   // Required questions
   const tabName = { prepitch: () => tr('Pre-pitch', 'ก่อนการนำเสนอ'), pitching: () => tr('Pitching', 'การนำเสนอ'), resubmit: () => tr('Re-submission', 'การส่งแก้ไข') };

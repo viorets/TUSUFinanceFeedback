@@ -12,7 +12,9 @@
  *        PrePitch_Log  append-only: one row per changed field on every Pre-pitch save (Admins only)
  *        Pitching      one row per project: summary, final approved budget, Noted documents
  *        Resubmission  one row per project: Approved / Not Approved for the resubmitted project
- *        Settings      Key | Value: site-wide values (Allocated Budget; Required = the required questions, JSON; Phases)
+ *        Resubmission_Log  append-only: every decision change and case close / open (Admins and Data team staff)
+ *        Settings      Key | Value: site-wide values (Allocated Budget; Required = the required questions, JSON; Phases;
+ *                      External Link = { label, url } of the extra top tab)
  *        OrgStatus     Org Ref | Status (Closed / Unclosed) | ...: a closed organization's data cannot be changed
  *        Texts         Key (built-in English line) | EN | TH | ...: the Owner's replacements for site text
  *   and uploaded files into DRIVE_FOLDER_ID / <Org Ref> / "<Project Ref> <purpose> — <file name>".
@@ -67,6 +69,7 @@ const TABS = {
   Pitching: ['Project Ref', 'Org Ref', 'Project Name', 'Summary', 'Final Approved Budget', 'Noted Documents',
     'Updated At', 'Updated By', 'Correct Excel File', 'Noted Documents JSON', 'Correct Excel File JSON'],
   Resubmission: ['Project Ref', 'Org Ref', 'Project Name', 'Decision', 'Updated At', 'Updated By'],
+  Resubmission_Log: ['Logged At', 'By', 'Project Ref', 'Org Ref', 'Field', 'Old', 'New'],
   Settings: ['Key', 'Value', 'Updated At', 'Updated By'],
   OrgStatus: ['Org Ref', 'Status', 'Updated At', 'Updated By'],
   Texts: ['Key', 'EN', 'TH', 'Updated At', 'Updated By'],
@@ -125,7 +128,7 @@ const ACTIONS = {
   admin: admin_, saveUsers: saveUsers_, setInCharge: setInCharge_, saveResubmit: saveResubmit_,
   dashboard: dashboard_, saveAllocated: saveAllocated_,
   setOrgStatus: setOrgStatus_, saveTexts: saveTexts_, saveRequired: saveRequired_, savePhases: savePhases_,
-  exportData: exportData_,
+  exportData: exportData_, printData: printData_, saveExternalLink: saveExternalLink_,
 };
 
 function doPost(e) {
@@ -172,14 +175,14 @@ function boot_(req, user) {
       if (fin != null) x.approved = (x.approved || 0) + fin;
     });
     users_().forEach(function (u) { u.orgs.forEach(function (ref) { org(ref).people.push(u.email); }); });
-    return { orgs: orgs, removed: removed_(s.log), closed: closed_(), texts: texts_(), required: required_(), phases: phases_() };
+    return { orgs: orgs, removed: removed_(s.log), closed: closed_(), texts: texts_(), required: required_(), phases: phases_(), link: externalLink_() };
   });
   // names: display name per email (set in the admin console); the site shows the email where none is set.
   const names = {};
   users_().forEach(function (u) { if (u.name) names[u.email] = u.name; });
   const out = { me: { email: user.email, role: user.role, owner: user.email === owner_(), control: canControl_(user), log: canLog_(user) },
     orgs: core.orgs, removed: core.removed, closed: core.closed, texts: core.texts, required: core.required, phases: core.phases,
-    names: names };
+    link: core.link, names: names };
   if (RANK[user.role] >= RANK.Chief) out.users = users_().filter(function (u) { return u.role; }).map(function (u) { return u.email; });
   return out;
 }
@@ -206,7 +209,7 @@ function org_(req, user) {
     const pitch = {};
     feedbackRows_('Pitching').forEach(function (r) { if (refs.indexOf(r['Project Ref']) >= 0) pitch[r['Project Ref']] = pitchOut_(r); });
     const resub = {};
-    rows_(tab_('Resubmission')).forEach(function (r) { if (refs.indexOf(r['Project Ref']) >= 0) resub[r['Project Ref']] = resubOut_(r); });
+    resubRows_().forEach(function (r) { if (refs.indexOf(r['Project Ref']) >= 0) resub[r['Project Ref']] = resubOut_(r); });
     const slots = {};
     schedule_().forEach(function (r) { if (refs.indexOf(r.ref) >= 0) slots[r.ref] = r; });
     return {
@@ -308,14 +311,21 @@ function saveResubmit_(req, user) {
   phaseOn_('resubmit');
   const decision = String(req.decision || '');
   if (decision && decision !== 'Approved' && decision !== 'Not Approved') throw new Error('Decision must be Approved or Not Approved');
-  const row = { 'Project Ref': p.ref, 'Org Ref': p.org, 'Project Name': p.name, 'Decision': decision, 'Updated At': new Date(), 'Updated By': user.email };
+  const now = new Date();
+  const row = { 'Project Ref': p.ref, 'Org Ref': p.org, 'Project Name': p.name, 'Decision': decision, 'Updated At': now, 'Updated By': user.email };
   locked_(function () {
     const sh = tab_('Resubmission');
-    upsert_(sh, rows_(sh), TABS.Resubmission, row);
+    const all = rows_(sh);
+    const old = String((all.filter(function (r) { return r['Project Ref'] === p.ref; })[0] || {})['Decision'] || '');
+    upsert_(sh, all, TABS.Resubmission, row);
+    if (old !== decision) resubLog_([[now, user.email, p.ref, p.org, 'Decision', old, decision]]);
     bump_();
   });
   return { resub: resubOut_(row) };
 }
+
+// Resubmission rows, read once per request.
+function resubRows_() { return memo_('resub', function () { return rows_(tab_('Resubmission')); }); }
 
 function resubOut_(r) { return { decision: r['Decision'] || '', at: iso_(r['Updated At']), by: r['Updated By'] || '' }; }
 
@@ -403,7 +413,9 @@ function setOrgStatus_(req, user) {
     const sh = tab_('OrgStatus');
     const refs = sh.getLastRow() > 1 ? sh.getRange(2, 1, sh.getLastRow() - 1, 1).getValues().map(function (x) { return x[0]; }) : [];
     const i = refs.indexOf(ref);
+    const was = i >= 0 && sh.getRange(i + 2, 2).getValue() === 'Closed' ? 'Closed' : 'Open';
     sh.getRange(i >= 0 ? i + 2 : sh.getLastRow() + 1, 1, 1, 4).setValues([[ref, closing ? 'Closed' : 'Unclosed', now, user.email]]);
+    if (was !== (closing ? 'Closed' : 'Open')) resubLog_([[now, user.email, '', ref, 'Case', was, closing ? 'Closed' : 'Open']]);
     bump_();
   });
   return { closed: closing ? { at: now.toISOString(), by: user.email } : null };
@@ -501,13 +513,46 @@ function savePhases_(req, user) {
 // Admin console. The edit log goes to Admins only. Each part is cached until the next write.
 function admin_(req, user) {
   // Data team staff see only the edit log.
-  if (user.role === DATA_TEAM) return { log: cached_('log', logTail_), logOnly: true };
+  if (user.role === DATA_TEAM) return { log: cached_('log', function () { return logTail_('PrePitch_Log'); }), resubLog: cached_('resubLog', function () { return logTail_('Resubmission_Log'); }), logOnly: true };
   need_(user, 'Chief');
   const out = cached_('admin', function () { return { removed: removed_(submissionLog_()), allocated: allocated_(), phases: phases_() }; });
   out.users = users_();
   out.owner = owner_();
-  if (canLog_(user)) out.log = cached_('log', logTail_);
+  if (canLog_(user)) {
+    out.log = cached_('log', function () { return logTail_('PrePitch_Log'); });
+    out.resubLog = cached_('resubLog', function () { return logTail_('Resubmission_Log'); });
+  }
   return out;
+}
+
+// Print campus (organization list): the org data of every organization of one campus that has a submission
+// (removed ones left out), in one call. Reads are shared across organizations (memo_).
+function printData_(req, user) {
+  need_(user, 'Staff');
+  const campus = String(req.campus || '');
+  if (!/^[A-Z]{2}$/.test(campus)) throw new Error('Bad campus code');
+  const s = subs_();
+  const gone = removed_(s.log);
+  const refs = s.orgs.map(function (o) { return o['Org Ref']; })
+    .filter(function (r) { return r.split('-')[0] === campus && gone.indexOf(r) < 0; }).sort();
+  return { orgs: refs.map(function (ref) { return { ref: ref, data: org_({ ref: ref }, user) }; }) };
+}
+
+// Extra top tab (Control): { label, url } linking to another website, or null (tab hidden).
+function externalLink_() {
+  const r = rows_(tab_('Settings')).filter(function (x) { return x['Key'] === 'External Link'; })[0];
+  const v = r ? parse_(String(r['Value'] || '')) : null;
+  return v && /^https:\/\/\S+$/.test(v.url || '') ? { label: String(v.label || ''), url: v.url } : null;
+}
+function saveExternalLink_(req, user) {
+  needControl_(user);
+  const url = String(req.url || '').trim();
+  const label = text_(req.label, 40).trim();
+  if (url && !/^https:\/\/\S+$/.test(url)) throw new Error('The link must start with https://');
+  if (url.length > 500) throw new Error('The link is too long');
+  if (/[<>]/.test(label)) throw new Error('The label cannot contain < or >');
+  setSetting_('External Link', url ? JSON.stringify({ label: label, url: url }) : '', user);
+  return { link: externalLink_() };
 }
 
 // Export (admin console): organizations always, plus the phases asked for. Removed organizations are left out.
@@ -573,13 +618,19 @@ function submissionLog_() {
   return rows_(SpreadsheetApp.openById(prop_('SUBMISSIONS_SHEET_ID')).getSheetByName('Submission_Log'));
 }
 
-// The latest 500 PrePitch_Log rows, newest first. Reads only those rows, however long the log grows.
-function logTail_() {
-  const sh = tab_('PrePitch_Log');
+// Re-submission log rows (call inside locked_).
+function resubLog_(rows) {
+  const lg = tab_('Resubmission_Log');
+  lg.getRange(lg.getLastRow() + 1, 1, rows.length, rows[0].length).setValues(rows);
+}
+
+// The latest 500 rows of a log tab (PrePitch_Log or Resubmission_Log), newest first. Reads only those rows.
+function logTail_(name) {
+  const sh = tab_(name || 'PrePitch_Log');
   const last = sh.getLastRow();
   if (last < 2) return [];
   const n = Math.min(500, last - 1);
-  return sh.getRange(last - n + 1, 1, n, TABS.PrePitch_Log.length).getValues().reverse()
+  return sh.getRange(last - n + 1, 1, n, TABS[name || 'PrePitch_Log'].length).getValues().reverse()
     .filter(function (r) { return r[0] !== ''; })
     .map(function (r) { return { at: iso_(r[0]), by: r[1], ref: r[2], org: r[3], field: r[4], old: String(r[5]), now: String(r[6]) }; });
 }
@@ -713,7 +764,8 @@ function subs_() {
 }
 
 // Our PrePitch / Pitching rows, plus pilot samples for demo projects that have no saved row yet.
-function feedbackRows_(name) {
+function feedbackRows_(name) { return memo_('fb:' + name, function () { return feedbackRows0_(name); }); }
+function feedbackRows0_(name) {
   const rows = rows_(tab_(name));
   if (!DEMO || !subs_().projects.some(function (p) { return p['Org Ref'] === DEMO.org['Org Ref'] && DEMO.projects.indexOf(p) >= 0; })) return rows;
   const have = rows.map(function (r) { return r['Project Ref']; });
