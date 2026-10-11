@@ -1033,6 +1033,27 @@ function verifyUser_(idToken) {
   return { email: email };
 }
 
+/* ---------- daily backup (v2.6.1) ---------- */
+// A dated copy of our Sheet in "TUSU Pitch 2 Backups" (the script owner's My Drive, private), keeping the latest 14.
+// Runs from a daily time-driven trigger added once in the editor (Triggers -> dailyBackup -> Day timer). Google emails
+// the owner if a run fails. Restoring is manual: open a backup and copy the rows back.
+const BACKUP_FOLDER = 'TUSU Pitch 2 Backups';
+const BACKUP_PREFIX = 'TUSU Pitch 2 Feedback - backup ';
+const BACKUP_KEEP = 14;
+function dailyBackup() {
+  const root = DriveApp.getRootFolder();
+  const found = root.getFoldersByName(BACKUP_FOLDER);
+  const folder = found.hasNext() ? found.next() : root.createFolder(BACKUP_FOLDER);
+  const name = BACKUP_PREFIX + Utilities.formatDate(new Date(), Session.getScriptTimeZone(), 'yyyy-MM-dd');
+  if (!folder.getFilesByName(name).hasNext()) DriveApp.getFileById(FEEDBACK_SHEET_ID).makeCopy(name, folder);
+  const all = [];
+  const it = folder.getFiles();
+  while (it.hasNext()) { const f = it.next(); if (f.getName().indexOf(BACKUP_PREFIX) === 0) all.push(f); }
+  all.sort(function (a, b) { return a.getName() < b.getName() ? 1 : -1; }); // newest first (dates sort as text)
+  all.slice(BACKUP_KEEP).forEach(function (f) { f.setTrashed(true); });
+  Logger.log('Backup ' + name + ' in ' + folder.getUrl() + ' (' + Math.min(all.length, BACKUP_KEEP) + ' kept)');
+}
+
 /** Run once from the editor after deploying v2.5: fills the hidden file twins of rows saved before them. */
 function backfillFileJson() {
   ['PrePitch', 'Pitching'].forEach(function (name) {
