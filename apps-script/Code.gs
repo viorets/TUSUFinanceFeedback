@@ -29,6 +29,10 @@
  * Cached answers are gzipped and split into pieces, so large ones (dashboard, boot) stay cached.
  * File cells have a hidden "<column> JSON" twin holding the same files as text, so reads skip the slow rich-text
  * read. A file cell edited by hand in the Sheet leaves its twin stale: change files through the site.
+ * Each Sheet access costs ~0.3-0.5 s whatever its size (load test, v2.6.2), so reads avoid the Sheets entirely when
+ * they can: each of our tabs is cached on its own (tabRows_) under a per-tab stamp that only writes to that tab
+ * change, and the Submissions rows are cached apart (our writes never change them). A save then rebuilds pages from
+ * cache plus one read of the tab it wrote.
  *
  * Setup: README.md. After changing this file: clasp push, then update the existing deployment (same /exec URL).
  */
@@ -156,7 +160,7 @@ function boot_(req, user) {
   const core = cached_('boot', function () {
     const s = subs_();
     const pitch = byKey_(feedbackRows_('Pitching'), 'Project Ref');
-    const resub = byKey_(rows_(tab_('Resubmission')), 'Project Ref');
+    const resub = byKey_(tabRows_('Resubmission'), 'Project Ref');
     const ph = phases_();
     const orgs = {};
     // pending = projects unfinished on Pitching or Re-submission; proposed / approved = budget totals (approved:
@@ -275,7 +279,7 @@ function savePrePitch_(req, user) {
       upsert_(sh, all, TABS.PrePitch, row);
       const lg = tab_('PrePitch_Log');
       lg.getRange(lg.getLastRow() + 1, 1, log.length, log[0].length).setValues(log);
-      bump_();
+      bump_('PrePitch', 'PrePitch_Log');
     }
     return { pre: preOut_(log.length ? row : old), changed: log.length };
   });
@@ -298,7 +302,7 @@ function savePitching_(req, user) {
   locked_(function () {
     const sh = tab_('Pitching');
     upsert_(sh, rows_(sh), TABS.Pitching, row);
-    bump_();
+    bump_('Pitching');
   });
   return { pitch: pitchOut_(row) };
 }
@@ -319,13 +323,15 @@ function saveResubmit_(req, user) {
     const old = String((all.filter(function (r) { return r['Project Ref'] === p.ref; })[0] || {})['Decision'] || '');
     upsert_(sh, all, TABS.Resubmission, row);
     if (old !== decision) resubLog_([[now, user.email, p.ref, p.org, 'Decision', old, decision]]);
-    bump_();
+    bump_('Resubmission', 'Resubmission_Log');
   });
   return { resub: resubOut_(row) };
 }
 
 // Resubmission rows, read once per request.
-function resubRows_() { return memo_('resub', function () { return rows_(tab_('Resubmission')); }); }
+function resubRows_() { return tabRows_('Resubmission'); }
+// Settings rows (allocated budget, required questions, phases, extra tab).
+function settings_() { return tabRows_('Settings'); }
 
 function resubOut_(r) { return { decision: r['Decision'] || '', at: iso_(r['Updated At']), by: r['Updated By'] || '' }; }
 
@@ -346,7 +352,7 @@ function dashboard_(req, user) {
     const approved = money('PrePitch', 'Approved Budget');
     const pitched = money('Pitching', 'Final Approved Budget');
     const decision = {};
-    rows_(tab_('Resubmission')).forEach(function (r) { if (r['Decision']) decision[r['Project Ref']] = r['Decision']; });
+    tabRows_('Resubmission').forEach(function (r) { if (r['Decision']) decision[r['Project Ref']] = r['Decision']; });
     const or = function (o, k) { return k in o ? o[k] : null; };
     return {
       allocated: allocated_(),
@@ -360,7 +366,7 @@ function dashboard_(req, user) {
 }
 
 function allocated_() {
-  const r = rows_(tab_('Settings')).filter(function (x) { return x['Key'] === 'Allocated Budget'; })[0];
+  const r = settings_().filter(function (x) { return x['Key'] === 'Allocated Budget'; })[0];
   return r ? num_(r['Value']) : null;
 }
 
@@ -379,7 +385,7 @@ function setSetting_(key, value, user) {
     const keys = sh.getLastRow() > 1 ? sh.getRange(2, 1, sh.getLastRow() - 1, 1).getValues().map(function (x) { return x[0]; }) : [];
     const i = keys.indexOf(key);
     sh.getRange(i >= 0 ? i + 2 : sh.getLastRow() + 1, 1, 1, 4).setValues([[key, value, new Date(), user.email]]);
-    bump_();
+    bump_('Settings');
   });
 }
 
@@ -389,7 +395,7 @@ function setSetting_(key, value, user) {
 function closed_() {
   return memo_('closed', function () {
     const out = {};
-    rows_(tab_('OrgStatus')).forEach(function (r) { if (r['Status'] === 'Closed') out[r['Org Ref']] = { at: iso_(r['Updated At']), by: r['Updated By'] || '' }; });
+    tabRows_('OrgStatus').forEach(function (r) { if (r['Status'] === 'Closed') out[r['Org Ref']] = { at: iso_(r['Updated At']), by: r['Updated By'] || '' }; });
     return out;
   });
 }
@@ -404,7 +410,7 @@ function setOrgStatus_(req, user) {
   const closing = req.closed === true;
   // A case closes only when every project in the latest submission is Approved on Re-submission.
   if (closing) {
-    const decided = byKey_(rows_(tab_('Resubmission')), 'Project Ref');
+    const decided = byKey_(tabRows_('Resubmission'), 'Project Ref');
     const left = subs_().projects.filter(function (p) { return p['Org Ref'] === ref && (decided[p['Project Ref']] || {})['Decision'] !== 'Approved'; });
     if (left.length) throw new Error('Every project must be Approved before the case can be closed (' + left.length + ' not Approved).');
   }
@@ -416,7 +422,7 @@ function setOrgStatus_(req, user) {
     const was = i >= 0 && sh.getRange(i + 2, 2).getValue() === 'Closed' ? 'Closed' : 'Open';
     sh.getRange(i >= 0 ? i + 2 : sh.getLastRow() + 1, 1, 1, 4).setValues([[ref, closing ? 'Closed' : 'Unclosed', now, user.email]]);
     if (was !== (closing ? 'Closed' : 'Open')) resubLog_([[now, user.email, '', ref, 'Case', was, closing ? 'Closed' : 'Open']]);
-    bump_();
+    bump_('OrgStatus', 'Resubmission_Log');
   });
   return { closed: closing ? { at: now.toISOString(), by: user.email } : null };
 }
@@ -431,7 +437,7 @@ function needControl_(user) { if (!canControl_(user)) throw new Error('Only the 
 // The Owner's site text: { 'Built-in English line': { en, th } } (empty = keep the built-in line).
 function texts_() {
   const out = {};
-  rows_(tab_('Texts')).forEach(function (r) {
+  tabRows_('Texts').forEach(function (r) {
     const en = String(r['EN'] || ''); const th = String(r['TH'] || '');
     if (en || th) out[String(r['Key'])] = { en: en, th: th };
   });
@@ -456,7 +462,7 @@ function saveTexts_(req, user) {
     const sh = tab_('Texts');
     if (sh.getLastRow() > 1) sh.getRange(2, 1, sh.getLastRow() - 1, TABS.Texts.length).clearContent();
     if (rows.length) sh.getRange(2, 1, rows.length, TABS.Texts.length).setValues(rows);
-    bump_();
+    bump_('Texts');
   });
   return { texts: texts_() };
 }
@@ -464,7 +470,7 @@ function saveTexts_(req, user) {
 // Required / Not required per question: the defaults overlaid with the Owner's choices (Settings, key "Required").
 function required_() {
   return memo_('required', function () {
-    const r = rows_(tab_('Settings')).filter(function (x) { return x['Key'] === 'Required'; })[0];
+    const r = settings_().filter(function (x) { return x['Key'] === 'Required'; })[0];
     const saved = r ? parse_(String(r['Value'])) || {} : {};
     const out = {};
     Object.keys(QUESTIONS).forEach(function (k) { out[k] = k in saved ? saved[k] === true : QUESTIONS[k]; });
@@ -489,7 +495,7 @@ function saveRequired_(req, user) {
 const PHASES = ['prepitch', 'pitching', 'resubmit'];
 function phases_() {
   return memo_('phases', function () {
-    const r = rows_(tab_('Settings')).filter(function (x) { return x['Key'] === 'Phases'; })[0];
+    const r = settings_().filter(function (x) { return x['Key'] === 'Phases'; })[0];
     const saved = r ? parse_(String(r['Value'])) || {} : {};
     const out = {};
     PHASES.forEach(function (k) { out[k] = saved[k] !== false; });
@@ -540,7 +546,7 @@ function printData_(req, user) {
 
 // Extra top tab (Control): { label, url } linking to another website, or null (tab hidden).
 function externalLink_() {
-  const r = rows_(tab_('Settings')).filter(function (x) { return x['Key'] === 'External Link'; })[0];
+  const r = settings_().filter(function (x) { return x['Key'] === 'External Link'; })[0];
   const v = r ? parse_(String(r['Value'] || '')) : null;
   return v && /^https:\/\/\S+$/.test(v.url || '') ? { label: String(v.label || ''), url: v.url } : null;
 }
@@ -603,7 +609,7 @@ function exportData_(req, user) {
     });
   }
   if (want.resubmit) {
-    const rs = byKey_(rows_(tab_('Resubmission')), 'Project Ref');
+    const rs = byKey_(tabRows_('Resubmission'), 'Project Ref');
     out.resubmit = projects.map(function (p) {
       const r = rs[p['Project Ref']] || {};
       return { 'Project Ref': p['Project Ref'], 'Decision': r['Decision'] || '', 'Updated At': iso_(r['Updated At']), 'Updated By': r['Updated By'] || '' };
@@ -663,7 +669,7 @@ function saveUsers_(req, user) {
     const sh = tab_('Users');
     if (sh.getLastRow() > 1) sh.getRange(2, 1, sh.getLastRow() - 1, TABS.Users.length).clearContent();
     if (rows.length) sh.getRange(2, 1, rows.length, TABS.Users.length).setValues(rows);
-    bump_();
+    bump_('Users');
   });
   return { users: users_() };
 }
@@ -688,7 +694,7 @@ function setInCharge_(req, user) {
       if (String(r[0]).trim().toLowerCase() === email) keep.push(ref);
       if (keep.join(', ') !== has.join(', ')) sh.getRange(i + 2, 3, 1, 3).setValues([[keep.join(', '), now, user.email]]);
     });
-    bump_();
+    bump_('Users');
     return { people: email ? [email] : [] };
   });
 }
@@ -749,12 +755,17 @@ function need_(user, role) { if (RANK[user.role] < RANK[role]) throw new Error('
 // The pitching site's Sheet, read once per request (+ the pilot demo while it has no RS-ACA-01 row).
 function subs_() {
   return memo_('subs', function () {
-    const ss = SpreadsheetApp.openById(prop_('SUBMISSIONS_SHEET_ID'));
-    const s = {
-      orgs: rows_(ss.getSheetByName('Organization')),
-      projects: rows_(ss.getSheetByName('Project')),
-      log: rows_(ss.getSheetByName('Submission_Log')),
-    };
+    const c = CacheService.getScriptCache();
+    let s = cacheGet_(c, 'subs');
+    if (s === undefined) {
+      const ss = SpreadsheetApp.openById(prop_('SUBMISSIONS_SHEET_ID'));
+      s = {
+        orgs: rows_(ss.getSheetByName('Organization')),
+        projects: rows_(ss.getSheetByName('Project')),
+        log: rows_(ss.getSheetByName('Submission_Log')),
+      };
+      cachePut_(c, 'subs', s);
+    }
     if (DEMO && !s.orgs.some(function (o) { return o['Org Ref'] === DEMO.org['Org Ref']; })) {
       s.orgs.push(DEMO.org);
       s.projects = s.projects.concat(DEMO.projects);
@@ -766,7 +777,7 @@ function subs_() {
 // Our PrePitch / Pitching rows, plus pilot samples for demo projects that have no saved row yet.
 function feedbackRows_(name) { return memo_('fb:' + name, function () { return feedbackRows0_(name); }); }
 function feedbackRows0_(name) {
-  const rows = rows_(tab_(name));
+  const rows = tabRows_(name);
   if (!DEMO || !subs_().projects.some(function (p) { return p['Org Ref'] === DEMO.org['Org Ref'] && DEMO.projects.indexOf(p) >= 0; })) return rows;
   const have = rows.map(function (r) { return r['Project Ref']; });
   return rows.concat(Object.keys(DEMO[name]).filter(function (ref) { return have.indexOf(ref) < 0; }).map(function (ref) { return demoRow_(name, ref); }));
@@ -808,16 +819,16 @@ function logText_(v) {
 // organizations in charge); the owner's role is always Admin whatever the tab says.
 function users_() {
   return memo_('users', function () {
-    return cached_('users', function () {
+    return (function () {
       const owner = owner_();
-      return rows_(tab_('Users')).map(function (r) {
+      return tabRows_('Users').map(function (r) {
         const email = String(r['Email']).trim().toLowerCase();
         return {
           email: email, role: email === owner ? 'Admin' : RANK[RENAMED[r['Role']] || r['Role']] ? RENAMED[r['Role']] || r['Role'] : '', name: String(r['Name'] || '').trim(),
           orgs: String(r['Org Refs'] || '').split(/[,\s]+/).filter(function (x) { return ORG_REF.test(x); }),
         };
       }).filter(function (u) { return u.email; });
-    });
+    })();
   });
 }
 
@@ -884,13 +895,33 @@ function cacheGet_(c, k) {
   for (let i = 0; i < n; i++) { if (got[keys[i]] == null) return undefined; z += got[keys[i]]; }
   try { return JSON.parse(Utilities.ungzip(Utilities.newBlob(Utilities.base64Decode(z), 'application/x-gzip')).getDataAsString()); } catch (e) { return undefined; }
 }
+// After a write: a new version stamp (every composed answer is rebuilt) and a new stamp for each tab written (only
+// those tabs are read again). No names = every tab.
 function bump_() {
   const v = Date.now().toString(36) + Math.random().toString(36).slice(2, 8); // unique even for two writes in one ms
-  CacheService.getScriptCache().put('ver', v, 21600);
+  const names = arguments.length ? Array.prototype.slice.call(arguments) : Object.keys(TABS);
+  const o = { ver: v };
+  names.forEach(function (n) { o['tv:' + n] = v; });
+  CacheService.getScriptCache().putAll(o, 21600);
   // Keep the open spreadsheets and the Submissions rows (not changed by our writes); drop everything read from our tabs.
   const keep = { ver: v };
   ['owner', 'ours', 'subs'].forEach(function (k) { if (MEMO_[k] !== undefined) keep[k] = MEMO_[k]; }); // closed / required re-read
   MEMO_ = keep;
+}
+
+// One of our tabs as rows_, cached under its own stamp (changed only by writes to that tab). Writes read the Sheet
+// directly, never this.
+function tabRows_(name) {
+  return memo_('rows:' + name, function () {
+    const c = CacheService.getScriptCache();
+    const stamps = memo_('tv', function () { return c.getAll(Object.keys(TABS).map(function (n) { return 'tv:' + n; })); });
+    const k = 'rows:' + name + '@' + (stamps['tv:' + name] || '0');
+    const hit = cacheGet_(c, k);
+    if (hit !== undefined) return hit;
+    const v = rows_(tab_(name));
+    cachePut_(c, k, v);
+    return v;
+  });
 }
 
 function locked_(fn) {
@@ -1069,7 +1100,7 @@ function backfillFileJson() {
       sh.getRange(2, t + 1, v.length, 1).setValues(v.map(function (r, n) { return [r[0] === '' ? '' : JSON.stringify(filesIn_(rich[n][0], raw[n][0]))]; }));
     });
   });
-  bump_();
+  bump_('PrePitch', 'Pitching');
   Logger.log('File twins filled.');
 }
 
