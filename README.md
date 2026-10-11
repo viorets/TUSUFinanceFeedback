@@ -20,9 +20,9 @@ English by default with a Thai toggle.
 | Tab (ours) | One row per | Columns |
 | --- | --- | --- |
 | `Users` | person | Email, Role (Admin / Chief / Staff), Org Refs (in charge of), Updated At, Updated By, Name |
-| `PrePitch` | project | Project Ref, Org Ref, Project Name, Approved Budget, Docx Approved, Docx Feedback File, PDF Approved, PDF Feedback File, Feedback Note, Updated At, Updated By |
+| `PrePitch` | project | Project Ref, Org Ref, Project Name, Approved Budget, Docx Approved, Docx Feedback File, PDF Approved, PDF Feedback File, Feedback Note, Updated At, Updated By, Docx Feedback File JSON, PDF Feedback File JSON (hidden) |
 | `PrePitch_Log` | changed field (append-only) | Logged At, By, Project Ref, Org Ref, Field, Old, New |
-| `Pitching` | project | Project Ref, Org Ref, Project Name, Summary, Final Approved Budget, Noted Documents, Updated At, Updated By |
+| `Pitching` | project | Project Ref, Org Ref, Project Name, Summary, Final Approved Budget, Noted Documents, Updated At, Updated By, Correct Excel File, Noted Documents JSON, Correct Excel File JSON (hidden) |
 | `Resubmission` | project | Project Ref, Org Ref, Project Name, Decision, Updated At, Updated By |
 | `Settings` | setting | Key, Value, Updated At, Updated By (`Allocated Budget`; `Required` = JSON of the Owner's required questions) |
 | `OrgStatus` | organization | Org Ref, Status (Closed / Unclosed), Updated At, Updated By (v2) |
@@ -32,10 +32,10 @@ Files are stored as JSON `{ id, name }`. Tabs are created by `setup()` / on firs
 (organization code + `-P<nn>`, position in the latest submission; see the open question in the plan).
 
 **Rules (server-side, `Code.gs`)**
-- Roles: Admin = everything (admin console + edit log). Chief = everything except the edit log, and cannot add, change or remove Admins. Staff = edit Pre-pitch and Pitching, upload; no admin console. Emails not in `Users` (or with an old Viewer role) get "No access". Old Reviewer rows count as Staff. The script owner is always Admin.
+- Roles: Admin = everything (admin console + edit log). Chief = everything except the edit log, and cannot add, change or remove Admins. Staff = edit Pre-pitch and Pitching, upload; no admin console. Data team staff (v2.5) = Staff + the Control tab + the edit log (admin console shows only the log). Emails not in `Users` (or with an old Viewer role) get "No access". Old Reviewer rows count as Staff. The script owner is always Admin.
 - Approval finished (`finished_`): every required Pre-pitch question answered. Defaults: Approved budget filled, and .docx and PDF each Yes, or No with a feedback file uploaded in that field. Unfinished projects are counted on the list and the detail page.
 - Closed cases (v2, moved in v2.2): Admins and Chiefs close or open an organization's case at the top of its Re-submission tab; the list shows Open / Closed. Every write to a closed organization (Pre-pitch, Pitching, Re-submission, uploads) is refused; the person in charge can still change.
-- Owner (v2) = the script owner. Only the Owner sees the Control tab: site text in English and Thai (`Texts`; the built-in English line is the key, `{n}` marks stand for values) and Required / Not required per feedback question (`QUESTIONS` in `Code.gs` and `public/js/project.js`).
+- Owner (v2) = the script owner. The Owner and Data team staff see the Control tab (site text split into tabs by page): site text in English and Thai (`Texts`; the built-in English line is the key, `{n}` marks stand for values) and Required / Not required per feedback question (`QUESTIONS` in `Code.gs` and `public/js/project.js`).
 - Pre-pitch save (v2): a window confirms the organization, project number, project name and approved budget (OK and Cancel both close it); a failed save shows an error window and keeps the edits. Leaving a page with unsaved edits opens a window naming each unsaved project (Save and leave / Leave without saving / Stay). Closing the tab or refreshing is not guarded.
 - Print (v2): the organization page's Print button prints the master data and every project on all three tabs, without progress tracking, "Saved by" lines or the person in charge.
 - Organizations whose last remove/restore in `Submission_Log` is a remove are hidden from the list and shown in the admin console.
@@ -54,7 +54,8 @@ overrides the earlier styles. Glass turns solid for reduced transparency; motion
 
 ## Versions
 
-- `v2.3.3` (tag, `main`): the account menu opens above the tabs bar (its name and email were hidden).
+- `v2.5` (tag, `main`): v2.4 + v2.5 in one release. Pre-pitch shows the organization's Budget proposal form (.xlsx) (Submissions `Organization` column "Budget Proposal Form (.xlsx)") and calls its money field "Estimated Approved budget" (column stays `Approved Budget`). Admin console: Export (Excel via SheetJS from cdnjs, or CSV; Include toggles per phase; downloads on Save) and a Save button for pitching phases. A case closes only when every project is Approved. Data team staff role. Unsaved-changes window offers Save and leave on every page with a Save. Dashboard in the Mosaic Blue palette (#00758F), Total row first in All project budgets. Speed: gzipped, chunked script cache; hidden JSON twins of file columns so reads skip rich text — after deploying, run `backfillFileJson()` once from the editor; edit file cells only through the site.
+- `v2.3.3` (tag): the account menu opens above the tabs bar (its name and email were hidden).
 - `v2.3.2` (tag): blue-and-white page background (soft blue glows on white; navy at night), whiter top bar.
 - `v2.3.1` (tag): the organization list page is wider (up to 1600 px).
 - `v2.3` (tag): a closed case counts as Done on the list (filter, counts, Unfinished column) and its tabs show no unfinished badges; each campus is its own card on the list, with space between.

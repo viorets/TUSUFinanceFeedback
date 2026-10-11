@@ -144,7 +144,7 @@ async function printOrg(o, ref, d) {
     [tr('Total proposed project budget', 'งบประมาณโครงการที่เสนอ'), money(p.budget)],
   ])}
       <h3>${tr('Pre-pitch', 'ก่อนการนำเสนอ')}</h3>${!phaseOn(d, 'prepitch') ? `<p>${esc(PENDING())}</p>` : table([
-    [tr('Approved budget', 'งบประมาณที่อนุมัติ'), money(pre.approvedBudget)],
+    [tr('Estimated Approved budget', 'งบประมาณที่คาดว่าจะได้รับอนุมัติ'), money(pre.approvedBudget)],
     [tr('Approved project .docx?', 'อนุมัติไฟล์โครงการ .docx?'), `${yn(pre.docxOk)}${pre.docxFile ? ` · ${files([pre.docxFile])}` : ''}`],
     [tr('Approved project PDF?', 'อนุมัติไฟล์โครงการ PDF?'), `${yn(pre.pdfOk)}${pre.pdfFile ? ` · ${files([pre.pdfFile])}` : ''}`],
     [tr('Note', 'บันทึก'), text(pre.note)],

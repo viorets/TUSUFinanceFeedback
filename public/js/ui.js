@@ -106,3 +106,6 @@ export function skeleton(rows = 5) {
   return `<div aria-busy="true" aria-label="Loading">${sk('45%', 30, 'margin:8px 0 10px')}${sk('30%', 14, 'margin-bottom:22px')}
     <div class="group">${Array.from({ length: rows }, (_, i) => `<div class="row"><span class="grow" style="display:grid;gap:7px">${sk(`${62 - (i % 3) * 12}%`, 13)}${sk(`${34 + (i % 2) * 10}%`, 10)}</span>${sk('70px', 14, 'flex:none')}</div>`).join('')}</div></div>`;
 }
+
+// Role names as shown on the site.
+export const ROLE_LABEL = (r) => ({ Admin: tr('Admin', 'ผู้ดูแล'), Chief: tr('Chief', 'หัวหน้า'), Staff: tr('Staff', 'เจ้าหน้าที่'), 'Data team staff': tr('Data team staff', 'เจ้าหน้าที่ทีมข้อมูล') }[r] || r);

@@ -12,7 +12,7 @@
  *        PrePitch_Log  append-only: one row per changed field on every Pre-pitch save (Admins only)
  *        Pitching      one row per project: summary, final approved budget, Noted documents
  *        Resubmission  one row per project: Approved / Not Approved for the resubmitted project
- *        Settings      Key | Value: site-wide values (Allocated Budget; Required = the Owner's required questions, JSON)
+ *        Settings      Key | Value: site-wide values (Allocated Budget; Required = the required questions, JSON; Phases)
  *        OrgStatus     Org Ref | Status (Closed / Unclosed) | ...: a closed organization's data cannot be changed
  *        Texts         Key (built-in English line) | EN | TH | ...: the Owner's replacements for site text
  *   and uploaded files into DRIVE_FOLDER_ID / <Org Ref> / "<Project Ref> <purpose> — <file name>".
@@ -24,6 +24,9 @@
  *
  * Speed: each Sheet is opened once per request (memo_), and answers are kept in the script cache (cached_) under a
  * version stamp that every write bumps, so a write is seen at once and outside changes within CACHE_SECONDS.
+ * Cached answers are gzipped and split into pieces, so large ones (dashboard, boot) stay cached.
+ * File cells have a hidden "<column> JSON" twin holding the same files as text, so reads skip the slow rich-text
+ * read. A file cell edited by hand in the Sheet leaves its twin stale: change files through the site.
  *
  * Setup: README.md. After changing this file: clasp push, then update the existing deployment (same /exec URL).
  */
@@ -45,9 +48,11 @@ const KINDS = {
   xls: 'application/vnd.ms-excel',
 };
 const EXCEL = ['xlsx', 'xls'];
-// Staff: edit organization data. Chief: + admin console (users, persons in charge, removed organizations), no edit log.
+// Staff: edit organization data. Data team staff: Staff + Control (with the Owner) + the edit log.
+// Chief: + admin console (users, persons in charge, removed organizations), no edit log.
 // Admin: everything. A role not listed here (e.g. the retired Viewer) gives no access.
-const RANK = { Staff: 1, Chief: 2, Admin: 3 };
+const DATA_TEAM = 'Data team staff';
+const RANK = { Staff: 1, 'Data team staff': 1, Chief: 2, Admin: 3 };
 const RENAMED = { Reviewer: 'Staff' }; // roles from earlier versions
 const ORG_REF = /^[A-Z]{2}-[A-Z]{3}-\d{2,}$/;
 const PROJECT_REF = /^[A-Z]{2}-[A-Z]{3}-\d{2,}-P\d{2}$/;
@@ -56,10 +61,11 @@ const TABS = {
   // Name was added later, so it sits last: older Users tabs get the header added by tab_().
   Users: ['Email', 'Role', 'Org Refs', 'Updated At', 'Updated By', 'Name'],
   PrePitch: ['Project Ref', 'Org Ref', 'Project Name', 'Approved Budget', 'Docx Approved', 'Docx Feedback File',
-    'PDF Approved', 'PDF Feedback File', 'Feedback Note', 'Updated At', 'Updated By'],
+    'PDF Approved', 'PDF Feedback File', 'Feedback Note', 'Updated At', 'Updated By',
+    'Docx Feedback File JSON', 'PDF Feedback File JSON'],
   PrePitch_Log: ['Logged At', 'By', 'Project Ref', 'Org Ref', 'Field', 'Old', 'New'],
   Pitching: ['Project Ref', 'Org Ref', 'Project Name', 'Summary', 'Final Approved Budget', 'Noted Documents',
-    'Updated At', 'Updated By', 'Correct Excel File'],
+    'Updated At', 'Updated By', 'Correct Excel File', 'Noted Documents JSON', 'Correct Excel File JSON'],
   Resubmission: ['Project Ref', 'Org Ref', 'Project Name', 'Decision', 'Updated At', 'Updated By'],
   Settings: ['Key', 'Value', 'Updated At', 'Updated By'],
   OrgStatus: ['Org Ref', 'Status', 'Updated At', 'Updated By'],
@@ -73,6 +79,7 @@ const QUESTIONS = {
 };
 // Cells that hold files: written as file names linked to Drive, read back from those links (filesIn_).
 const FILE_COLS = ['Docx Feedback File', 'PDF Feedback File', 'Noted Documents', 'Correct Excel File'];
+const TWIN = ' JSON'; // hidden text twin of a file column (see Speed above)
 // Pre-pitch fields that are logged.
 const PRE_FIELDS = ['Approved Budget', 'Docx Approved', 'Docx Feedback File', 'PDF Approved', 'PDF Feedback File', 'Feedback Note'];
 
@@ -118,6 +125,7 @@ const ACTIONS = {
   admin: admin_, saveUsers: saveUsers_, setInCharge: setInCharge_, saveResubmit: saveResubmit_,
   dashboard: dashboard_, saveAllocated: saveAllocated_,
   setOrgStatus: setOrgStatus_, saveTexts: saveTexts_, saveRequired: saveRequired_, savePhases: savePhases_,
+  exportData: exportData_,
 };
 
 function doPost(e) {
@@ -169,8 +177,9 @@ function boot_(req, user) {
   // names: display name per email (set in the admin console); the site shows the email where none is set.
   const names = {};
   users_().forEach(function (u) { if (u.name) names[u.email] = u.name; });
-  const out = { me: { email: user.email, role: user.role, owner: user.email === owner_() }, orgs: core.orgs, removed: core.removed,
-    closed: core.closed, texts: core.texts, required: core.required, phases: core.phases, names: names };
+  const out = { me: { email: user.email, role: user.role, owner: user.email === owner_(), control: canControl_(user), log: canLog_(user) },
+    orgs: core.orgs, removed: core.removed, closed: core.closed, texts: core.texts, required: core.required, phases: core.phases,
+    names: names };
   if (RANK[user.role] >= RANK.Chief) out.users = users_().filter(function (u) { return u.role; }).map(function (u) { return u.email; });
   return out;
 }
@@ -205,6 +214,7 @@ function org_(req, user) {
         at: iso_(o['Submitted At']), version: o['Version'], total: num_(o['Total Proposed Budget']),
         name: o['Submitted By'], position: o['Submitter Position'], phone: String(o['Telegram Phone'] || ''),
         emName: o['Emergency Contact'], emPosition: o['Emergency Position'], emPhone: String(o['Emergency Phone'] || ''),
+        budgetForm: String(o['Budget Proposal Form (.xlsx)'] || ''), // Drive link, one per organization
       } : null,
       projects: projects, pre: pre, pitch: pitch, resub: resub, slots: slots,
       closed: closed_()[ref] || null, required: required_(), phases: phases_(),
@@ -382,6 +392,12 @@ function setOrgStatus_(req, user) {
   const ref = String(req.ref || '');
   if (!ORG_REF.test(ref)) throw new Error('Bad organization code');
   const closing = req.closed === true;
+  // A case closes only when every project in the latest submission is Approved on Re-submission.
+  if (closing) {
+    const decided = byKey_(rows_(tab_('Resubmission')), 'Project Ref');
+    const left = subs_().projects.filter(function (p) { return p['Org Ref'] === ref && (decided[p['Project Ref']] || {})['Decision'] !== 'Approved'; });
+    if (left.length) throw new Error('Every project must be Approved before the case can be closed (' + left.length + ' not Approved).');
+  }
   const now = new Date();
   locked_(function () {
     const sh = tab_('OrgStatus');
@@ -395,7 +411,10 @@ function setOrgStatus_(req, user) {
 
 /* ---------- Owner: site text and required questions ---------- */
 
-function needOwner_(user) { if (user.email !== owner_()) throw new Error('Only the Owner can do this'); }
+// Control tab: the Owner and Data team staff. Edit log: Admins and Data team staff.
+function canControl_(user) { return user.email === owner_() || user.role === DATA_TEAM; }
+function canLog_(user) { return user.role === 'Admin' || user.role === DATA_TEAM; }
+function needControl_(user) { if (!canControl_(user)) throw new Error('Only the Owner and Data team staff can do this'); }
 
 // The Owner's site text: { 'Built-in English line': { en, th } } (empty = keep the built-in line).
 function texts_() {
@@ -409,7 +428,7 @@ function texts_() {
 
 // Replaces the whole Texts tab with the lines sent. No < or > (the site puts these lines into its pages).
 function saveTexts_(req, user) {
-  needOwner_(user);
+  needControl_(user);
   const list = Array.isArray(req.texts) ? req.texts : [];
   if (list.length > 3000) throw new Error('Too many lines');
   const now = new Date();
@@ -443,7 +462,7 @@ function required_() {
 function isReq_(id) { return required_()[id]; }
 
 function saveRequired_(req, user) {
-  needOwner_(user);
+  needControl_(user);
   const v = req.required || {};
   const out = {};
   Object.keys(QUESTIONS).forEach(function (k) { out[k] = k in v ? v[k] === true : QUESTIONS[k]; });
@@ -481,11 +500,70 @@ function savePhases_(req, user) {
 
 // Admin console. The edit log goes to Admins only. Each part is cached until the next write.
 function admin_(req, user) {
+  // Data team staff see only the edit log.
+  if (user.role === DATA_TEAM) return { log: cached_('log', logTail_), logOnly: true };
   need_(user, 'Chief');
   const out = cached_('admin', function () { return { removed: removed_(submissionLog_()), allocated: allocated_(), phases: phases_() }; });
   out.users = users_();
   out.owner = owner_();
-  if (user.role === 'Admin') out.log = cached_('log', logTail_);
+  if (canLog_(user)) out.log = cached_('log', logTail_);
+  return out;
+}
+
+// Export (admin console): organizations always, plus the phases asked for. Removed organizations are left out.
+// The page turns the rows into an Excel or CSV file. Money as numbers, files as Drive links.
+function exportData_(req, user) {
+  need_(user, 'Chief');
+  const want = req.phases || {};
+  const s = subs_();
+  const gone = removed_(s.log);
+  const keep = function (ref) { return gone.indexOf(ref) < 0; };
+  const shut = closed_();
+  const links = function (list) { return files_(list).map(function (f) { return driveUrl_(f.id); }).join('\n'); };
+  const orgs = s.orgs.filter(function (o) { return keep(o['Org Ref']); }).map(function (o) {
+    const ref = o['Org Ref'];
+    return {
+      'Org Ref': ref, 'Organization': o['Organization'] || '', 'Org Type': o['Org Type'] || '', 'Campus': o['Campus'] || o['Campus Code'] || '',
+      'Category': o['Category'] || o['Category Code'] || '', 'Version': o['Version'], 'Submitted At': iso_(o['Submitted At']),
+      'Submitted By': o['Submitted By'] || '', 'Submitter Email': o['Submitter Email'] || '', 'Submitter Position': o['Submitter Position'] || '',
+      'Telegram Phone': String(o['Telegram Phone'] || ''), 'Emergency Contact': o['Emergency Contact'] || '',
+      'Emergency Position': o['Emergency Position'] || '', 'Emergency Phone': String(o['Emergency Phone'] || ''),
+      'Total Proposed Budget': num_(o['Total Proposed Budget']), 'Project Count': Number(o['Project Count']) || 0,
+      'Budget Proposal Form (.xlsx)': String(o['Budget Proposal Form (.xlsx)'] || ''),
+      'Persons in charge': users_().filter(function (u) { return u.orgs.indexOf(ref) >= 0; }).map(function (u) { return u.email; }).join(', '),
+      'Case': shut[ref] ? 'Closed' : 'Open',
+    };
+  });
+  const projects = s.projects.filter(function (p) { return keep(p['Org Ref']); }).map(function (p) {
+    return { 'Project Ref': p['Project Ref'], 'Org Ref': p['Org Ref'], 'Project Name': p['Project Name'] || '', 'Project No': Number(p['Project No']) || '',
+      'Budget': num_(p['Budget']), 'Project Dates': String(p['Project Dates'] || ''), 'Proposal .docx': p['Proposal .docx'] || '', 'Proposal .pdf': p['Proposal .pdf'] || '' };
+  });
+  const out = { orgs: orgs, projects: projects };
+  if (want.prepitch) {
+    const pre = byKey_(feedbackRows_('PrePitch'), 'Project Ref');
+    out.prepitch = projects.map(function (p) {
+      const r = pre[p['Project Ref']] || {};
+      return { 'Project Ref': p['Project Ref'], 'Estimated Approved Budget': num_(r['Approved Budget']), 'Docx Approved': r['Docx Approved'] || '',
+        'Docx Feedback File': links(r['Docx Feedback File']), 'PDF Approved': r['PDF Approved'] || '', 'PDF Feedback File': links(r['PDF Feedback File']),
+        'Note': String(r['Feedback Note'] || ''), 'Updated At': iso_(r['Updated At']), 'Updated By': r['Updated By'] || '' };
+    });
+  }
+  if (want.pitching) {
+    const pit = byKey_(feedbackRows_('Pitching'), 'Project Ref');
+    out.pitching = projects.map(function (p) {
+      const r = pit[p['Project Ref']] || {};
+      return { 'Project Ref': p['Project Ref'], 'Summary': String(r['Summary'] || ''), 'Final Approved Budget': num_(r['Final Approved Budget']),
+        'Noted Documents': links(r['Noted Documents']), 'Correct Excel File': links(r['Correct Excel File']),
+        'Updated At': iso_(r['Updated At']), 'Updated By': r['Updated By'] || '' };
+    });
+  }
+  if (want.resubmit) {
+    const rs = byKey_(rows_(tab_('Resubmission')), 'Project Ref');
+    out.resubmit = projects.map(function (p) {
+      const r = rs[p['Project Ref']] || {};
+      return { 'Project Ref': p['Project Ref'], 'Decision': r['Decision'] || '', 'Updated At': iso_(r['Updated At']), 'Updated By': r['Updated By'] || '' };
+    });
+  }
   return out;
 }
 
@@ -721,14 +799,38 @@ let MEMO_ = {};
 function memo_(k, fn) { return Object.prototype.hasOwnProperty.call(MEMO_, k) ? MEMO_[k] : (MEMO_[k] = fn()); }
 
 // Answers kept CACHE_SECONDS under the current version stamp; bump_() after a write makes every older answer unused.
+// Each answer is gzipped, base64-encoded and split into pieces under the 100 KB per-value limit: key = piece count,
+// key#0.. = the pieces. A missing piece counts as a miss.
+const PIECE = 90000;
 function cached_(key, fn) {
   const c = CacheService.getScriptCache();
   const k = key + '@' + memo_('ver', function () { return c.get('ver') || '0'; });
-  const hit = c.get(k);
-  if (hit) return JSON.parse(hit);
+  const hit = cacheGet_(c, k);
+  if (hit !== undefined) return hit;
   const v = fn();
-  try { c.put(k, JSON.stringify(v), CACHE_SECONDS); } catch (e) { /* over 100 KB: not cached */ }
+  cachePut_(c, k, v);
   return v;
+}
+function cachePut_(c, k, v) {
+  try {
+    const z = Utilities.base64Encode(Utilities.gzip(Utilities.newBlob(JSON.stringify(v), 'application/json')).getBytes());
+    const n = Math.ceil(z.length / PIECE);
+    if (n > 50) return; // too big to be worth it
+    const o = {};
+    o[k] = String(n);
+    for (let i = 0; i < n; i++) o[k + '#' + i] = z.slice(i * PIECE, (i + 1) * PIECE);
+    c.putAll(o, CACHE_SECONDS);
+  } catch (e) { /* not cached */ }
+}
+function cacheGet_(c, k) {
+  const n = Number(c.get(k));
+  if (!(n > 0)) return undefined;
+  const keys = [];
+  for (let i = 0; i < n; i++) keys.push(k + '#' + i);
+  const got = c.getAll(keys);
+  let z = '';
+  for (let i = 0; i < n; i++) { if (got[keys[i]] == null) return undefined; z += got[keys[i]]; }
+  try { return JSON.parse(Utilities.ungzip(Utilities.newBlob(Utilities.base64Decode(z), 'application/x-gzip')).getDataAsString()); } catch (e) { return undefined; }
 }
 function bump_() {
   const v = Date.now().toString(36) + Math.random().toString(36).slice(2, 8); // unique even for two writes in one ms
@@ -758,7 +860,9 @@ function tab_(name) {
   } else if (sh.getLastColumn() < TABS[name].length) {
     // A column added in a later version: complete the header row (existing rows keep their cells).
     sh.getRange(1, 1, 1, TABS[name].length).setValues([TABS[name]]).setFontWeight('bold');
-  }
+  } else return sh;
+  // File twins are for the site only.
+  TABS[name].forEach(function (h, i) { if (h.slice(-TWIN.length) === TWIN) sh.hideColumns(i + 1); });
   return sh;
 }
 
@@ -768,11 +872,20 @@ function rows_(sh) {
   const v = sh.getDataRange().getValues();
   const head = v.shift();
   const fileCols = head.map(function (h, i) { return FILE_COLS.indexOf(h) >= 0 ? i : -1; }).filter(function (i) { return i >= 0; });
-  const rich = {};
-  fileCols.forEach(function (i) { rich[i] = sh.getRange(2, i + 1, v.length, 1).getRichTextValues(); });
+  // A file column is read from its text twin; the slow rich-text read runs only when some filled cell has no twin yet
+  // (rows saved before v2.5 and not backfilled).
+  const twin = {}; const rich = {};
+  fileCols.forEach(function (i) {
+    const t = head.indexOf(head[i] + TWIN);
+    if (t >= 0) twin[i] = t;
+    if (t < 0 || v.some(function (r) { return r[i] !== '' && r[t] === ''; })) rich[i] = sh.getRange(2, i + 1, v.length, 1).getRichTextValues();
+  });
   return v.map(function (r, n) {
     const o = {};
-    head.forEach(function (h, i) { o[h] = i in rich ? filesIn_(rich[i][n][0], r[i]) : r[i]; });
+    head.forEach(function (h, i) {
+      if (i in twin && r[twin[i]] !== '') o[h] = files_(parse_(String(r[twin[i]])));
+      else o[h] = i in rich ? filesIn_(rich[i][n][0], r[i]) : r[i];
+    });
     return o;
   }).filter(function (o) { return o[head[0]] !== ''; });
 }
@@ -809,7 +922,9 @@ function byKey_(rows, key) {
 function upsert_(sh, all, cols, row) {
   const i = all.map(function (r) { return r['Project Ref']; }).indexOf(row['Project Ref']);
   const at = i >= 0 ? i + 2 : sh.getLastRow() + 1;
-  sh.getRange(at, 1, 1, cols.length).setValues([cols.map(function (c) { return Array.isArray(row[c]) ? '' : cell_(row[c]); })]);
+  // A file twin holds its column's files as JSON text ('[]' = none).
+  const twinOf = function (c) { const base = c.slice(0, -TWIN.length); return c.slice(-TWIN.length) === TWIN && Array.isArray(row[base]) ? JSON.stringify(row[base]) : null; };
+  sh.getRange(at, 1, 1, cols.length).setValues([cols.map(function (c) { const t = twinOf(c); return t != null ? t : Array.isArray(row[c]) ? '' : cell_(row[c]); })]);
   cols.forEach(function (c, i) { if (Array.isArray(row[c]) && row[c].length) sh.getRange(at, i + 1).setRichTextValue(filesOut_(row[c])); });
 }
 
@@ -864,6 +979,25 @@ function verifyUser_(idToken) {
   const email = u.email.toLowerCase();
   c.put(key, email, 600);
   return { email: email };
+}
+
+/** Run once from the editor after deploying v2.5: fills the hidden file twins of rows saved before them. */
+function backfillFileJson() {
+  ['PrePitch', 'Pitching'].forEach(function (name) {
+    const sh = tab_(name);
+    if (sh.getLastRow() < 2) return;
+    const head = sh.getRange(1, 1, 1, sh.getLastColumn()).getValues()[0];
+    const v = sh.getRange(2, 1, sh.getLastRow() - 1, 1).getValues();
+    FILE_COLS.forEach(function (c) {
+      const i = head.indexOf(c); const t = head.indexOf(c + TWIN);
+      if (i < 0 || t < 0) return;
+      const rich = sh.getRange(2, i + 1, v.length, 1).getRichTextValues();
+      const raw = sh.getRange(2, i + 1, v.length, 1).getValues();
+      sh.getRange(2, t + 1, v.length, 1).setValues(v.map(function (r, n) { return [r[0] === '' ? '' : JSON.stringify(filesIn_(rich[n][0], raw[n][0]))]; }));
+    });
+  });
+  bump_();
+  Logger.log('File twins filled.');
 }
 
 /** Run once from the editor: authorizes the scopes and creates our tabs. */

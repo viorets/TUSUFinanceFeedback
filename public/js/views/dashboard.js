@@ -8,8 +8,8 @@ import { $, esc, icon, toast } from '../ui.js';
 import { cached, peek } from '../api.js';
 import { CAMPUSES, CATEGORIES, ORGS } from '../masterdata.js';
 
-// Categorical slots: CSS tokens --c0..--c5 (app.css), one validated set per theme (dataviz palette check on the
-// light and the dark surface). Colour follows the entity: campus / category N always gets slot N, whatever the data.
+// Categorical slots: CSS tokens --c0..--c5, set for the dashboard by .dash-ci in app.css from the Mosaic Blue
+// palette (#00758F, the dashboard CI). Colour follows the entity: campus / category N always gets slot N.
 const SLOTS = 6;
 
 const baht = (n) => `฿${Math.round(n || 0).toLocaleString('en-US')}`;
@@ -23,7 +23,7 @@ const finalOf = (p) => (p.decision === 'Approved' ? p.pitched : null);
 const view = { q: '', group: 'none', sort: 'budget' };
 
 export async function render(page) {
-  page.innerHTML = `<h1 class="grad">${tr('Dashboard', 'แดชบอร์ด')}</h1><div id="dash"></div>`;
+  page.innerHTML = `<div class="dash-ci"><h1 class="grad">${tr('Dashboard', 'แดชบอร์ด')}</h1><div id="dash"></div></div>`;
   const kept = peek('dashboard');
   if (kept) draw($('#dash', page), kept);
   try {
@@ -53,7 +53,7 @@ function draw(el, d) {
 
   el.innerHTML = `<div class="kpis">
       ${tile(tr('Total proposed budget', 'งบประมาณที่เสนอทั้งหมด'), total, d.allocated, tr('{n} projects', '{n} โครงการ', { n: ps.length }))}
-      ${tile(tr('Approved budget', 'งบประมาณที่อนุมัติ'), sumOf(ps, 'approved'), d.allocated, `${tr('Pre-pitch', 'ก่อนการนำเสนอ')} · ${of('approved')}`)}
+      ${tile(tr('Estimated Approved budget', 'งบประมาณที่คาดว่าจะได้รับอนุมัติ'), sumOf(ps, 'approved'), d.allocated, `${tr('Pre-pitch', 'ก่อนการนำเสนอ')} · ${of('approved')}`)}
       ${tile(tr('Pitched budget', 'งบประมาณหลังการนำเสนอ'), sumOf(ps, 'pitched'), d.allocated, `${tr('Final approved budget at pitching', 'งบประมาณอนุมัติขั้นสุดท้ายจากการนำเสนอ')} · ${of('pitched')}`)}
       ${tile(tr('Final budget', 'งบประมาณสุดท้าย'), sumOf(ps, 'final'), d.allocated, `${tr('Re-submission approved', 'อนุมัติหลังส่งแก้ไข')} · ${of('final')}`)}
       <div class="kpi"><span>${tr('Total projects', 'จำนวนโครงการทั้งหมด')}</span><b class="hero">${ps.length.toLocaleString('en-US')}</b>
@@ -93,7 +93,7 @@ function draw(el, d) {
 // ---------- every-project table ----------
 const orgName = (ref) => ORGS.find((o) => o.code === ref)?.en || ref;
 const COLS = [
-  ['budget', () => tr('Proposed', 'เสนอ')], ['approved', () => tr('Approved', 'อนุมัติ')],
+  ['budget', () => tr('Proposed', 'เสนอ')], ['approved', () => tr('Estimated approved', 'คาดว่าจะอนุมัติ')],
   ['pitched', () => tr('Pitched', 'หลังนำเสนอ')], ['final', () => tr('Final', 'สุดท้าย')],
 ];
 // Group key + heading per choice. Codes are <campus>-<category>-<nn>.
@@ -107,7 +107,7 @@ const GROUPS = {
 const byNum = (k) => (a, b) => (b[k] ?? -1) - (a[k] ?? -1);
 const SORTS = {
   budget: { label: () => tr('Proposed budget', 'งบที่เสนอ'), fn: byNum('budget') },
-  approved: { label: () => tr('Approved budget', 'งบที่อนุมัติ'), fn: byNum('approved') },
+  approved: { label: () => tr('Estimated Approved budget', 'งบประมาณที่คาดว่าจะได้รับอนุมัติ'), fn: byNum('approved') },
   pitched: { label: () => tr('Pitched budget', 'งบหลังนำเสนอ'), fn: byNum('pitched') },
   final: { label: () => tr('Final budget', 'งบสุดท้าย'), fn: byNum('final') },
   name: { label: () => tr('Project name', 'ชื่อโครงการ'), fn: (a, b) => String(a.name).localeCompare(String(b.name)) },
@@ -122,6 +122,7 @@ function table(ps) {
   const q = view.q.trim().toLowerCase();
   const list = ps.filter((p) => !q || `${p.name} ${p.ref} ${p.org} ${orgName(p.org)}`.toLowerCase().includes(q)).sort(SORTS[view.sort].fn);
   if (!list.length) return `<tr><td colspan="6" class="muted">${tr('No projects match', 'ไม่มีโครงการที่ตรงกัน')}</td></tr>`;
+  // Total first, so it reads before the rows and groups.
   const row = (p) => `<tr data-org="${esc(p.org)}" tabindex="0"><td><b>${esc(p.name || '—')}</b><small class="muted mono">${esc(p.ref)}</small></td>
     <td class="small">${esc(orgName(p.org))}</td>${COLS.map(([k]) => `<td class="r num">${money(p[k])}</td>`).join('')}</tr>`;
   const g = GROUPS[view.group];
@@ -134,7 +135,7 @@ function table(ps) {
     body = [...groups].sort((a, b) => sumOf(b[1], 'budget') - sumOf(a[1], 'budget'))
       .map(([k, rows]) => totals(rows, g.head(k) || k, 'grp') + rows.map(row).join('')).join('');
   }
-  return body + totals(list, tr('Total', 'รวม'), 'total');
+  return totals(list, tr('Total', 'รวม'), 'total') + body;
 }
 
 // Big number + a meter against the allocated budget (track and fill in one hue; over the allocation = warning).

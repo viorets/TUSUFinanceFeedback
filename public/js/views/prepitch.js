@@ -1,6 +1,7 @@
 // Pre-pitch: each project as submitted, then a Note form for self-noting (every role can edit; nothing is
 // required and nothing is tracked since v2.2). A No on .docx / PDF offers a feedback file, uploaded straight to
 // Drive when picked; Save writes the row and the server logs every changed field in PrePitch_Log.
+// Top of the tab: the organization's Budget proposal form (.xlsx) from the submission (v2.4), preview + download.
 import { tr } from '../i18n.js';
 import { $, esc, icon, toast, moneyBox, parseMoney, liveMoney, dateTimeFmt, num2, dialog, errorBox } from '../ui.js';
 import { call, upload, forget } from '../api.js';
@@ -20,10 +21,18 @@ export async function saveAll() { for (const p of unsaved()) await save(p.ref); 
 
 export function render(el, d, ctx) {
   st = { el, d, ctx, can: ctx.canEdit, form: Object.fromEntries(d.projects.map((p) => [p.ref, pick(d.pre[p.ref] || blank)])) };
-  el.innerHTML = `<div class="notice blue">${icon('alert', 18)}<span>${tr('This section is for your own notes. You don’t have to fill it in.', 'ส่วนนี้มีไว้สำหรับจดบันทึกของคุณเอง ไม่จำเป็นต้องกรอก')}</span></div>${d.projects.map(card).join('')}`;
+  el.innerHTML = `<div class="notice blue">${icon('alert', 18)}<span>${tr('This section is for your own notes. You don’t have to fill it in.', 'ส่วนนี้มีไว้สำหรับจดบันทึกของคุณเอง ไม่จำเป็นต้องกรอก')}</span></div>${budgetForm(d)}${d.projects.map(card).join('')}`;
   el.oninput = onInput;
   el.onchange = onChange;
   el.onclick = onClick;
+}
+
+// One per organization: the Budget proposal form (.xlsx) uploaded with the submission (a Drive link).
+function budgetForm(d) {
+  const src = d.org?.budgetForm || '';
+  return `<section class="group budget-form"><div class="row"><span class="grow"><b>${tr('Budget proposal form (.xlsx)', 'แบบฟอร์มรายการงบประมาณ (.xlsx)')}</b>
+    <small class="muted">${src ? tr('One per organization, from the submission', 'หนึ่งไฟล์ต่อองค์กร จากการส่งข้อมูล') : tr('No file submitted', 'ยังไม่มีไฟล์ที่ส่งเข้ามา')}</small></span>
+    ${dlBtn(src, tr('Budget proposal form', 'แบบฟอร์มงบประมาณ'))}</div></section>`;
 }
 
 function card(p) {
@@ -34,7 +43,7 @@ function card(p) {
   return `<section class="group pcard" data-ref="${esc(p.ref)}">
     ${cardTop(p, [[tr('Total proposed project budget', 'งบประมาณโครงการที่เสนอ'), p.budget]], `${dlBtn(p.pdf, tr('Project PDF', 'โครงการ PDF'))}${dlBtn(p.docx, tr('Project .docx', 'โครงการ .docx'))}`)}
     <div class="fb"><h4>${tr('Note', 'บันทึก')}</h4>
-      <div class="field"><label>${tr('Approved budget', 'งบประมาณที่อนุมัติ')}</label><input type="text" inputmode="decimal" data-k="approvedBudget" value="${esc(moneyBox(f.approvedBudget))}" placeholder="0.00" ${dis}></div>
+      <div class="field"><label>${tr('Estimated Approved budget', 'งบประมาณที่คาดว่าจะได้รับอนุมัติ')}</label><input type="text" inputmode="decimal" data-k="approvedBudget" value="${esc(moneyBox(f.approvedBudget))}" placeholder="0.00" ${dis}></div>
       <div class="field"><label>${tr('Approved project .docx?', 'อนุมัติไฟล์โครงการ .docx?')}</label><div>${yn('docx')}<div data-slot="docx">${slot(p.ref, 'docx')}</div></div></div>
       <div class="field"><label>${tr('Approved project PDF?', 'อนุมัติไฟล์โครงการ PDF?')}</label><div>${yn('pdf')}<div data-slot="pdf">${slot(p.ref, 'pdf')}</div></div></div>
       <div class="field"><label>${tr('Note', 'บันทึก')}</label><textarea data-k="note" maxlength="5000" ${dis}>${esc(f.note)}</textarea></div>
@@ -112,7 +121,7 @@ function savedWindow(ref) {
     [tr('Organization', 'องค์กร'), org?.en || code],
     [tr('Project number', 'รหัสโครงการ'), ref],
     [tr('Project name', 'ชื่อโครงการ'), p?.name || '—'],
-    [tr('Approved budget', 'งบประมาณที่อนุมัติ'), v == null ? '—' : `฿${num2(v)}`],
+    [tr('Estimated Approved budget', 'งบประมาณที่คาดว่าจะได้รับอนุมัติ'), v == null ? '—' : `฿${num2(v)}`],
   ];
   return dialog(tr('Saved', 'บันทึกแล้ว'), `<dl class="kv saved-kv">${kv.map(([k, x]) => `<dt>${esc(k)}</dt><dd>${esc(x)}</dd>`).join('')}</dl>`,
     [{ v: false, label: tr('Cancel', 'ยกเลิก') }, { v: true, label: tr('OK', 'ตกลง'), cls: 'primary' }], { sticky: true });

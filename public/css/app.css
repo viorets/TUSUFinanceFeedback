@@ -440,3 +440,29 @@ button.btn-pill:disabled { opacity: .5; cursor: default; }
 /* ---------- v2.2: case bar at the top of the Re-submission tab ---------- */
 .casebar { display: flex; align-items: center; gap: 12px; padding: 14px 20px; margin-bottom: 20px; }
 .casebar b { margin-right: 8px; }
+
+/* ---------- v2.5: dashboard CI (Mosaic Blue #00758F palette), budget form card, text tabs, case note ---------- */
+.dash-ci {
+  --teal: #00758F; --cyan: #4EA0B2; --ink: #005F73; --grad: linear-gradient(90deg, #00758F, #4EA0B2);
+  --fill: rgba(0, 117, 143, .10); --fill2: rgba(0, 117, 143, .16);
+  --c0: #00758F; --c1: #003A46; --c2: #4EA0B2; --c3: #005E90; --c4: #9AC9D0; --c5: #008B8E;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) .dash-ci {
+    --teal: #1A8499; --cyan: #68ACBC; --ink: #9AC9D0; --grad: linear-gradient(90deg, #4EA0B2, #CCE4E9);
+    --fill: rgba(78, 160, 178, .14); --fill2: rgba(78, 160, 178, .24);
+    --c0: #4EA0B2; --c1: #E6F1F2; --c2: #00758F; --c3: #9AC9D0; --c4: #005E90; --c5: #68ACBC;
+  }
+}
+:root[data-theme="dark"] .dash-ci {
+  --teal: #1A8499; --cyan: #68ACBC; --ink: #9AC9D0; --grad: linear-gradient(90deg, #4EA0B2, #CCE4E9);
+  --fill: rgba(78, 160, 178, .14); --fill2: rgba(78, 160, 178, .24);
+  --c0: #4EA0B2; --c1: #E6F1F2; --c2: #00758F; --c3: #9AC9D0; --c4: #005E90; --c5: #68ACBC;
+}
+.budget-form { margin-bottom: 20px; }
+.budget-form .row { flex-wrap: wrap; gap: 12px; }
+.budget-form small { display: block; margin-top: 2px; }
+.text-tabs { margin: 8px 0 14px; }
+.text-tabs a { padding: 6px 14px; font-size: 14px; }
+.text-tabs a .small { opacity: .7; margin-left: 2px; }
+.casebar .case-why { display: block; margin-top: 4px; }

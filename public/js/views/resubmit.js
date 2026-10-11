@@ -3,6 +3,7 @@
 // decision is real: it saves at once to our Resubmission tab.
 // Top of the tab: the case status, Open or Closed. Admins and Chiefs close / reopen it here (v2.2; it was on the
 // organization list before). Closed = nothing in the organization can be changed (Code.gs refuses the writes).
+// A case can close only when every project is Approved (v2.4); Code.gs checks too. Reopening is always allowed.
 import { tr } from '../i18n.js';
 import { $, esc, icon, toast, dateTimeFmt, confirmBox } from '../ui.js';
 import { call, forget } from '../api.js';
@@ -21,10 +22,16 @@ export function render(el, d, ctx) {
   d.resub = d.resub || {};
   const saved = (s) => (s?.at ? tr('Saved {when} by {who}', 'บันทึก {when} โดย {who}', { when: dateTimeFmt(s.at), who: esc(ctx.nameOf(s.by)) }) : tr('No decision yet', 'ยังไม่ได้ตัดสิน'));
   const closed = d.closed;
-  const caseBar = `<div class="group casebar"><span class="grow"><b>${tr('Case', 'เคส')}</b>
-      ${closed ? `<span class="pill closed">${icon('lock', 13)}${tr('Closed', 'ปิดแล้ว')}</span>` : `<span class="pill green">${tr('Open', 'เปิด')}</span>`}</span>
-      ${ctx.console ? `<button class="btn ${closed ? '' : 'danger'}" data-case>${icon('lock', 16)}${closed ? tr('Open case', 'เปิดเคส') : tr('Close case', 'ปิดเคส')}</button>` : ''}</div>`;
-  el.innerHTML = `${caseBar}<div data-progress></div><div class="notice blue">${icon('alert', 18)}<span>${tr('Prototype: the resubmission website is not built yet, so no resubmitted data is shown.', 'ต้นแบบ: ยังไม่มีเว็บไซต์สำหรับส่งแก้ไข จึงยังไม่มีข้อมูลที่ส่งแก้ไข')}</span></div>
+  // Projects not Approved yet (Not Approved or no decision): each one blocks closing.
+  const notApproved = () => d.projects.filter((p) => d.resub[p.ref]?.decision !== 'Approved').length;
+  const caseBar = () => {
+    const n = closed ? 0 : notApproved();
+    return `<span class="grow"><b>${tr('Case', 'เคส')}</b>
+      ${closed ? `<span class="pill closed">${icon('lock', 13)}${tr('Closed', 'ปิดแล้ว')}</span>` : `<span class="pill green">${tr('Open', 'เปิด')}</span>`}
+      ${n && ctx.console ? `<small class="muted case-why">${tr('{n} projects not Approved — every project must be Approved to close the case', 'ยังไม่อนุมัติ {n} โครงการ — ต้องอนุมัติทุกโครงการก่อนปิดเคส', { n })}</small>` : ''}</span>
+      ${ctx.console ? `<button class="btn ${closed ? '' : 'danger'}" data-case ${n ? 'disabled' : ''}>${icon('lock', 16)}${closed ? tr('Open case', 'เปิดเคส') : tr('Close case', 'ปิดเคส')}</button>` : ''}`;
+  };
+  el.innerHTML = `<div class="group casebar" data-casebar>${caseBar()}</div><div data-progress></div><div class="notice blue">${icon('alert', 18)}<span>${tr('Prototype: the resubmission website is not built yet, so no resubmitted data is shown.', 'ต้นแบบ: ยังไม่มีเว็บไซต์สำหรับส่งแก้ไข จึงยังไม่มีข้อมูลที่ส่งแก้ไข')}</span></div>
     ${d.projects.map((p) => {
     const s = d.resub[p.ref];
     return `<section class="group pcard" data-ref="${esc(p.ref)}">
@@ -71,6 +78,7 @@ export function render(el, d, ctx) {
       d.resub[ref] = out.resub;
       $('[data-saved]', box).innerHTML = saved(out.resub);
       progress(el, d, 'resubmit');
+      $('[data-casebar]', el).innerHTML = caseBar();
       ctx.persist?.();
       forget('dashboard');
       toast(tr('Saved', 'บันทึกแล้ว'));

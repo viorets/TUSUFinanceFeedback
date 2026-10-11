@@ -1,6 +1,6 @@
 import { firebaseConfig, SCRIPT_URL } from './config.js';
 import { tr, getLang, setLang, setTexts } from './i18n.js';
-import { $, esc, icon, toast, dialog, errorBox, skeleton } from './ui.js';
+import { $, esc, icon, toast, dialog, errorBox, skeleton, ROLE_LABEL } from './ui.js';
 
 const root = $('#app');
 
@@ -41,9 +41,11 @@ const ctx = {
   user: null, me: null, boot: null,
   // Admin console: Admins and Chiefs (only Admins see the edit log; the server enforces both).
   get console() { return ctx.me?.role === 'Admin' || ctx.me?.role === 'Chief'; },
-  get canEdit() { return ['Admin', 'Chief', 'Staff'].includes(ctx.me?.role); },
-  // Owner = the script owner: the Control tab (site text, required questions). The server checks too.
-  get owner() { return !!ctx.me?.owner; },
+  // Data team staff open the admin console for the edit log only.
+  get adminTab() { return ctx.console || !!ctx.me?.log; },
+  get canEdit() { return ['Admin', 'Chief', 'Staff', 'Data team staff'].includes(ctx.me?.role); },
+  // Control tab (site text, required questions): the script owner and Data team staff. The server checks too.
+  get control() { return !!ctx.me?.control; },
   // Display name set in the admin console, else the email.
   nameOf: (email) => ctx.boot?.names?.[email] || email,
   go: (h) => { location.hash = h; },
@@ -62,7 +64,7 @@ function parse(hash) {
 
 function shell(route) {
   const tab = (href, ic, label, on) => `<a href="${href}" class="${on ? 'on' : ''}">${icon(ic, 18)}<span>${label}</span></a>`;
-  const roleLabel = { Admin: tr('Admin', 'ผู้ดูแล'), Chief: tr('Chief', 'หัวหน้า'), Staff: tr('Staff', 'เจ้าหน้าที่') }[ctx.me.role] || ctx.me.role;
+  const roleLabel = ROLE_LABEL(ctx.me.role);
   return `<div class="chrome"><header class="topbar">
     <a class="brand" href="#/"><img class="brand-logo" src="icon.svg" alt=""><span class="grow"><b>${TITLE}</b><span>TUSU Budget Pitching</span></span></a>
     <nav class="topnav">
@@ -73,8 +75,8 @@ function shell(route) {
     <nav class="tabs" aria-label="${tr('Sections', 'เมนู')}"><div class="tabs-in">
       ${tab('#/dashboard', 'chart', tr('Dashboard', 'แดชบอร์ด'), route.view === 'dashboard')}
       ${tab('#/', 'grid', tr('Organizations', 'องค์กร'), route.view === 'list' || route.view === 'org')}
-      ${ctx.console ? tab('#/admin', 'shield', tr('Admin console', 'คอนโซลผู้ดูแล'), route.view === 'admin') : ''}
-      ${ctx.owner ? tab('#/control', 'sliders', tr('Control', 'ควบคุม'), route.view === 'control') : ''}
+      ${ctx.adminTab ? tab('#/admin', 'shield', tr('Admin console', 'คอนโซลผู้ดูแล'), route.view === 'admin') : ''}
+      ${ctx.control ? tab('#/control', 'sliders', tr('Control', 'ควบคุม'), route.view === 'control') : ''}
       <span class="pill blue role">${esc(roleLabel)}</span>
     </div></nav></div>
     <main class="page wide" id="page">${skeleton()}</main>`;
@@ -104,7 +106,7 @@ document.addEventListener('click', (e) => { if (!e.target.closest('.acct')) docu
 
 async function render() {
   const route = parse(location.hash);
-  if ((route.view === 'admin' && !ctx.console) || (route.view === 'control' && !ctx.owner)) { ctx.go('#/'); return; }
+  if ((route.view === 'admin' && !ctx.adminTab) || (route.view === 'control' && !ctx.control)) { ctx.go('#/'); return; }
   root.innerHTML = shell(route);
   $('#lang').onclick = async () => { if (!(await confirmLeave())) return; setLang(getLang() === 'th' ? 'en' : 'th'); current = null; render(); };
   $('#acct').onclick = (e) => accountMenu(e.currentTarget);
@@ -122,12 +124,13 @@ async function render() {
 }
 
 // Leaving a page (or tab, language, account) with unsaved edits: a window naming each unsaved project, with
-// Save and leave / Leave without saving / Stay. Closing the tab, refreshing or typing a new URL is not guarded
+// Save and leave / Leave without saving / Stay. Every page with a Save (organization tabs, admin console, Control)
+// offers Save and leave. Closing the tab, refreshing or typing a new URL is not guarded
 // (option 2 in the plan): those edits are lost without a warning.
 async function confirmLeave() {
   if (!current?.isDirty?.()) return true;
   const list = current.unsaved?.() || [];
-  const canSave = list.length > 0 && !!current.canSaveAll?.();
+  const canSave = !!current.canSaveAll?.();
   const html = list.length
     ? `<p>${tr('These projects have unsaved changes:', 'โครงการเหล่านี้มีการแก้ไขที่ยังไม่ได้บันทึก:')}</p>
       <ul class="unsaved">${list.map((p) => `<li><span class="code">${esc(p.ref)}</span><span>${esc(p.name || '—')}</span></li>`).join('')}</ul>`
@@ -185,7 +188,7 @@ onUser(async (user) => {
     ctx.boot = await api.cached('boot');
     const textsChanged = JSON.stringify(ctx.boot.texts || {}) !== JSON.stringify(kept?.texts || {});
     setTexts(ctx.boot.texts);
-    const roleChanged = ctx.boot.me.role !== kept?.me.role || !!ctx.boot.me.owner !== !!kept?.me.owner;
+    const roleChanged = ctx.boot.me.role !== kept?.me.role || !!ctx.boot.me.control !== !!kept?.me.control || !!ctx.boot.me.log !== !!kept?.me.log;
     ctx.me = ctx.boot.me;
     // Same role: repaint only for new site text, and never over unsaved edits.
     if (!roleChanged && (!textsChanged || current?.isDirty?.())) return;
