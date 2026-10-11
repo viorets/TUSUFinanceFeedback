@@ -33,6 +33,8 @@
  * they can: each of our tabs is cached on its own (tabRows_) under a per-tab stamp that only writes to that tab
  * change, and the Submissions rows are cached apart (our writes never change them). A save then rebuilds pages from
  * cache plus one read of the tab it wrote.
+ * Saves (v2.6.3): updating a project's existing row is one write and needs no lock; only adding a new row takes the
+ * script lock (saveRow_), so saves no longer queue behind each other. Log rows are added with appendRow (atomic).
  *
  * Setup: README.md. After changing this file: clasp push, then update the existing deployment (same /exec URL).
  */
@@ -261,28 +263,26 @@ function savePrePitch_(req, user) {
   const d = req.data || {};
   const docxOk = yesNo_(d.docxOk);
   const pdfOk = yesNo_(d.pdfOk);
-  return locked_(function () {
-    const sh = tab_('PrePitch');
-    const all = rows_(sh);
-    const old = all.filter(function (r) { return r['Project Ref'] === p.ref; })[0] || demoRow_('PrePitch', p.ref) || {};
-    const now = new Date();
-    const row = {
-      'Project Ref': p.ref, 'Org Ref': p.org, 'Project Name': p.name,
-      'Approved Budget': money_(d.approvedBudget),
-      'Docx Approved': docxOk, 'Docx Feedback File': docxOk === 'No' ? one_(file_(d.docxFile, p.org, 'docx')) : [],
-      'PDF Approved': pdfOk, 'PDF Feedback File': pdfOk === 'No' ? one_(file_(d.pdfFile, p.org, 'pdf')) : [],
-      'Feedback Note': text_(d.note, 5000), 'Updated At': now, 'Updated By': user.email,
-    };
-    const log = PRE_FIELDS.filter(function (k) { return logText_(old[k]) !== logText_(row[k]); })
-      .map(function (k) { return [now, user.email, p.ref, p.org, k, cell_(logText_(old[k])), cell_(logText_(row[k]))]; });
-    if (log.length) {
-      upsert_(sh, all, TABS.PrePitch, row);
-      const lg = tab_('PrePitch_Log');
-      lg.getRange(lg.getLastRow() + 1, 1, log.length, log[0].length).setValues(log);
-      bump_('PrePitch', 'PrePitch_Log');
-    }
-    return { pre: preOut_(log.length ? row : old), changed: log.length };
-  });
+  const sh = tab_('PrePitch');
+  const at = rowOf_(sh, p.ref);
+  const old = (at && rowAt_(sh, at)) || demoRow_('PrePitch', p.ref) || {};
+  const now = new Date();
+  const row = {
+    'Project Ref': p.ref, 'Org Ref': p.org, 'Project Name': p.name,
+    'Approved Budget': money_(d.approvedBudget),
+    'Docx Approved': docxOk, 'Docx Feedback File': docxOk === 'No' ? one_(file_(d.docxFile, p.org, 'docx')) : [],
+    'PDF Approved': pdfOk, 'PDF Feedback File': pdfOk === 'No' ? one_(file_(d.pdfFile, p.org, 'pdf')) : [],
+    'Feedback Note': text_(d.note, 5000), 'Updated At': now, 'Updated By': user.email,
+  };
+  const log = PRE_FIELDS.filter(function (k) { return logText_(old[k]) !== logText_(row[k]); })
+    .map(function (k) { return [now, user.email, p.ref, p.org, k, cell_(logText_(old[k])), cell_(logText_(row[k]))]; });
+  if (log.length) {
+    saveRow_(sh, TABS.PrePitch, row, at);
+    const lg = tab_('PrePitch_Log');
+    log.forEach(function (r) { lg.appendRow(r); });
+    bump_('PrePitch', 'PrePitch_Log');
+  }
+  return { pre: preOut_(log.length ? row : old), changed: log.length };
 }
 
 function savePitching_(req, user) {
@@ -299,11 +299,9 @@ function savePitching_(req, user) {
     'Final Approved Budget': money_(d.finalBudget), 'Noted Documents': noted,
     'Updated At': new Date(), 'Updated By': user.email, 'Correct Excel File': one_(excel),
   };
-  locked_(function () {
-    const sh = tab_('Pitching');
-    upsert_(sh, rows_(sh), TABS.Pitching, row);
-    bump_('Pitching');
-  });
+  const sh = tab_('Pitching');
+  saveRow_(sh, TABS.Pitching, row);
+  bump_('Pitching');
   return { pitch: pitchOut_(row) };
 }
 
@@ -317,14 +315,12 @@ function saveResubmit_(req, user) {
   if (decision && decision !== 'Approved' && decision !== 'Not Approved') throw new Error('Decision must be Approved or Not Approved');
   const now = new Date();
   const row = { 'Project Ref': p.ref, 'Org Ref': p.org, 'Project Name': p.name, 'Decision': decision, 'Updated At': now, 'Updated By': user.email };
-  locked_(function () {
-    const sh = tab_('Resubmission');
-    const all = rows_(sh);
-    const old = String((all.filter(function (r) { return r['Project Ref'] === p.ref; })[0] || {})['Decision'] || '');
-    upsert_(sh, all, TABS.Resubmission, row);
-    if (old !== decision) resubLog_([[now, user.email, p.ref, p.org, 'Decision', old, decision]]);
-    bump_('Resubmission', 'Resubmission_Log');
-  });
+  const sh = tab_('Resubmission');
+  const at = rowOf_(sh, p.ref);
+  const old = at ? String(sh.getRange(at, TABS.Resubmission.indexOf('Decision') + 1).getValue() || '') : '';
+  saveRow_(sh, TABS.Resubmission, row, at);
+  if (old !== decision) resubLog_([[now, user.email, p.ref, p.org, 'Decision', old, decision]]);
+  bump_('Resubmission', 'Resubmission_Log');
   return { resub: resubOut_(row) };
 }
 
@@ -624,10 +620,10 @@ function submissionLog_() {
   return rows_(SpreadsheetApp.openById(prop_('SUBMISSIONS_SHEET_ID')).getSheetByName('Submission_Log'));
 }
 
-// Re-submission log rows (call inside locked_).
+// Re-submission log rows.
 function resubLog_(rows) {
   const lg = tab_('Resubmission_Log');
-  lg.getRange(lg.getLastRow() + 1, 1, rows.length, rows[0].length).setValues(rows);
+  rows.forEach(function (r) { lg.appendRow(r); }); // atomic: safe without the lock
 }
 
 // The latest 500 rows of a log tab (PrePitch_Log or Resubmission_Log), newest first. Reads only those rows.
@@ -954,6 +950,11 @@ function rows_(sh) {
   if (!sh || sh.getLastRow() < 2) return [];
   const v = sh.getDataRange().getValues();
   const head = v.shift();
+  return objects_(sh, head, v, 2);
+}
+
+// Values of consecutive sheet rows starting at row `first` -> objects, as rows_ (blank key rows left out).
+function objects_(sh, head, v, first) {
   const fileCols = head.map(function (h, i) { return FILE_COLS.indexOf(h) >= 0 ? i : -1; }).filter(function (i) { return i >= 0; });
   // A file column is read from its text twin; the slow rich-text read runs only when some filled cell has no twin yet
   // (rows saved before v2.5 and not backfilled).
@@ -961,7 +962,7 @@ function rows_(sh) {
   fileCols.forEach(function (i) {
     const t = head.indexOf(head[i] + TWIN);
     if (t >= 0) twin[i] = t;
-    if (t < 0 || v.some(function (r) { return r[i] !== '' && r[t] === ''; })) rich[i] = sh.getRange(2, i + 1, v.length, 1).getRichTextValues();
+    if (t < 0 || v.some(function (r) { return r[i] !== '' && r[t] === ''; })) rich[i] = sh.getRange(first, i + 1, v.length, 1).getRichTextValues();
   });
   return v.map(function (r, n) {
     const o = {};
@@ -1004,7 +1005,33 @@ function byKey_(rows, key) {
 // Write `row` (object) over the row with the same Project Ref, or append it.
 function upsert_(sh, all, cols, row) {
   const i = all.map(function (r) { return r['Project Ref']; }).indexOf(row['Project Ref']);
-  const at = i >= 0 ? i + 2 : sh.getLastRow() + 1;
+  writeRow_(sh, i >= 0 ? i + 2 : sh.getLastRow() + 1, cols, row);
+}
+
+// Sheet row number of a Project Ref (from the key column), 0 = none.
+function rowOf_(sh, ref) {
+  const n = sh.getLastRow() - 1;
+  if (n < 1) return 0;
+  const i = sh.getRange(2, 1, n, 1).getValues().map(function (r) { return r[0]; }).indexOf(ref);
+  return i < 0 ? 0 : i + 2;
+}
+
+// One sheet row as an object, as rows_ gives it.
+function rowAt_(sh, at) {
+  const w = sh.getLastColumn();
+  return objects_(sh, sh.getRange(1, 1, 1, w).getValues()[0], sh.getRange(at, 1, 1, w).getValues(), at)[0] || null;
+}
+
+// Writes `row` over its project's row (at = its row number if already known). An existing row is overwritten in one
+// write, without the lock (two saves of one project at once: the last wins). A new row is added under the lock, after
+// looking again, so two first saves of one project can't both append.
+function saveRow_(sh, cols, row, at) {
+  at = at || rowOf_(sh, row['Project Ref']);
+  if (at) { writeRow_(sh, at, cols, row); return; }
+  locked_(function () { writeRow_(sh, rowOf_(sh, row['Project Ref']) || sh.getLastRow() + 1, cols, row); });
+}
+
+function writeRow_(sh, at, cols, row) {
   // A file twin holds its column's files as JSON text ('[]' = none).
   const twinOf = function (c) { const base = c.slice(0, -TWIN.length); return c.slice(-TWIN.length) === TWIN && Array.isArray(row[base]) ? JSON.stringify(row[base]) : null; };
   sh.getRange(at, 1, 1, cols.length).setValues([cols.map(function (c) { const t = twinOf(c); return t != null ? t : Array.isArray(row[c]) ? '' : cell_(row[c]); })]);

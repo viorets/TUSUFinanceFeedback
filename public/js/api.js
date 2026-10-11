@@ -7,13 +7,30 @@ const MAX_MB = 25; // keep in step with MAX_BYTES in Code.gs
 const TTL = 60e3;
 const cache = new Map(); // reads only: key → { t, p }
 
+// Server busy (too many requests at once, or a save waited too long for the lock): nothing was saved, so the same
+// call is tried again, up to twice, after 1.5 s and 3 s. Errors in English or Thai (the script owner's language).
+const BUSY = /lock timeout|หมดเวลาการล็อก|simultaneous|พร้อมกันมากเกินไป|invoked too many|^BUSY/i;
+
 export async function call(action, body = {}) {
+  for (let tries = 0; ; tries++) {
+    try {
+      return await once(action, body);
+    } catch (e) {
+      if (tries >= 2 || !BUSY.test(e.message)) throw e;
+      await new Promise((r) => { setTimeout(r, 1500 * (tries + 1)); });
+    }
+  }
+}
+
+async function once(action, body) {
   // text/plain keeps this a "simple" CORS request (Apps Script can't answer preflights).
   const res = await fetch(SCRIPT_URL, {
     method: 'POST', headers: { 'Content-Type': 'text/plain;charset=utf-8' },
     body: JSON.stringify({ ...body, action, idToken: await idToken() }),
   });
-  const out = await res.json();
+  const text = await res.text();
+  let out;
+  try { out = JSON.parse(text); } catch { throw new Error(tr('BUSY: the server is busy — please try again', 'BUSY: เซิร์ฟเวอร์ไม่ว่าง — กรุณาลองใหม่')); } // Google's "too many" page
   if (!out.ok) throw Object.assign(new Error(out.error || 'Request failed'), { code: out.error });
   return out;
 }
