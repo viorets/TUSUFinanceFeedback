@@ -61,6 +61,7 @@ async function draw(page, ctx, route, data) {
         <dl class="kv">
           <dt>${tr('Submitter', 'ผู้ส่ง')}</dt><dd>${s ? contact(s.name, s.position, s.phone) : '—'}${s?.phone ? ` <span class="pill blue">Telegram</span>` : ''}</dd>
           <dt>${tr('Emergency contact', 'ผู้ติดต่อกรณีฉุกเฉิน')}</dt><dd>${s ? contact(s.emName, s.emPosition, s.emPhone) : '—'}</dd>
+          <dt>${tr('Notification emails', 'อีเมลรับการแจ้งเตือน')}</dt><dd>${(s?.emails || []).map((e) => `<a href="mailto:${esc(e)}">${esc(e)}</a>`).join(', ') || '—'}</dd>
           <dt>${tr('Person in charge', 'ผู้รับผิดชอบ')}</dt><dd>${data.people.map((p) => esc(ctx.nameOf(p))).join(', ') || '—'}</dd>
           <dt>${tr('Latest submission', 'ส่งล่าสุด')}</dt><dd>${s ? `${dateTimeFmt(s.at)} · ${tr('version {n}', 'ครั้งที่ {n}', { n: s.version })}` : tr('Not submitted yet', 'ยังไม่ได้ส่ง')}</dd>
         </dl></details>
@@ -68,8 +69,8 @@ async function draw(page, ctx, route, data) {
     ${closed ? `<div class="notice closed">${icon('lock', 18)}<span>${tr('Closed by {who} on {when}. Its data cannot be changed.', 'ปิดโดย {who} เมื่อ {when} ไม่สามารถแก้ไขข้อมูลได้', { who: esc(ctx.nameOf(closed.by)), when: dateTimeFmt(closed.at) })}</span></div>` : ''}
     <nav class="seg-tabs" id="tabs"></nav>
     <div id="tab"></div>`;
-  // Print: pick the phases, then the cover + one page per phase (print.js).
-  $('#print', page).onclick = async () => { const show = await askPhases(tr('Print', 'พิมพ์')); if (show) printNow(printSheet(route.ref, data, show, ctx.nameOf)); };
+  // Print: pick the phases and the paper, then everything on one vertical page (print.js).
+  $('#print', page).onclick = async () => { const show = await askPhases(tr('Print', 'พิมพ์')); if (show) printNow(printSheet(route.ref, data, show, ctx.nameOf), show.paper); };
   await switchTab(route.tab);
 }
 

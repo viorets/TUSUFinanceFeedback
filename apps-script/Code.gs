@@ -7,14 +7,20 @@
  * Writes our own Sheet (FEEDBACK_SHEET_ID):
  *        Users         Email | Role (Admin / Chief / Staff) | Org Refs (persons in charge) | Updated At | Updated By | Name
  * Reads  the pitching scheduling site's Sheet (script property SCHEDULE_SHEET_ID, optional), tab "Schedule":
- *        Project Ref | Date | Start | End | Room. One row per project; shown on the Pitching tab. Read only.
+ *        Project Ref | Date | Start | End | Room | Meeting Link (optional). One row per project; shown on the Pitching
+ *        tab and My projects. Read only.
  *        PrePitch      one row per project: approval + feedback (latest)
  *        PrePitch_Log  append-only: one row per changed field on every Pre-pitch save (Admins only)
  *        Pitching      one row per project: summary, final approved budget, Noted documents
+ *        Pitching_Log  append-only: one row per changed field on every Pitching save (v2.7)
+ *        OrgPrePitch   one row per organization: note + feedback file on its Budget proposal form (v2.7; logged in
+ *                      PrePitch_Log with an empty Project Ref)
+ *        Export_Log    append-only: who exported data, when, which parts and format (v2.7; exports are Admin-only)
  *        Resubmission  one row per project: Approved / Not Approved for the resubmitted project
  *        Resubmission_Log  append-only: every decision change and case close / open (Admins and Data team staff)
  *        Settings      Key | Value: site-wide values (Allocated Budget; Required = the required questions, JSON; Phases;
- *                      External Link = { label, url } of the extra top tab)
+ *                      External Link = { label, url } of the extra top tab; Restored Orgs = organizations removed on
+ *                      the pitching site that Admins / Chiefs put back on our list, JSON list)
  *        OrgStatus     Org Ref | Status (Closed / Unclosed) | ...: a closed organization's data cannot be changed
  *        Texts         Key (built-in English line) | EN | TH | ...: the Owner's replacements for site text
  *   and uploaded files into DRIVE_FOLDER_ID / <Org Ref> / "<Project Ref> <purpose> — <file name>".
@@ -74,6 +80,9 @@ const TABS = {
   PrePitch_Log: ['Logged At', 'By', 'Project Ref', 'Org Ref', 'Field', 'Old', 'New'],
   Pitching: ['Project Ref', 'Org Ref', 'Project Name', 'Summary', 'Final Approved Budget', 'Noted Documents',
     'Updated At', 'Updated By', 'Correct Excel File', 'Noted Documents JSON', 'Correct Excel File JSON'],
+  Pitching_Log: ['Logged At', 'By', 'Project Ref', 'Org Ref', 'Field', 'Old', 'New'],
+  OrgPrePitch: ['Org Ref', 'Feedback Note', 'Budget Form Feedback File', 'Updated At', 'Updated By', 'Budget Form Feedback File JSON'],
+  Export_Log: ['Logged At', 'By', 'Parts', 'Format'],
   Resubmission: ['Project Ref', 'Org Ref', 'Project Name', 'Decision', 'Updated At', 'Updated By'],
   Resubmission_Log: ['Logged At', 'By', 'Project Ref', 'Org Ref', 'Field', 'Old', 'New'],
   Settings: ['Key', 'Value', 'Updated At', 'Updated By'],
@@ -87,10 +96,14 @@ const QUESTIONS = {
   'pitch.summary': false, 'pitch.finalBudget': true, 'pitch.noted': false, 'pitch.excel': false, 'resub.decision': true,
 };
 // Cells that hold files: written as file names linked to Drive, read back from those links (filesIn_).
-const FILE_COLS = ['Docx Feedback File', 'PDF Feedback File', 'Noted Documents', 'Correct Excel File'];
+const FILE_COLS = ['Docx Feedback File', 'PDF Feedback File', 'Noted Documents', 'Correct Excel File', 'Budget Form Feedback File'];
 const TWIN = ' JSON'; // hidden text twin of a file column (see Speed above)
 // Pre-pitch fields that are logged.
 const PRE_FIELDS = ['Approved Budget', 'Docx Approved', 'Docx Feedback File', 'PDF Approved', 'PDF Feedback File', 'Feedback Note'];
+// Pitching fields that are logged (v2.7).
+const PITCH_FIELDS = ['Summary', 'Final Approved Budget', 'Noted Documents', 'Correct Excel File'];
+// Budget-form feedback (Pre-pitch, one per organization): sheet column -> log field name.
+const FORM_FIELDS = { 'Feedback Note': 'Budget form note', 'Budget Form Feedback File': 'Budget form file' };
 
 /* ---------- PILOT DEMO ----------
  * Sample submission for RS-ACA-01 (ชุมนุม TEDxThammasatU) so the pilot can be tested before real submissions exist.
@@ -135,6 +148,7 @@ const ACTIONS = {
   dashboard: dashboard_, saveAllocated: saveAllocated_,
   setOrgStatus: setOrgStatus_, saveTexts: saveTexts_, saveRequired: saveRequired_, savePhases: savePhases_,
   exportData: exportData_, printData: printData_, saveExternalLink: saveExternalLink_,
+  saveOrgPrePitch: saveOrgPrePitch_, myProjects: myProjects_, setRestored: setRestored_,
 };
 
 function doPost(e) {
@@ -181,7 +195,7 @@ function boot_(req, user) {
       if (fin != null) x.approved = (x.approved || 0) + fin;
     });
     users_().forEach(function (u) { u.orgs.forEach(function (ref) { org(ref).people.push(u.email); }); });
-    return { orgs: orgs, removed: removed_(s.log), closed: closed_(), texts: texts_(), required: required_(), phases: phases_(), link: externalLink_() };
+    return { orgs: orgs, removed: hidden_(s.log), closed: closed_(), texts: texts_(), required: required_(), phases: phases_(), link: externalLink_() };
   });
   // names: display name per email (set in the admin console); the site shows the email where none is set.
   const names = {};
@@ -224,8 +238,9 @@ function org_(req, user) {
         name: o['Submitted By'], position: o['Submitter Position'], phone: String(o['Telegram Phone'] || ''),
         emName: o['Emergency Contact'], emPosition: o['Emergency Position'], emPhone: String(o['Emergency Phone'] || ''),
         budgetForm: String(o['Budget Proposal Form (.xlsx)'] || ''), // Drive link, one per organization
+        emails: emails_(o),
       } : null,
-      projects: projects, pre: pre, pitch: pitch, resub: resub, slots: slots,
+      projects: projects, pre: pre, pitch: pitch, resub: resub, slots: slots, orgPre: orgPreOut_(orgPreRow_(ref)),
       closed: closed_()[ref] || null, required: required_(), phases: phases_(),
       people: users_().filter(function (u) { return u.orgs.indexOf(ref) >= 0; }).map(function (u) { return u.email; }),
     };
@@ -237,16 +252,17 @@ function org_(req, user) {
 // One file into DRIVE_FOLDER_ID/<Org Ref>/. Returns { file: { id, name } } for a following save.
 function upload_(req, user) {
   need_(user, 'Staff');
-  const p = project_(req.ref);
+  // purpose 'form' (budget-form feedback) belongs to an organization, the others to a project.
+  const p = req.purpose === 'form' ? org__(req.org) : project_(req.ref);
   open_(p.org);
   const name = String(req.name || '').replace(/[\\/:*?"<>|]/g, '_').slice(0, 180);
   const kind = ((name.match(/\.([a-z0-9]+)$/i) || [])[1] || '').toLowerCase();
   if (!KINDS[kind] || req.mime !== KINDS[kind]) throw new Error('Only .docx, .pdf, .xlsx or .xls files');
-  const purpose = { feedback: 'feedback', noted: 'noted', excel: 'excel' }[req.purpose];
+  const purpose = { feedback: 'feedback', noted: 'noted', excel: 'excel', form: 'form' }[req.purpose];
   if (!purpose) throw new Error('Bad purpose');
-  if (purpose === 'excel' ? EXCEL.indexOf(kind) < 0 : EXCEL.indexOf(kind) >= 0) throw new Error(purpose === 'excel' ? 'Only an Excel file (.xlsx or .xls) can go here' : 'Only .docx or .pdf files');
+  if (purpose !== 'form' && (purpose === 'excel' ? EXCEL.indexOf(kind) < 0 : EXCEL.indexOf(kind) >= 0)) throw new Error(purpose === 'excel' ? 'Only an Excel file (.xlsx or .xls) can go here' : 'Only .docx or .pdf files');
   if (req.only && req.only !== 'excel' && req.only !== kind) throw new Error('Only a .' + req.only + ' file can go here');
-  phaseOn_(purpose === 'feedback' ? 'prepitch' : 'pitching');
+  phaseOn_(purpose === 'feedback' || purpose === 'form' ? 'prepitch' : 'pitching');
   const bytes = Utilities.base64Decode(req.data || '');
   if (!bytes.length) throw new Error('Empty file');
   if (bytes.length > MAX_BYTES) throw new Error('File larger than 25 MB');
@@ -285,6 +301,33 @@ function savePrePitch_(req, user) {
   return { pre: preOut_(log.length ? row : old), changed: log.length };
 }
 
+// Budget-form feedback (Pre-pitch, v2.7): one note + one file per organization. Each changed field is logged in
+// PrePitch_Log with an empty Project Ref.
+function saveOrgPrePitch_(req, user) {
+  need_(user, 'Staff');
+  const o = org__(req.org);
+  open_(o.org);
+  phaseOn_('prepitch');
+  const d = req.data || {};
+  const sh = tab_('OrgPrePitch');
+  const at = rowOf_(sh, o.org);
+  const old = (at && rowAt_(sh, at)) || {};
+  const now = new Date();
+  const row = {
+    'Org Ref': o.org, 'Feedback Note': text_(d.note, 5000), 'Budget Form Feedback File': one_(file_(d.file, o.org)),
+    'Updated At': now, 'Updated By': user.email,
+  };
+  const log = Object.keys(FORM_FIELDS).filter(function (k) { return logText_(old[k]) !== logText_(row[k]); })
+    .map(function (k) { return [now, user.email, '', o.org, FORM_FIELDS[k], cell_(logText_(old[k])), cell_(logText_(row[k]))]; });
+  if (log.length) {
+    saveRow_(sh, TABS.OrgPrePitch, row, at);
+    const lg = tab_('PrePitch_Log');
+    log.forEach(function (r) { lg.appendRow(r); });
+    bump_('OrgPrePitch', 'PrePitch_Log');
+  }
+  return { orgPre: orgPreOut_(log.length ? row : old), changed: log.length };
+}
+
 function savePitching_(req, user) {
   need_(user, 'Staff');
   const p = project_(req.ref);
@@ -300,9 +343,16 @@ function savePitching_(req, user) {
     'Updated At': new Date(), 'Updated By': user.email, 'Correct Excel File': one_(excel),
   };
   const sh = tab_('Pitching');
-  saveRow_(sh, TABS.Pitching, row);
-  bump_('Pitching');
-  return { pitch: pitchOut_(row) };
+  const at = rowOf_(sh, p.ref);
+  const old = (at && rowAt_(sh, at)) || demoRow_('Pitching', p.ref) || {};
+  const log = PITCH_FIELDS.filter(function (k) { return logText_(old[k]) !== logText_(row[k]); })
+    .map(function (k) { return [row['Updated At'], user.email, p.ref, p.org, k, cell_(logText_(old[k])), cell_(logText_(row[k]))]; });
+  if (!log.length) return { pitch: pitchOut_(old), changed: 0 };
+  saveRow_(sh, TABS.Pitching, row, at);
+  const lg = tab_('Pitching_Log');
+  log.forEach(function (r) { lg.appendRow(r); });
+  bump_('Pitching', 'Pitching_Log');
+  return { pitch: pitchOut_(row), changed: log.length };
 }
 
 // Re-submission decision for one project: 'Approved', 'Not Approved' or '' (cleared).
@@ -339,7 +389,7 @@ function resubOut_(r) { return { decision: r['Decision'] || '', at: iso_(r['Upda
 function dashboard_(req, user) {
   return cached_('dash', function () {
     const s = subs_();
-    const removed = removed_(s.log);
+    const removed = hidden_(s.log);
     const money = function (name, col) {
       const out = {};
       feedbackRows_(name).forEach(function (r) { const v = num_(r[col]); if (v != null) out[r['Project Ref']] = v; });
@@ -515,16 +565,20 @@ function savePhases_(req, user) {
 // Admin console. The edit log goes to Admins only. Each part is cached until the next write.
 function admin_(req, user) {
   // Data team staff see only the edit log.
-  if (user.role === DATA_TEAM) return { log: cached_('log', function () { return logTail_('PrePitch_Log'); }), resubLog: cached_('resubLog', function () { return logTail_('Resubmission_Log'); }), logOnly: true };
+  const logs = function (o) {
+    o.log = cached_('log', function () { return logTail_('PrePitch_Log'); });
+    o.pitchLog = cached_('pitchLog', function () { return logTail_('Pitching_Log'); });
+    o.resubLog = cached_('resubLog', function () { return logTail_('Resubmission_Log'); });
+    return o;
+  };
+  if (user.role === DATA_TEAM) return logs({ logOnly: true });
   need_(user, 'Chief');
-  const out = cached_('admin', function () { return { removed: removed_(submissionLog_()), allocated: allocated_(), phases: phases_() }; });
+  // removed: every organization removed on the pitching site; restored: those put back on our list.
+  const out = cached_('admin', function () { return { removed: removed_(submissionLog_()), restored: restored_(), allocated: allocated_(), phases: phases_() }; });
   out.users = users_();
   out.owner = owner_();
-  if (canLog_(user)) {
-    out.log = cached_('log', function () { return logTail_('PrePitch_Log'); });
-    out.resubLog = cached_('resubLog', function () { return logTail_('Resubmission_Log'); });
-  }
-  return out;
+  out.sheetUrl = 'https://docs.google.com/spreadsheets/d/' + FEEDBACK_SHEET_ID + '/edit';
+  return canLog_(user) ? logs(out) : out;
 }
 
 // Print campus (organization list): the org data of every organization of one campus that has a submission
@@ -534,7 +588,7 @@ function printData_(req, user) {
   const campus = String(req.campus || '');
   if (!/^[A-Z]{2}$/.test(campus)) throw new Error('Bad campus code');
   const s = subs_();
-  const gone = removed_(s.log);
+  const gone = hidden_(s.log);
   const refs = s.orgs.map(function (o) { return o['Org Ref']; })
     .filter(function (r) { return r.split('-')[0] === campus && gone.indexOf(r) < 0; }).sort();
   return { orgs: refs.map(function (ref) { return { ref: ref, data: org_({ ref: ref }, user) }; }) };
@@ -559,11 +613,15 @@ function saveExternalLink_(req, user) {
 
 // Export (admin console): organizations always, plus the phases asked for. Removed organizations are left out.
 // The page turns the rows into an Excel or CSV file. Money as numbers, files as Drive links.
+// Admin-only since v2.7 (personal data: phones, emails); every export is logged in Export_Log.
 function exportData_(req, user) {
-  need_(user, 'Chief');
+  need_(user, 'Admin');
   const want = req.phases || {};
   const s = subs_();
-  const gone = removed_(s.log);
+  const gone = hidden_(s.log);
+  const parts = ['organizations', 'projects'].concat(['prepitch', 'pitching', 'resubmit', 'emails'].filter(function (k) { return want[k]; }));
+  const fmt = req.format === 'csv' ? 'CSV' : 'Excel';
+  tab_('Export_Log').appendRow([new Date(), user.email, parts.join(', '), fmt]);
   const keep = function (ref) { return gone.indexOf(ref) < 0; };
   const shut = closed_();
   const links = function (list) { return files_(list).map(function (f) { return driveUrl_(f.id); }).join('\n'); };
@@ -577,6 +635,7 @@ function exportData_(req, user) {
       'Emergency Position': o['Emergency Position'] || '', 'Emergency Phone': String(o['Emergency Phone'] || ''),
       'Total Proposed Budget': num_(o['Total Proposed Budget']), 'Project Count': Number(o['Project Count']) || 0,
       'Budget Proposal Form (.xlsx)': String(o['Budget Proposal Form (.xlsx)'] || ''),
+      'Notification Emails': emails_(o).join(', '),
       'Persons in charge': users_().filter(function (u) { return u.orgs.indexOf(ref) >= 0; }).map(function (u) { return u.email; }).join(', '),
       'Case': shut[ref] ? 'Closed' : 'Open',
     };
@@ -586,6 +645,15 @@ function exportData_(req, user) {
       'Budget': num_(p['Budget']), 'Project Dates': String(p['Project Dates'] || ''), 'Proposal .docx': p['Proposal .docx'] || '', 'Proposal .pdf': p['Proposal .pdf'] || '' };
   });
   const out = { orgs: orgs, projects: projects };
+  // One row per notification email.
+  if (want.emails) {
+    out.emails = [];
+    orgs.forEach(function (o) {
+      emails_(s.orgs.filter(function (x) { return x['Org Ref'] === o['Org Ref']; })[0]).forEach(function (e) {
+        out.emails.push({ 'Org Ref': o['Org Ref'], 'Organization': o['Organization'], 'Campus': o['Campus'], 'Email': e });
+      });
+    });
+  }
   if (want.prepitch) {
     const pre = byKey_(feedbackRows_('PrePitch'), 'Project Ref');
     out.prepitch = projects.map(function (p) {
@@ -626,7 +694,7 @@ function resubLog_(rows) {
   rows.forEach(function (r) { lg.appendRow(r); }); // atomic: safe without the lock
 }
 
-// The latest 500 rows of a log tab (PrePitch_Log or Resubmission_Log), newest first. Reads only those rows.
+// The latest 500 rows of a log tab (PrePitch_Log, Pitching_Log or Resubmission_Log), newest first. Reads only those rows.
 function logTail_(name) {
   const sh = tab_(name || 'PrePitch_Log');
   const last = sh.getLastRow();
@@ -705,7 +773,9 @@ function schedule_() {
     const time = function (v) { return fmt(v, 'HH:mm'); };
     const rows = id ? rows_(SpreadsheetApp.openById(id).getSheetByName('Schedule')) : [];
     const out = rows.filter(function (r) { return PROJECT_REF.test(String(r['Project Ref'] || '')); }).map(function (r) {
-      return { ref: r['Project Ref'], date: day(r['Date']), start: time(r['Start']), end: time(r['End']), room: String(r['Room'] || '') };
+      const link = String(r['Meeting Link'] || '').trim();
+      return { ref: r['Project Ref'], date: day(r['Date']), start: time(r['Start']), end: time(r['End']), room: String(r['Room'] || ''),
+        link: /^https:\/\/\S+$/.test(link) ? link : '' };
     });
     if (DEMO) Object.keys(DEMO.Schedule).forEach(function (ref) {
       if (!out.some(function (r) { return r.ref === ref; })) out.push(Object.assign({ ref: ref }, DEMO.Schedule[ref]));
@@ -742,6 +812,36 @@ function removed_(log) {
   const last = {};
   log.forEach(function (r) { if (r['Action'] === 'remove' || r['Action'] === 'restore') last[r['Org Ref']] = r['Action']; });
   return Object.keys(last).filter(function (k) { return last[k] === 'remove'; }).sort();
+}
+
+// Organizations removed on the pitching site that Admins / Chiefs put back on our list (v2.7).
+function restored_() {
+  const r = settings_().filter(function (x) { return x['Key'] === 'Restored Orgs'; })[0];
+  const v = r ? parse_(String(r['Value'] || '')) : null;
+  return Array.isArray(v) ? v.filter(function (x) { return ORG_REF.test(String(x)); }) : [];
+}
+// Organizations hidden from our list, Dashboard, export and print: removed on the pitching site and not put back.
+function hidden_(log) {
+  const back = restored_();
+  return removed_(log).filter(function (r) { return back.indexOf(r) < 0; });
+}
+// Put a removed organization back on our list (on = true) or take it off again: Admins and Chiefs. Logged in
+// Resubmission_Log (Field = List).
+function setRestored_(req, user) {
+  need_(user, 'Chief');
+  const ref = String(req.ref || '');
+  if (!ORG_REF.test(ref)) throw new Error('Bad organization code');
+  const on = req.on === true;
+  return locked_(function () {
+    const list = restored_().filter(function (r) { return r !== ref; });
+    const was = list.length !== restored_().length;
+    if (on) list.push(ref);
+    list.sort();
+    setSetting_('Restored Orgs', JSON.stringify(list), user);
+    if (was !== on) resubLog_([[new Date(), user.email, '', ref, 'List', was ? 'Added back' : 'Removed', on ? 'Added back' : 'Removed']]);
+    bump_('Settings', 'Resubmission_Log');
+    return { restored: list };
+  });
 }
 
 function need_(user, role) { if (RANK[user.role] < RANK[role]) throw new Error('Only ' + role + 's can do this'); }
@@ -789,6 +889,42 @@ function project_(ref) {
   const p = subs_().projects.filter(function (x) { return x['Project Ref'] === ref; })[0];
   if (!p) throw new Error('Project ' + ref + ' is not in the latest submissions');
   return { ref: ref, org: p['Org Ref'], name: p['Project Name'] };
+}
+
+// An organization with a submission; the same shape as project_ (org = its RefCode).
+function org__(ref) {
+  ref = String(ref || '');
+  if (!ORG_REF.test(ref)) throw new Error('Bad organization code');
+  if (!subs_().orgs.some(function (o) { return o['Org Ref'] === ref; })) throw new Error('Organization ' + ref + ' is not in the latest submissions');
+  return { org: ref };
+}
+
+// Notification emails from the submission (Organization tab, "Notification Emails"): up to 3, checked, lower case.
+function emails_(o) {
+  const seen = [];
+  String((o && o['Notification Emails']) || '').split(/[\s,;]+/).forEach(function (e) {
+    e = e.trim().toLowerCase();
+    if (/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(e) && seen.indexOf(e) < 0 && seen.length < 3) seen.push(e);
+  });
+  return seen;
+}
+
+// Budget-form feedback row of one organization (or null).
+function orgPreRow_(ref) {
+  return tabRows_('OrgPrePitch').filter(function (r) { return r['Org Ref'] === ref; })[0] || null;
+}
+function orgPreOut_(r) {
+  r = r || {};
+  return { note: String(r['Feedback Note'] || ''), file: files_(r['Budget Form Feedback File'])[0] || null, at: iso_(r['Updated At']), by: r['Updated By'] || '' };
+}
+
+// My projects (v2.7): the org data of every organization I'm in charge of that has a submission.
+function myProjects_(req, user) {
+  need_(user, 'Staff');
+  const me = users_().filter(function (u) { return u.email === user.email; })[0];
+  const have = subs_().orgs.map(function (o) { return o['Org Ref']; });
+  const refs = (me ? me.orgs : []).filter(function (r) { return have.indexOf(r) >= 0; }).sort();
+  return { orgs: refs.map(function (ref) { return { ref: ref, data: org_({ ref: ref }, user) }; }) };
 }
 
 // A file picked earlier through upload_: must sit in DRIVE_FOLDER_ID/<org>/. Returns { id, name } or null.
@@ -1008,7 +1144,7 @@ function upsert_(sh, all, cols, row) {
   writeRow_(sh, i >= 0 ? i + 2 : sh.getLastRow() + 1, cols, row);
 }
 
-// Sheet row number of a Project Ref (from the key column), 0 = none.
+// Sheet row number of a key (Project Ref / Org Ref, from the first column), 0 = none.
 function rowOf_(sh, ref) {
   const n = sh.getLastRow() - 1;
   if (n < 1) return 0;
@@ -1026,9 +1162,10 @@ function rowAt_(sh, at) {
 // write, without the lock (two saves of one project at once: the last wins). A new row is added under the lock, after
 // looking again, so two first saves of one project can't both append.
 function saveRow_(sh, cols, row, at) {
-  at = at || rowOf_(sh, row['Project Ref']);
+  const key = row[cols[0]]; // Project Ref, or Org Ref on OrgPrePitch
+  at = at || rowOf_(sh, key);
   if (at) { writeRow_(sh, at, cols, row); return; }
-  locked_(function () { writeRow_(sh, rowOf_(sh, row['Project Ref']) || sh.getLastRow() + 1, cols, row); });
+  locked_(function () { writeRow_(sh, rowOf_(sh, key) || sh.getLastRow() + 1, cols, row); });
 }
 
 function writeRow_(sh, at, cols, row) {

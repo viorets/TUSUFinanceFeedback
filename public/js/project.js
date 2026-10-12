@@ -102,13 +102,19 @@ export function cardTop(p, budgets, extra = '', lead = '') {
       ${extra ? `<div class="dl-row">${extra}</div>` : ''}</div>`;
 }
 
-// Pitching slot from the scheduling site: { date: 'yyyy-mm-dd', start, end, room } (room may be a meeting link).
+// Pitching slot from the scheduling site: { date: 'yyyy-mm-dd', start, end, room, link } (room may be a meeting link;
+// link = the Meeting Link column, https only).
 export function slotLine(s) {
   if (!s?.date) return `<p class="slot none">${icon('clock', 18)}${tr('Pitching time not scheduled yet', 'ยังไม่มีกำหนดเวลานำเสนอ')}</p>`;
   const d = new Date(`${s.date}T00:00`);
   const day = Number.isNaN(+d) ? s.date : d.toLocaleDateString(locale(), { weekday: 'short', day: 'numeric', month: 'short', year: 'numeric' });
   const room = /^https?:\/\//.test(s.room) ? `<a href="${esc(s.room)}" target="_blank" rel="noopener">${tr('Join meeting', 'เข้าร่วมประชุม')}</a>` : esc(s.room);
-  return `<p class="slot">${icon('clock', 18)}<span class="muted">${tr('Pitching', 'นำเสนอ')}</span><b>${esc(day)}</b><b class="num">${esc(s.start)}${s.end ? `–${esc(s.end)}` : ''}</b>${room ? `<span>${room}</span>` : ''}</p>`;
+  return `<p class="slot">${icon('clock', 18)}<span class="muted">${tr('Pitching', 'นำเสนอ')}</span><b>${esc(day)}</b><b class="num">${esc(s.start)}${s.end ? `–${esc(s.end)}` : ''}</b>${room ? `<span>${room}</span>` : ''}${meetLink(s)}</p>`;
+}
+
+// The slot's meeting link ("Join meeting", new tab), or '' when there is none.
+export function meetLink(s, empty = '') {
+  return s?.link ? `<a href="${esc(s.link)}" target="_blank" rel="noopener">${icon('ext', 14)}${tr('Join meeting', 'เข้าร่วมประชุม')}</a>` : empty;
 }
 
 // The same slot as plain text (print).

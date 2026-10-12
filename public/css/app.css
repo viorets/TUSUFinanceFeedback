@@ -412,19 +412,34 @@ button.btn-pill:disabled { opacity: .5; cursor: default; }
 .texts textarea { min-height: 44px; padding: 8px 12px; font-size: 15px; }
 .texts tr.changed td:first-child { box-shadow: inset 4px 0 0 var(--cyan); }
 
-/* ---------- print (v2.6): cover + one page per phase, styled like the site, light colours whatever the theme ---------- */
+/* ---------- print (v2.7): one continuous vertical page, full width; styled like the site, light colours whatever the theme.
+   The page size (@page) is set by printNow (print.js) for the paper picked. ---------- */
 .print-sheet { display: none; }
+/* Auto paper: laid out off screen at the printable width (210mm - 2 x 8mm) to measure its height. */
+.print-sheet.measure { display: block; position: absolute; left: -10000px; top: 0; width: 194mm; font-size: 10pt; visibility: hidden; }
+.print-opts .paper { display: grid; gap: 6px; margin-top: 6px; }
 .print-opts { display: grid; gap: 10px; margin: 6px 0 4px; text-align: left; }
 .print-opts .check { margin-left: 0; }
 @media print {
-  @page { size: A4; margin: 14mm 13mm 16mm; @bottom-right { content: counter(page); font: 8pt sans-serif; color: #6e6e73; } }
   body.printing { background: #fff !important; color: #1d1d1f; font-size: 10pt; }
   body.printing > :not(.print-sheet) { display: none !important; }
   body.printing .print-sheet { display: block; }
+}
+/* Sheet styles apply on screen too, so the Auto paper measure (.measure) matches the printed layout. */
+.print-sheet { font-size: 10pt; }
+@media all {
   .print-sheet { font-family: var(--font); color: #1d1d1f; -webkit-print-color-adjust: exact; print-color-adjust: exact; }
   .print-sheet * { box-shadow: none !important; }
   .print-sheet .p-orgdoc + .p-orgdoc { break-before: page; }
-  .print-sheet .p-phase { break-before: page; }
+  .print-sheet .p-phase { margin-top: 5mm; }
+  .print-sheet .p-grid2 { display: grid; grid-template-columns: minmax(0, 2fr) minmax(0, 3fr); gap: 3.5mm; align-items: start; }
+  .print-sheet .p-cards { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 0 3.5mm; align-items: start; }
+  .print-sheet .p-title { margin: 4mm 0 3mm; }
+  .print-sheet .p-sum .p-orgrow td { border-top: .3mm solid #b2dce1; background: #f8fdfd; }
+  .print-sheet .p-sum .p-sub td { color: #3a3a3c; font-size: 9pt; padding-top: 1mm; padding-bottom: 1mm; }
+  .print-sheet .p-sum .p-sub small { display: inline; margin-left: 1.5mm; }
+  .print-sheet .p-sum tfoot td { border-top: .5mm solid #006371; padding: 2mm; }
+  .print-sheet .p-campus h1 { margin-top: 5mm; }
 
   /* cover */
   .print-sheet .p-top { display: flex; justify-content: space-between; align-items: center; padding: 4mm 5mm; border-radius: 3mm;
@@ -516,3 +531,13 @@ button.btn-pill:disabled { opacity: .5; cursor: default; }
 .link-row { gap: 14px; flex-wrap: wrap; align-items: flex-end; }
 .link-row label { display: grid; gap: 6px; font-size: 14px; color: var(--text2); min-width: 200px; }
 .link-row .grow2 { flex: 2; }
+
+/* ---------- v2.7: My projects, budget-form feedback, admin console ---------- */
+.pill.red { background: rgba(215, 0, 21, .1); color: var(--red); }
+small.block { display: block; margin-top: 2px; }
+.quotes tr.grp a { color: inherit; text-decoration: none; }
+.quotes tr.grp a:hover { text-decoration: underline; }
+.budget-form .bform { border-top: 1px solid var(--sep); margin-top: 12px; padding-top: 12px; }
+.section-title .ic { vertical-align: -3px; margin-right: 8px; color: var(--ink); }
+.admin-top { display: flex; flex-wrap: wrap; gap: 10px; align-items: center; margin-bottom: 8px; }
+.removed-row { display: flex; align-items: center; gap: 12px; }

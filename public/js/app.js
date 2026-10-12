@@ -35,6 +35,7 @@ const VIEWS = {
   admin: () => import('./views/admin.js'),
   dashboard: () => import('./views/dashboard.js'),
   control: () => import('./views/control.js'),
+  mine: () => import('./views/mine.js'),
 };
 
 const ctx = {
@@ -59,6 +60,7 @@ function parse(hash) {
   if (a === 'admin') return { view: 'admin' };
   if (a === 'dashboard') return { view: 'dashboard' };
   if (a === 'control') return { view: 'control' };
+  if (a === 'mine') return { view: 'mine' };
   return { view: 'list' };
 }
 
@@ -75,6 +77,7 @@ function shell(route) {
     <nav class="tabs" aria-label="${tr('Sections', 'เมนู')}"><div class="tabs-in">
       ${tab('#/dashboard', 'chart', tr('Dashboard', 'แดชบอร์ด'), route.view === 'dashboard')}
       ${tab('#/', 'grid', tr('Organizations', 'องค์กร'), route.view === 'list' || route.view === 'org')}
+      ${tab('#/mine', 'user', tr('My projects', 'โครงการของฉัน'), route.view === 'mine')}
       ${ctx.adminTab ? tab('#/admin', 'shield', tr('Admin console', 'คอนโซลผู้ดูแล'), route.view === 'admin') : ''}
       ${ctx.control ? tab('#/control', 'sliders', tr('Control', 'ควบคุม'), route.view === 'control') : ''}
       ${ctx.boot?.link ? `<a href="${esc(ctx.boot.link.url)}" target="_blank" rel="noopener">${icon('ext', 18)}<span>${esc(ctx.boot.link.label || tr('Schedule', 'ตารางเวลา'))}</span></a>` : ''}

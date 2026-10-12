@@ -1,26 +1,30 @@
 // Pre-pitch: each project as submitted, then a Note form for self-noting (every role can edit; nothing is
 // required and nothing is tracked since v2.2). A No on .docx / PDF offers a feedback file, uploaded straight to
 // Drive when picked; Save writes the row and the server logs every changed field in PrePitch_Log.
-// Top of the tab: the organization's Budget proposal form (.xlsx) from the submission (v2.4), preview + download.
+// Top of the tab: the organization's Budget proposal form (.xlsx) from the submission (v2.4), preview + download,
+// and under it a feedback box on that form (v2.7): a note + one file, saved with its own Save, logged like the cards.
 import { tr } from '../i18n.js';
 import { $, esc, icon, toast, moneyBox, parseMoney, liveMoney, dateTimeFmt, num2, dialog, errorBox } from '../ui.js';
 import { call, upload, forget } from '../api.js';
 import { cardTop, dlBtn, fileChip } from '../project.js';
 import { ORGS } from '../masterdata.js';
 
-let st = null; // { el, d, can, form: { ref: working copy } }
+let st = null; // { el, d, can, form: { ref: working copy }, box: budget-form feedback working copy }
 
 const blank = { approvedBudget: null, docxOk: '', docxFile: null, pdfOk: '', pdfFile: null, note: '' };
 const pick = (x) => ({ approvedBudget: x.approvedBudget ?? null, docxOk: x.docxOk || '', docxFile: x.docxFile || null, pdfOk: x.pdfOk || '', pdfFile: x.pdfFile || null, note: x.note || '' });
 const dirty = (ref) => JSON.stringify(st.form[ref]) !== JSON.stringify(pick(st.d.pre[ref] || blank));
-export const isDirty = () => !!st && st.d.projects.some((p) => dirty(p.ref));
-// Projects with unsaved edits, for the leave window: [{ ref, name }].
-export const unsaved = () => (st ? st.d.projects.filter((p) => dirty(p.ref)).map((p) => ({ ref: p.ref, name: p.name })) : []);
-// "Save and leave": saves each unsaved project; throws at the first that fails (the rest stay unsaved).
-export async function saveAll() { for (const p of unsaved()) await save(p.ref); }
+const pickBox = (x) => ({ note: x?.note || '', file: x?.file || null });
+const boxDirty = () => !!st && JSON.stringify(st.box) !== JSON.stringify(pickBox(st.d.orgPre));
+export const isDirty = () => !!st && (boxDirty() || st.d.projects.some((p) => dirty(p.ref)));
+// Unsaved edits, for the leave window: [{ ref, name }] (the budget-form box first, ref 'form').
+export const unsaved = () => (st ? [...(boxDirty() ? [{ ref: 'form', name: tr('Feedback on the budget form', 'ข้อเสนอแนะต่อแบบฟอร์มงบประมาณ') }] : []),
+  ...st.d.projects.filter((p) => dirty(p.ref)).map((p) => ({ ref: p.ref, name: p.name }))] : []);
+// "Save and leave": saves each unsaved part; throws at the first that fails (the rest stay unsaved).
+export async function saveAll() { for (const p of unsaved()) await (p.ref === 'form' ? saveBox() : save(p.ref)); }
 
 export function render(el, d, ctx) {
-  st = { el, d, ctx, can: ctx.canEdit, form: Object.fromEntries(d.projects.map((p) => [p.ref, pick(d.pre[p.ref] || blank)])) };
+  st = { el, d, ctx, can: ctx.canEdit, form: Object.fromEntries(d.projects.map((p) => [p.ref, pick(d.pre[p.ref] || blank)])), box: pickBox(d.orgPre) };
   el.innerHTML = `<div class="notice blue">${icon('alert', 18)}<span>${tr('This section is for your own notes. You don’t have to fill it in.', 'ส่วนนี้มีไว้สำหรับจดบันทึกของคุณเอง ไม่จำเป็นต้องกรอก')}</span></div>${budgetForm(d)}${d.projects.map(card).join('')}`;
   el.oninput = onInput;
   el.onchange = onChange;
@@ -32,8 +36,31 @@ function budgetForm(d) {
   const src = d.org?.budgetForm || '';
   return `<section class="group budget-form"><div class="row"><span class="grow"><b>${tr('Budget proposal form (.xlsx)', 'แบบฟอร์มรายการงบประมาณ (.xlsx)')}</b>
     <small class="muted">${src ? tr('One per organization, from the submission', 'หนึ่งไฟล์ต่อองค์กร จากการส่งข้อมูล') : tr('No file submitted', 'ยังไม่มีไฟล์ที่ส่งเข้ามา')}</small></span>
-    ${dlBtn(src, tr('Budget proposal form', 'แบบฟอร์มงบประมาณ'))}</div></section>`;
+    ${dlBtn(src, tr('Budget proposal form', 'แบบฟอร์มงบประมาณ'))}</div>
+    <div class="fb bform"><h4>${tr('Feedback on the budget form', 'ข้อเสนอแนะต่อแบบฟอร์มงบประมาณ')}</h4>
+      <div class="field"><label>${tr('Note', 'บันทึก')}</label><textarea data-box="note" maxlength="5000" ${st.can ? '' : 'disabled'}>${esc(st.box.note)}</textarea></div>
+      <div class="field"><label>${tr('Feedback file', 'ไฟล์ข้อเสนอแนะ')}</label><div data-slot="box">${boxSlot()}</div></div>
+      <div class="actions"><span class="muted small" data-box-saved>${savedLine(d.orgPre)}</span>${st.can ? `<button class="btn primary" data-save-box>${tr('Save', 'บันทึก')}</button>` : ''}</div>
+    </div></section>`;
 }
+
+// The budget-form feedback file: .xlsx, .xls, .docx or PDF.
+function boxSlot() {
+  const f = st.box.file;
+  return `<div class="upl">${fileChip(f)}${st.can ? `<label class="btn">${icon('upload', 16)}${f ? tr('Replace', 'เปลี่ยนไฟล์') : tr('Upload feedback file', 'อัปโหลดไฟล์ข้อเสนอแนะ')}
+    <input type="file" hidden accept=".xlsx,.xls,.docx,.pdf" data-up="box"></label>` : ''}${f && st.can ? `<button type="button" class="btn plain" data-box-clear>${tr('Remove', 'นำออก')}</button>` : ''}</div>`;
+}
+
+async function saveBox() {
+  const out = await call('saveOrgPrePitch', { org: orgRef(), data: st.box });
+  st.d.orgPre = out.orgPre;
+  st.box = pickBox(out.orgPre);
+  const line = $('[data-box-saved]', st.el);
+  if (line) line.innerHTML = savedLine(out.orgPre);
+  st.ctx.persist?.();
+  return out;
+}
+const orgRef = () => (st.d.projects[0]?.ref || '').replace(/-P\d+$/, '');
 
 function card(p) {
   const f = st.form[p.ref];
@@ -68,6 +95,7 @@ function slot(ref, k) {
 const refOf = (e) => e.target.closest('[data-ref]')?.dataset.ref;
 
 function onInput(e) {
+  if (e.target.dataset.box === 'note') { st.box.note = e.target.value; return; }
   const ref = refOf(e); const k = e.target.dataset.k;
   if (!ref || !k) return;
   if (k === 'approvedBudget') { liveMoney(e.target); st.form[ref].approvedBudget = parseMoney(e.target.value); }
@@ -75,6 +103,7 @@ function onInput(e) {
 }
 
 async function onChange(e) {
+  if (e.target.dataset.up === 'box') { await boxUpload(e); return; }
   const ref = refOf(e);
   if (!ref) return;
   const k = e.target.dataset.k;
@@ -96,6 +125,20 @@ async function onChange(e) {
     toast(err.message, 'bad');
   }
   box.innerHTML = slot(ref, kind);
+}
+
+async function boxUpload(e) {
+  const file = e.target.files?.[0];
+  if (!file) return;
+  const box = e.target.closest('[data-slot]');
+  box.querySelector('.upl')?.classList.add('busy');
+  try {
+    st.box.file = await upload(file, { org: orgRef(), purpose: 'form', only: 'any' });
+    toast(tr('Uploaded to Drive — press Save to keep it', 'อัปโหลดไปยัง Drive แล้ว — กดบันทึกเพื่อเก็บ'));
+  } catch (err) {
+    toast(err.message, 'bad');
+  }
+  box.innerHTML = boxSlot();
 }
 
 // Saves one project's form and repaints its card. Returns the server's answer; throws when the save fails.
@@ -128,6 +171,19 @@ function savedWindow(ref) {
 }
 
 async function onClick(e) {
+  if (e.target.closest('[data-box-clear]')) { st.box.file = null; $('[data-slot="box"]', st.el).innerHTML = boxSlot(); return; }
+  const bb = e.target.closest('[data-save-box]');
+  if (bb) {
+    bb.disabled = true;
+    try {
+      const out = await saveBox();
+      toast(out.changed ? tr('Saved', 'บันทึกแล้ว') : tr('Nothing changed', 'ไม่มีการเปลี่ยนแปลง'));
+    } catch (err) {
+      await errorBox(err.message);
+    }
+    bb.disabled = false;
+    return;
+  }
   const btn = e.target.closest('[data-save]');
   if (!btn) return;
   const ref = refOf(e);

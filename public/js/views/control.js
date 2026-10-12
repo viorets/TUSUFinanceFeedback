@@ -16,6 +16,7 @@ import { QUESTIONS, isReq } from '../project.js';
 const SOURCES = [
   ['js/app.js', () => tr('Top bar and sign-in', 'แถบด้านบนและการลงชื่อเข้าใช้')],
   ['js/views/list.js', () => tr('Organizations', 'องค์กร')],
+  ['js/views/mine.js', () => tr('My projects', 'โครงการของฉัน')],
   ['js/views/org.js', () => tr('Organization page', 'หน้าองค์กร')],
   ['js/views/prepitch.js', () => tr('Pre-pitch', 'ก่อนการนำเสนอ')],
   ['js/views/pitching.js', () => tr('Pitching', 'การนำเสนอ')],

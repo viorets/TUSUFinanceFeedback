@@ -7,7 +7,8 @@
 // A closed case counts as Done whatever its projects' progress (v2.3).
 // Each campus is its own card; fixed column widths keep the cards lined up.
 // "Mine only" (v2.6) keeps the organizations I'm in charge of; it combines with the filter and is kept on this device.
-// "Print campus" (v2.6) prints every submitted organization of that campus in one go (print.js, one printData call).
+// "Print campus" (v2.7) prints a summary of that campus: each organization with its projects as sub-rows
+// (print.js campusSheet, one printData call).
 import { tr, getLang } from '../i18n.js';
 import { $, esc, icon, toast, num2 } from '../ui.js';
 import { cached, call, peek, remember, forget } from '../api.js';
@@ -118,18 +119,16 @@ export async function render(page, ctx) {
     if (b) { printCampus(b); return; }
     open(e);
   };
-  // Print campus: pick the phases, load every organization of the campus in one call, print them one after another.
+  // Print campus: load every organization of the campus in one call, print the summary table.
   const printCampus = async (b) => {
     const c = CAMPUSES.find((x) => x.code === b.dataset.printCampus);
-    const { askPhases, printSheet, printNow } = await import('../print.js');
-    const pick = await askPhases(tr('Print {campus}', 'พิมพ์ {campus}', { campus: label(CAMPUSES, c.code) }));
-    if (!pick) return;
+    const { campusSheet, printNow } = await import('../print.js');
     b.disabled = true;
     toast(tr('Preparing the print…', 'กำลังเตรียมการพิมพ์…'));
     try {
       const out = await call('printData', { campus: c.code });
-      const html = out.orgs.filter((x) => x.data.org).map((x) => printSheet(x.ref, x.data, pick, ctx.nameOf)).join('');
-      if (html) printNow(html); else toast(tr('No submitted organizations in this campus', 'ไม่มีองค์กรที่ส่งข้อมูลในวิทยาเขตนี้'), 'bad');
+      const orgs = out.orgs.filter((x) => x.data.org);
+      if (orgs.length) printNow(campusSheet(c.code, orgs), 'A4'); else toast(tr('No submitted organizations in this campus', 'ไม่มีองค์กรที่ส่งข้อมูลในวิทยาเขตนี้'), 'bad');
     } catch (err) {
       toast(err.message, 'bad');
     }
