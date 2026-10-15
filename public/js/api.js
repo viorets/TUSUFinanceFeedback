@@ -2,6 +2,7 @@
 import { SCRIPT_URL } from './config.js';
 import { idToken } from './firebase.js';
 import { tr } from './i18n.js';
+import { dateTimeFmt } from './ui.js';
 
 const MAX_MB = 25; // keep in step with MAX_BYTES in Code.gs
 const TTL = 60e3;
@@ -31,8 +32,21 @@ async function once(action, body) {
   const text = await res.text();
   let out;
   try { out = JSON.parse(text); } catch { throw new Error(tr('BUSY: the server is busy — please try again', 'BUSY: เซิร์ฟเวอร์ไม่ว่าง — กรุณาลองใหม่')); } // Google's "too many" page
-  if (!out.ok) throw Object.assign(new Error(out.error || 'Request failed'), { code: out.error });
+  if (!out.ok) throw Object.assign(new Error(message(out.error)), { code: out.error });
   return out;
+}
+
+// Save conflicts (v2.8) come back as codes: someone else saved after this page loaded, so nothing was written.
+// Every other error is shown as the server wrote it.
+function message(err) {
+  if (!err) return 'Request failed';
+  if (err === 'CONFLICT_USERS') return tr('Someone else changed the user list after this page loaded, so nothing was saved. Reload the page and make your changes again.', 'มีคนอื่นแก้ไขรายชื่อผู้ใช้หลังจากเปิดหน้านี้ จึงยังไม่ได้บันทึก กรุณาโหลดหน้าใหม่แล้วแก้ไขอีกครั้ง');
+  if (err.startsWith('CONFLICT:')) {
+    let c = {};
+    try { c = JSON.parse(err.slice(9)); } catch { /* shown without names */ }
+    return tr('{who} saved this at {when}, after this page loaded, so your changes were not saved. Copy what you typed, reload the page, then save again.', '{who} บันทึกรายการนี้เมื่อ {when} หลังจากเปิดหน้านี้ จึงยังไม่ได้บันทึกการแก้ไขของคุณ กรุณาคัดลอกสิ่งที่พิมพ์ไว้ โหลดหน้าใหม่ แล้วบันทึกอีกครั้ง', { who: c.by || tr('Someone', 'มีคน'), when: c.at ? dateTimeFmt(c.at) : '—' });
+  }
+  return err;
 }
 
 // Same read again within a minute → the same answer, no network. Views mutate the answer after a save.

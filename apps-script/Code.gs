@@ -41,6 +41,9 @@
  * cache plus one read of the tab it wrote.
  * Saves (v2.6.3): updating a project's existing row is one write and needs no lock; only adding a new row takes the
  * script lock (saveRow_), so saves no longer queue behind each other. Log rows are added with appendRow (atomic).
+ * Save conflicts (v2.8): a save carries the Updated At its page loaded (base); when the row changed since, the save is
+ * refused (fresh_) instead of silently overwriting. Save users does the same with a Users version (usersVer_). Right
+ * before writing, the case is checked again in the Sheet itself (stillOpen_).
  *
  * Setup: README.md. After changing this file: clasp push, then update the existing deployment (same /exec URL).
  */
@@ -293,6 +296,8 @@ function savePrePitch_(req, user) {
   const log = PRE_FIELDS.filter(function (k) { return logText_(old[k]) !== logText_(row[k]); })
     .map(function (k) { return [now, user.email, p.ref, p.org, k, cell_(logText_(old[k])), cell_(logText_(row[k]))]; });
   if (log.length) {
+    fresh_(at && old, req.base);
+    stillOpen_(p.org);
     saveRow_(sh, TABS.PrePitch, row, at);
     const lg = tab_('PrePitch_Log');
     log.forEach(function (r) { lg.appendRow(r); });
@@ -320,6 +325,8 @@ function saveOrgPrePitch_(req, user) {
   const log = Object.keys(FORM_FIELDS).filter(function (k) { return logText_(old[k]) !== logText_(row[k]); })
     .map(function (k) { return [now, user.email, '', o.org, FORM_FIELDS[k], cell_(logText_(old[k])), cell_(logText_(row[k]))]; });
   if (log.length) {
+    fresh_(at && old, req.base);
+    stillOpen_(o.org);
     saveRow_(sh, TABS.OrgPrePitch, row, at);
     const lg = tab_('PrePitch_Log');
     log.forEach(function (r) { lg.appendRow(r); });
@@ -348,6 +355,8 @@ function savePitching_(req, user) {
   const log = PITCH_FIELDS.filter(function (k) { return logText_(old[k]) !== logText_(row[k]); })
     .map(function (k) { return [row['Updated At'], user.email, p.ref, p.org, k, cell_(logText_(old[k])), cell_(logText_(row[k]))]; });
   if (!log.length) return { pitch: pitchOut_(old), changed: 0 };
+  fresh_(at && old, req.base);
+  stillOpen_(p.org);
   saveRow_(sh, TABS.Pitching, row, at);
   const lg = tab_('Pitching_Log');
   log.forEach(function (r) { lg.appendRow(r); });
@@ -367,7 +376,10 @@ function saveResubmit_(req, user) {
   const row = { 'Project Ref': p.ref, 'Org Ref': p.org, 'Project Name': p.name, 'Decision': decision, 'Updated At': now, 'Updated By': user.email };
   const sh = tab_('Resubmission');
   const at = rowOf_(sh, p.ref);
-  const old = at ? String(sh.getRange(at, TABS.Resubmission.indexOf('Decision') + 1).getValue() || '') : '';
+  const was = at ? rowAt_(sh, at) : null;
+  const old = was ? String(was['Decision'] || '') : '';
+  if (old !== decision) fresh_(was, req.base);
+  stillOpen_(p.org);
   saveRow_(sh, TABS.Resubmission, row, at);
   if (old !== decision) resubLog_([[now, user.email, p.ref, p.org, 'Decision', old, decision]]);
   bump_('Resubmission', 'Resubmission_Log');
@@ -447,6 +459,23 @@ function closed_() {
 }
 // Writes to a closed organization's projects are refused, whoever asks.
 function open_(orgRef) { if (closed_()[orgRef]) throw new Error('This organization is closed. Its data cannot be changed.'); }
+// L8 (v2.8): the same check read from the Sheet itself right before a write (closed_ can be a few seconds old).
+function stillOpen_(orgRef) {
+  const sh = tab_('OrgStatus');
+  const at = rowOf_(sh, orgRef);
+  if (at && sh.getRange(at, TABS.OrgStatus.indexOf('Status') + 1).getValue() === 'Closed') throw new Error('This organization is closed. Its data cannot be changed.');
+}
+
+// L1 (v2.8): refuses a save when the row (`now`, read from the Sheet; null = none yet) changed after the page loaded
+// it. base = the Updated At the page had ('' = no row). Requests without a base (pages from before v2.8) skip it.
+// A second of slack: the Sheet may round the stored time.
+function fresh_(now, base) {
+  if (base === undefined || !now) return;
+  const t = Date.parse(iso_(now['Updated At']));
+  const b = Date.parse(String(base || ''));
+  if (isNaN(t) || (!isNaN(b) && Math.abs(t - b) < 1000)) return;
+  throw new Error('CONFLICT:' + JSON.stringify({ by: String(now['Updated By'] || ''), at: iso_(now['Updated At']) }));
+}
 
 // Closed / Unclosed switch on the organization list: Admins and Chiefs.
 function setOrgStatus_(req, user) {
@@ -454,6 +483,8 @@ function setOrgStatus_(req, user) {
   const ref = String(req.ref || '');
   if (!ORG_REF.test(ref)) throw new Error('Bad organization code');
   const closing = req.closed === true;
+  // L9 (v2.8): opening a closed case again needs a reason; it goes into Resubmission_Log.
+  const reason = text_(req.reason, 500).trim();
   // A case closes only when every project in the latest submission is Approved on Re-submission.
   if (closing) {
     const decided = byKey_(tabRows_('Resubmission'), 'Project Ref');
@@ -466,8 +497,9 @@ function setOrgStatus_(req, user) {
     const refs = sh.getLastRow() > 1 ? sh.getRange(2, 1, sh.getLastRow() - 1, 1).getValues().map(function (x) { return x[0]; }) : [];
     const i = refs.indexOf(ref);
     const was = i >= 0 && sh.getRange(i + 2, 2).getValue() === 'Closed' ? 'Closed' : 'Open';
+    if (was === 'Closed' && !closing && !reason) throw new Error('Give a reason for opening the case again.');
     sh.getRange(i >= 0 ? i + 2 : sh.getLastRow() + 1, 1, 1, 4).setValues([[ref, closing ? 'Closed' : 'Unclosed', now, user.email]]);
-    if (was !== (closing ? 'Closed' : 'Open')) resubLog_([[now, user.email, '', ref, 'Case', was, closing ? 'Closed' : 'Open']]);
+    if (was !== (closing ? 'Closed' : 'Open')) resubLog_([[now, user.email, '', ref, 'Case', was, closing ? 'Closed' : 'Open — ' + reason]]);
     bump_('OrgStatus', 'Resubmission_Log');
   });
   return { closed: closing ? { at: now.toISOString(), by: user.email } : null };
@@ -576,6 +608,7 @@ function admin_(req, user) {
   // removed: every organization removed on the pitching site; restored: those put back on our list.
   const out = cached_('admin', function () { return { removed: removed_(submissionLog_()), restored: restored_(), allocated: allocated_(), phases: phases_() }; });
   out.users = users_();
+  out.usersVer = usersVer_();
   out.owner = owner_();
   out.sheetUrl = 'https://docs.google.com/spreadsheets/d/' + FEEDBACK_SHEET_ID + '/edit';
   return canLog_(user) ? logs(out) : out;
@@ -729,13 +762,26 @@ function saveUsers_(req, user) {
   if (user.role !== 'Admin') {
     Object.keys(before).forEach(function (e) { if (before[e] === 'Admin' && e !== owner_() && !seen[e]) throw new Error('Only Admins can remove Admins'); });
   }
-  locked_(function () {
+  const ver = locked_(function () {
+    // L2 (v2.8): refused when the tab changed after the console loaded it (another Chief's save, or a person in
+    // charge set on the list). Consoles from before v2.8 send no version and skip the check.
+    if (req.version !== undefined && req.version !== usersVer_()) throw new Error('CONFLICT_USERS');
     const sh = tab_('Users');
     if (sh.getLastRow() > 1) sh.getRange(2, 1, sh.getLastRow() - 1, TABS.Users.length).clearContent();
     if (rows.length) sh.getRange(2, 1, rows.length, TABS.Users.length).setValues(rows);
     bump_('Users');
+    return usersVer_();
   });
-  return { users: users_() };
+  return { users: users_(), usersVer: ver };
+}
+
+// The Users tab's version: a digest of its cells, read from the Sheet itself (never the cache).
+function usersVer_() {
+  const sh = tab_('Users');
+  const v = sh.getLastRow() > 1 ? sh.getRange(2, 1, sh.getLastRow() - 1, TABS.Users.length).getValues() : [];
+  // Times to the second, so the Sheet's rounding can't change the version.
+  v.forEach(function (r) { r.forEach(function (c, i) { if (c instanceof Date) r[i] = Math.floor(c.getTime() / 1000); }); });
+  return Utilities.base64EncodeWebSafe(Utilities.computeDigest(Utilities.DigestAlgorithm.MD5, JSON.stringify(v)));
 }
 
 // Person in charge of one organization (list-page dropdown): the chosen user gets the RefCode, everyone else loses it.

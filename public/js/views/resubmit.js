@@ -5,7 +5,7 @@
 // organization list before). Closed = nothing in the organization can be changed (Code.gs refuses the writes).
 // A case can close only when every project is Approved (v2.4); Code.gs checks too. Reopening is always allowed.
 import { tr } from '../i18n.js';
-import { $, esc, icon, toast, dateTimeFmt, confirmBox } from '../ui.js';
+import { $, esc, icon, toast, dateTimeFmt, confirmBox, dialog } from '../ui.js';
 import { call, forget } from '../api.js';
 import { progress, projNo, star } from '../project.js';
 
@@ -49,13 +49,14 @@ export function render(el, d, ctx) {
     if (!b) return;
     const ref = d.projects[0].ref.replace(/-P\d+$/, ''); // the tab only shows when there are projects
     const closing = !d.closed;
-    const ok = await confirmBox(closing ? tr('Close this case?', 'ปิดเคสนี้?') : tr('Open this case again?', 'เปิดเคสนี้อีกครั้ง?'),
-      closing ? tr('No one can change this organization’s data until the case is opened again.', 'จะไม่มีใครแก้ไขข้อมูลขององค์กรนี้ได้จนกว่าจะเปิดเคสอีกครั้ง') : tr('Its data can be changed again.', 'จะแก้ไขข้อมูลได้อีกครั้ง'),
-      { ok: closing ? tr('Close case', 'ปิดเคส') : tr('Open case', 'เปิดเคส'), danger: closing });
+    const reason = closing ? '' : await reopenReason();
+    const ok = closing ? await confirmBox(tr('Close this case?', 'ปิดเคสนี้?'),
+      tr('No one can change this organization’s data until the case is opened again.', 'จะไม่มีใครแก้ไขข้อมูลขององค์กรนี้ได้จนกว่าจะเปิดเคสอีกครั้ง'),
+      { ok: tr('Close case', 'ปิดเคส'), danger: true }) : !!reason;
     if (!ok) return;
     b.disabled = true;
     try {
-      const out = await call('setOrgStatus', { ref, closed: closing });
+      const out = await call('setOrgStatus', { ref, closed: closing, reason });
       d.closed = out.closed;
       forget('boot');
       ctx.persist?.();
@@ -74,7 +75,7 @@ export function render(el, d, ctx) {
     const radios = [...box.querySelectorAll('input[type=radio]')];
     radios.forEach((r) => { r.disabled = true; });
     try {
-      const out = await call('saveResubmit', { ref, decision: e.target.value });
+      const out = await call('saveResubmit', { ref, decision: e.target.value, base: d.resub[ref]?.at || '' });
       d.resub[ref] = out.resub;
       $('[data-saved]', box).innerHTML = saved(out.resub);
       progress(el, d, 'resubmit');
@@ -88,4 +89,22 @@ export function render(el, d, ctx) {
     }
     radios.forEach((r) => { r.disabled = !ctx.canEdit; });
   };
+}
+
+// Opening a closed case again (v2.8): the reason is required and goes into the Re-submission log. Resolves the
+// reason, or '' when cancelled.
+async function reopenReason() {
+  let why = '';
+  for (;;) {
+    const p = dialog(tr('Open this case again?', 'เปิดเคสนี้อีกครั้ง?'),
+      `<p>${esc(tr('Its data can be changed again. Say why; the reason is kept in the Re-submission log.', 'จะแก้ไขข้อมูลได้อีกครั้ง กรุณาระบุเหตุผล ซึ่งจะบันทึกไว้ในประวัติการแก้ไขการยื่นใหม่'))}</p>
+      <div class="field"><label for="reopen-why">${esc(tr('Reason', 'เหตุผล'))}</label><textarea id="reopen-why" maxlength="500">${esc(why)}</textarea></div>`,
+      [{ v: false, label: tr('Cancel', 'ยกเลิก') }, { v: true, label: tr('Open case', 'เปิดเคส'), cls: 'primary' }], { none: false });
+    const box = document.getElementById('reopen-why');
+    box?.addEventListener('input', () => { why = box.value; });
+    box?.focus();
+    if (!await p) return '';
+    if (why.trim()) return why.trim();
+    toast(tr('Give a reason for opening the case again', 'กรุณาระบุเหตุผลในการเปิดเคสอีกครั้ง'), 'bad');
+  }
 }

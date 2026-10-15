@@ -52,7 +52,7 @@ function boxSlot() {
 }
 
 async function saveBox() {
-  const out = await call('saveOrgPrePitch', { org: orgRef(), data: st.box });
+  const out = await call('saveOrgPrePitch', { org: orgRef(), data: st.box, base: st.d.orgPre?.at || '' });
   st.d.orgPre = out.orgPre;
   st.box = pickBox(out.orgPre);
   const line = $('[data-box-saved]', st.el);
@@ -143,7 +143,7 @@ async function boxUpload(e) {
 
 // Saves one project's form and repaints its card. Returns the server's answer; throws when the save fails.
 async function save(ref) {
-  const out = await call('savePrePitch', { ref, data: st.form[ref] });
+  const out = await call('savePrePitch', { ref, data: st.form[ref], base: st.d.pre[ref]?.at || '' });
   const sec = st.el.querySelector(`.pcard[data-ref="${CSS.escape(ref)}"]`);
   st.d.pre[ref] = out.pre;
   st.form[ref] = pick(out.pre);

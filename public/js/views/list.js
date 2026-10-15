@@ -154,6 +154,7 @@ export async function render(page, ctx) {
       stat(ref).people = out.people;
       remember('boot', {}, boot);
       forget('org');
+      forget('admin'); // the console's Users version changed
       toast(sel.value ? tr('{who} is in charge of {ref}', '{who} รับผิดชอบ {ref}', { who: sel.value, ref }) : tr('No one in charge of {ref}', '{ref} ไม่มีผู้รับผิดชอบ', { ref }));
     } catch (err) {
       toast(err.message, 'bad');

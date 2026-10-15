@@ -217,10 +217,11 @@ function draw(page, ctx, d) {
   };
   $('#add', page).onclick = () => { st.users.push({ email: '', role: 'Staff', orgs: [], name: '' }); paintUsers(); $('#users tr:last-child input', page)?.focus(); };
   st.save.users = async () => {
-    const out = await call('saveUsers', { users: st.users.filter((u) => u.email) });
+    const out = await call('saveUsers', { users: st.users.filter((u) => u.email), version: d.usersVer });
     st.users = out.users.map((u) => ({ ...u }));
     st.saved = JSON.stringify(st.users);
     d.users = out.users;
+    d.usersVer = out.usersVer;
     remember('admin', {}, d); forget('admin');
     if (ctx.boot) { ctx.boot.names = Object.fromEntries(out.users.filter((u) => u.name).map((u) => [u.email, u.name])); remember('boot', {}, ctx.boot); }
     if (page.isConnected) paintUsers();

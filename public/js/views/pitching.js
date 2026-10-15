@@ -114,7 +114,7 @@ async function onClick(e) {
 
 // Saves one project's form and repaints its card; throws when the save fails.
 async function save(ref) {
-  const out = await call('savePitching', { ref, data: st.form[ref] });
+  const out = await call('savePitching', { ref, data: st.form[ref], base: st.d.pitch[ref]?.at || '' });
   st.d.pitch[ref] = out.pitch;
   progress(st.el, st.d, 'pitching');
   st.ctx.persist?.();
