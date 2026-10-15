@@ -108,6 +108,15 @@ function accountMenu(btn) {
 }
 document.addEventListener('click', (e) => { if (!e.target.closest('.acct')) document.querySelector('.acct .menu')?.remove(); });
 
+// Saves kept on this device (v2.9, api.save): say when one is sent or refused, and show the fresh data.
+addEventListener('outbox', async (e) => {
+  ['org', 'boot', 'dashboard', 'myProjects'].forEach((k) => api.forget(k));
+  if (e.detail.ok) {
+    toast(tr('A pending save was sent', 'ส่งการบันทึกที่รอไว้แล้ว'));
+    if (!current?.isDirty?.()) render();
+  } else await errorBox(e.detail.message, tr('A pending save couldn’t be sent', 'ส่งการบันทึกที่รอไว้ไม่สำเร็จ'));
+});
+
 async function render() {
   const route = parse(location.hash);
   if ((route.view === 'admin' && !ctx.adminTab) || (route.view === 'control' && !ctx.control)) { ctx.go('#/'); return; }
@@ -190,6 +199,7 @@ onUser(async (user) => {
   else root.innerHTML = `<div class="page">${skeleton()}</div>`;
   try {
     ctx.boot = await api.cached('boot');
+    api.flushOutbox(); // saves kept on this device from an earlier visit
     const textsChanged = JSON.stringify(ctx.boot.texts || {}) !== JSON.stringify(kept?.texts || {});
     setTexts(ctx.boot.texts);
     const roleChanged = ctx.boot.me.role !== kept?.me.role || !!ctx.boot.me.control !== !!kept?.me.control || !!ctx.boot.me.log !== !!kept?.me.log;

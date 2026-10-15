@@ -6,7 +6,7 @@ import { tr } from '../i18n.js';
 import { $, esc, icon, num2, toast } from '../ui.js';
 import { cached, forget, peek } from '../api.js';
 import { ORGS } from '../masterdata.js';
-import { projNo, slotText, meetLink, UNFINISHED, phaseOn, PENDING } from '../project.js';
+import { projNo, slotText, meetLink, timeLeft, UNFINISHED, phaseOn, PENDING } from '../project.js';
 import { statusPill } from './org.js';
 
 export async function render(page, ctx) {
@@ -23,7 +23,10 @@ export async function render(page, ctx) {
   }
 }
 
-const COLS = '<colgroup><col style="width:5%"><col style="width:27%"><col style="width:13%"><col style="width:13%"><col style="width:14%"><col style="width:18%"><col style="width:10%"></colgroup>';
+const COLS = '<colgroup><col style="width:5%"><col style="width:24%"><col style="width:12%"><col style="width:12%"><col style="width:13%"><col style="width:17%"><col style="width:8%"><col style="width:9%"></colgroup>';
+let tick = 0; // the Time left column refreshes every minute while the page is open
+
+const left = (slot) => timeLeft(slot) || '<span class="muted">—</span>';
 
 function paint(page, ctx, out) {
   const orgs = out.orgs || [];
@@ -37,10 +40,10 @@ function paint(page, ctx, out) {
   }
   const head = `<tr><th>#</th><th>${tr('Project', 'โครงการ')}</th><th class="r">${tr('Proposed', 'เสนอ')}</th>
     <th>${tr('Pitching progress', 'ความคืบหน้าการนำเสนอ')}</th><th>${tr('Re-submission progress', 'ความคืบหน้าการส่งแก้ไข')}</th>
-    <th>${tr('Pitching time', 'เวลานำเสนอ')}</th><th>${tr('Meeting link', 'ลิงก์ประชุม')}</th></tr>`;
+    <th>${tr('Pitching time', 'เวลานำเสนอ')}</th><th>${tr('Time left', 'เหลือเวลา')}</th><th>${tr('Meeting link', 'ลิงก์ประชุม')}</th></tr>`;
   $('#rows', page).innerHTML = orgs.map(({ ref, data: d }) => {
     const o = ORGS.find((x) => x.code === ref);
-    const top = `<tr class="grp"><th colspan="7"><a href="#/org/${encodeURIComponent(ref)}"><span class="mono">${esc(ref)}</span> · ${esc(o?.en || ref)}</a> ${statusPill(d.closed)}</th></tr>`;
+    const top = `<tr class="grp"><th colspan="8"><a href="#/org/${encodeURIComponent(ref)}"><span class="mono">${esc(ref)}</span> · ${esc(o?.en || ref)}</a> ${statusPill(d.closed)}</th></tr>`;
     const rows = d.projects.map((p) => {
       const pitch = !phaseOn(d, 'pitching') ? `<span class="pill">${esc(PENDING())}</span>`
         : UNFINISHED.pitching(d, p) ? `<span class="pill orange">${tr('Unfinished', 'ยังไม่ครบ')}</span>` : `<span class="pill green">${tr('Done', 'ครบ')}</span>`;
@@ -51,10 +54,16 @@ function paint(page, ctx, out) {
       const slot = d.slots?.[p.ref];
       return `<tr data-ref="${esc(ref)}" data-tab="pitching" tabindex="0"><td>${projNo(p.ref)}</td><td>${esc(p.name || '—')}<small class="muted mono block">${esc(p.ref)}</small></td>
         <td class="r num">${p.budget == null ? '—' : num2(p.budget)}</td><td>${pitch}</td><td>${resub}</td>
-        <td class="small">${slot?.date ? esc(slotText(slot)) : '<span class="muted">—</span>'}</td><td class="small">${meetLink(slot, '<span class="muted">—</span>')}</td></tr>`;
-    }).join('') || `<tr class="none"><td colspan="7" class="muted">${tr('No submitted projects', 'ไม่มีโครงการที่ส่งเข้ามา')}</td></tr>`;
+        <td class="small">${slot?.date ? esc(slotText(slot)) : '<span class="muted">—</span>'}</td><td class="small" data-left="${esc(JSON.stringify(slot || {}))}">${left(slot)}</td>
+        <td class="small">${meetLink(slot, '<span class="muted">—</span>')}</td></tr>`;
+    }).join('') || `<tr class="none"><td colspan="8" class="muted">${tr('No submitted projects', 'ไม่มีโครงการที่ส่งเข้ามา')}</td></tr>`;
     return `<div class="group scroll-x campus-card"><table class="grid-table quotes">${COLS}<thead>${top}${head}</thead><tbody>${rows}</tbody></table></div>`;
   }).join('');
+  clearInterval(tick);
+  tick = setInterval(() => {
+    if (!page.isConnected) { clearInterval(tick); return; }
+    page.querySelectorAll('[data-left]').forEach((td) => { td.innerHTML = left(JSON.parse(td.dataset.left)); });
+  }, 60e3);
   // A row opens its organization's Pitching tab (links inside the row work as links).
   $('#rows', page).onclick = (e) => {
     if (e.target.closest('a')) return;

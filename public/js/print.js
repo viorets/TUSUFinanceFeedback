@@ -104,15 +104,15 @@ export function printSheet(ref, d, show = { prepitch: true, pitching: true, resu
 
   const pitch = () => {
     if (off('pitching')) return pending;
-    const more = ps.filter((p) => { const x = d.pitch[p.ref] || {}; return String(x.summary || '').trim() || (x.noted || []).length || x.excel; });
-    return `${table(
+    const more = ps.filter((p) => { const x = d.pitch[p.ref] || {}; return String(x.summary || '').trim() || (x.noted || []).length; });
+    // Correct Excel file: one per organization (v2.9).
+    return `<p class="p-case">${tr('Correct Excel file', 'ไฟล์ Excel ฉบับแก้ไข')}: ${files([d.orgPitch?.file])}</p>${table(
       ['#', tr('Project', 'โครงการ'), tr('Pitching time', 'เวลานำเสนอ'), tr('Final approved budget', 'งบประมาณอนุมัติขั้นสุดท้าย')],
       ps.map((p) => [projNo(p.ref), proj(p), esc(slotText(d.slots?.[p.ref])), money(d.pitch[p.ref]?.finalBudget)]),
       [3],
     )}<div class="p-cards">${more.map((p) => { const x = d.pitch[p.ref] || {}; return `<div class="p-card"><h3>${esc(tr('Project {n}', 'โครงการที่ {n}', { n: projNo(p.ref) }))} · ${esc(p.name || '—')}</h3>${kv([
       [tr('Summary', 'สรุป'), text(x.summary)],
       [tr('Noted documents', 'เอกสารบันทึก'), files(x.noted)],
-      [tr('Correct Excel file', 'ไฟล์ Excel ฉบับแก้ไข'), files([x.excel])],
     ])}</div>`; }).join('')}</div>`;
   };
 

@@ -4,7 +4,7 @@ import { idToken } from './firebase.js';
 import { tr } from './i18n.js';
 import { dateTimeFmt } from './ui.js';
 
-const MAX_MB = 25; // keep in step with MAX_BYTES in Code.gs
+const MAX_MB = 10; // keep in step with MAX_BYTES in Code.gs (v2.9: 10 MB)
 const TTL = 60e3;
 const cache = new Map(); // reads only: key → { t, p }
 
@@ -86,10 +86,13 @@ const toBase64 = (blob) => new Promise((res, rej) => {
   r.readAsDataURL(blob);
 });
 
-// Upload one file straight to Drive. only = 'docx' | 'pdf' | 'excel' (.xlsx or .xls) | 'any' (any of the four) |
-// '' (.docx or PDF). ref = the project; org = the organization for purpose 'form' (budget-form feedback).
-// Resolves { id, name }.
-export async function upload(file, { ref, org, purpose, only = '' }) {
+// Upload one file to Drive. only = 'docx' | 'pdf' | 'excel' (.xlsx or .xls) | 'any' (any of the four) |
+// '' (.docx or PDF). ref = the project; org = the organization for purposes 'form' (budget-form feedback) and
+// 'excel' (Correct Excel file, v2.9). onProgress(fraction) drives the progress bar. Resolves { id, name }.
+// v2.9: the file goes straight from the browser to Google Drive (a resumable session the server opens in the
+// organization's folder), with no base64 and no Apps Script in between. If that route fails (network, or the
+// browser blocks it), the file goes the old way: base64 through the server.
+export async function upload(file, { ref, org, purpose, only = '' }, onProgress = () => {}) {
   const kind = (String(file.name).match(/\.([a-z0-9]+)$/i) || [])[1]?.toLowerCase();
   const fits = only === 'any' ? !!MIME[kind] : only === 'excel' ? EXCEL.includes(kind) : MIME[kind] && !EXCEL.includes(kind) && (!only || kind === only);
   if (!fits) {
@@ -100,8 +103,91 @@ export async function upload(file, { ref, org, purpose, only = '' }) {
             : tr('Only .docx or PDF files', 'รับเฉพาะไฟล์ .docx หรือ PDF'));
   }
   if (file.size > MAX_MB * 1048576) throw new Error(tr('File is larger than {mb} MB', 'ไฟล์ใหญ่เกิน {mb} MB', { mb: MAX_MB }));
-  const out = await call('upload', { ref, org, purpose, only: only === 'any' ? '' : only, name: file.name, mime: MIME[kind], data: await toBase64(file) });
+  const what = { ref, org, purpose, only: only === 'any' ? '' : only, name: file.name, mime: MIME[kind] };
+  // The server's checks (role, phase, closed case, type) refuse here, before anything goes to Drive.
+  const start = await call('uploadStart', { ...what, size: file.size, origin: location.origin }).catch((e) => {
+    if (/^Drive upload could not start/.test(e.message)) return null; // the old way below
+    throw e;
+  });
+  if (start) {
+    try {
+      const id = await put(start.url, file, MIME[kind], onProgress);
+      return (await call('uploadDone', { ref, org, purpose, id, name: file.name })).file;
+    } catch { /* the old way below */ }
+  }
+  onProgress(0.5);
+  const out = await call('upload', { ...what, data: await toBase64(file) });
+  onProgress(1);
   return out.file;
+}
+
+// The raw file to a Drive resumable-upload session; resolves the new file's id.
+function put(url, file, mime, onProgress) {
+  return new Promise((res, rej) => {
+    const x = new XMLHttpRequest();
+    x.open('PUT', url);
+    x.setRequestHeader('Content-Type', mime);
+    x.upload.onprogress = (e) => { if (e.lengthComputable) onProgress(e.loaded / e.total); };
+    x.onload = () => {
+      let id = '';
+      try { id = JSON.parse(x.responseText).id || ''; } catch { /* rejected below */ }
+      if (x.status >= 200 && x.status < 300 && id) res(id); else rej(new Error(`Drive ${x.status}`));
+    };
+    x.onerror = () => rej(new Error('Drive upload failed'));
+    x.send(file);
+  });
+}
+
+/* ---------- saves kept on this device until the server has them (v2.9) ---------- */
+// A save that can't reach the server (no network, or still busy after the retries) is kept on this device and sent
+// again: when the network comes back, every minute while one waits, and on the next visit (flushOutbox, app.js).
+// One waiting save per item (key): a newer save of the same item replaces it. Each result is announced with an
+// 'outbox' event ({ key, ok, message }).
+const boxKey = () => `outbox:${who}`;
+const readBox = () => { try { return JSON.parse(localStorage.getItem(boxKey()) || '{}'); } catch { return {}; } };
+const writeBox = (b) => { try { if (Object.keys(b).length) localStorage.setItem(boxKey(), JSON.stringify(b)); else localStorage.removeItem(boxKey()); } catch { /* private mode */ } };
+const unreachable = (e) => e instanceof TypeError || BUSY.test(e.message);
+const drop = (key, t) => { const b = readBox(); if (b[key] && (t === undefined || b[key].t === t)) { delete b[key]; writeBox(b); } };
+export const waiting = (key) => !!readBox()[key];
+
+// A save: like call(), but kept on this device when the server can't be reached; it then throws code 'QUEUED'.
+export async function save(action, body, key) {
+  try {
+    const out = await call(action, body);
+    drop(key);
+    return out;
+  } catch (e) {
+    if (!unreachable(e)) throw e;
+    const b = readBox();
+    b[key] = { action, body, t: Date.now() };
+    writeBox(b);
+    arm();
+    throw Object.assign(new Error(tr('The server can’t be reached right now. Your save is kept on this device and will be sent automatically.', 'ขณะนี้ติดต่อเซิร์ฟเวอร์ไม่ได้ การบันทึกของคุณถูกเก็บไว้ในเครื่องนี้และจะส่งให้อัตโนมัติ')), { code: 'QUEUED' });
+  }
+}
+
+let timer = 0;
+let flushing = false;
+const arm = () => { if (!timer) timer = setInterval(flushOutbox, 60e3); };
+addEventListener('online', () => flushOutbox());
+export async function flushOutbox() {
+  const b = readBox();
+  if (!Object.keys(b).length) { clearInterval(timer); timer = 0; return; }
+  if (flushing || !who) return;
+  flushing = true;
+  try {
+    for (const [key, item] of Object.entries(b)) {
+      try {
+        await call(item.action, item.body);
+        drop(key, item.t);
+        dispatchEvent(new CustomEvent('outbox', { detail: { key, ok: true } }));
+      } catch (e) {
+        if (unreachable(e)) { arm(); break; }
+        drop(key, item.t); // refused for good (e.g. someone else saved first): announced, not retried
+        dispatchEvent(new CustomEvent('outbox', { detail: { key, ok: false, message: e.message } }));
+      }
+    }
+  } finally { flushing = false; }
 }
 
 // Drive links: view page and direct download.

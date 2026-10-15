@@ -5,8 +5,8 @@
 // organization list before). Closed = nothing in the organization can be changed (Code.gs refuses the writes).
 // A case can close only when every project is Approved (v2.4); Code.gs checks too. Reopening is always allowed.
 import { tr } from '../i18n.js';
-import { $, esc, icon, toast, dateTimeFmt, confirmBox, dialog } from '../ui.js';
-import { call, forget } from '../api.js';
+import { $, esc, icon, toast, dateTimeFmt, confirmBox, dialog, saving, errorBox } from '../ui.js';
+import { call, save as send, forget } from '../api.js';
 import { progress, projNo, star } from '../project.js';
 
 const CHOICES = [['Approved', () => tr('Approved', 'อนุมัติ')], ['Not Approved', () => tr('Not Approved', 'ไม่อนุมัติ')]];
@@ -20,7 +20,7 @@ export const RESUB_FIELDS = () => [
 
 export function render(el, d, ctx) {
   d.resub = d.resub || {};
-  const saved = (s) => (s?.at ? tr('Saved {when} by {who}', 'บันทึก {when} โดย {who}', { when: dateTimeFmt(s.at), who: esc(ctx.nameOf(s.by)) }) : tr('No decision yet', 'ยังไม่ได้ตัดสิน'));
+  const saved = (s) => (s?.pending ? `<span class="pill orange">${tr('Pending', 'รอส่ง')}</span> ${tr('Kept on this device; it is sent when the server can be reached', 'เก็บไว้ในเครื่องนี้ จะส่งเมื่อติดต่อเซิร์ฟเวอร์ได้')}` : s?.at ? tr('Saved {when} by {who}', 'บันทึก {when} โดย {who}', { when: dateTimeFmt(s.at), who: esc(ctx.nameOf(s.by)) }) : tr('No decision yet', 'ยังไม่ได้ตัดสิน'));
   const closed = d.closed;
   // Projects not Approved yet (Not Approved or no decision): each one blocks closing.
   const notApproved = () => d.projects.filter((p) => d.resub[p.ref]?.decision !== 'Approved').length;
@@ -56,7 +56,7 @@ export function render(el, d, ctx) {
     if (!ok) return;
     b.disabled = true;
     try {
-      const out = await call('setOrgStatus', { ref, closed: closing, reason });
+      const out = await saving(() => call('setOrgStatus', { ref, closed: closing, reason }));
       d.closed = out.closed;
       forget('boot');
       ctx.persist?.();
@@ -74,17 +74,24 @@ export function render(el, d, ctx) {
     const ref = box.dataset.ref;
     const radios = [...box.querySelectorAll('input[type=radio]')];
     radios.forEach((r) => { r.disabled = true; });
+    const prev = d.resub[ref];
     try {
-      const out = await call('saveResubmit', { ref, decision: e.target.value, base: d.resub[ref]?.at || '' });
+      let out;
+      try {
+        out = await saving(() => send('saveResubmit', { ref, decision: e.target.value, base: prev?.at || '' }, `resub:${ref}`));
+      } catch (err) {
+        if (err.code !== 'QUEUED') throw err;
+        out = { resub: { decision: e.target.value, at: prev?.at || '', by: prev?.by || '', pending: true }, queued: true };
+      }
       d.resub[ref] = out.resub;
       $('[data-saved]', box).innerHTML = saved(out.resub);
       progress(el, d, 'resubmit');
       $('[data-casebar]', el).innerHTML = caseBar();
       ctx.persist?.();
       forget('dashboard');
-      toast(tr('Saved', 'บันทึกแล้ว'));
+      toast(out.queued ? tr('Kept on this device — it will be sent automatically', 'เก็บไว้ในเครื่องนี้ — จะส่งให้อัตโนมัติ') : tr('Saved', 'บันทึกแล้ว'));
     } catch (err) {
-      toast(err.message, 'bad');
+      await errorBox(err.message);
       radios.forEach((r) => { r.checked = r.value === d.resub[ref]?.decision; });
     }
     radios.forEach((r) => { r.disabled = !ctx.canEdit; });

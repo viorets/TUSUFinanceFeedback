@@ -98,6 +98,27 @@ export function confirmBox(title, body = '', { ok = tr('OK', 'ตกลง'), da
   return dialog(title, `<p>${esc(body)}</p>`, [{ v: false, label: tr('Cancel', 'ยกเลิก') }, { v: true, label: ok, cls: danger ? 'danger' : 'primary' }], { none: false });
 }
 
+// Progress window (v2.9) around every save and upload: a spinner, a title, an optional bar, no buttons. The page
+// behind can't be clicked, and closing or refreshing the tab asks first while one is open. run(set) gets
+// set(fraction 0..1) for the bar. Resolves run's value; on failure the window closes and the error goes on to the
+// caller, which shows the error window (the edits stay on screen).
+let running = 0;
+addEventListener('beforeunload', (e) => { if (running) { e.preventDefault(); e.returnValue = ''; } });
+export async function busy(title, run) {
+  const back = document.createElement('div');
+  back.className = 'modal-back';
+  back.innerHTML = `<div class="modal busy" role="alertdialog" aria-modal="true" aria-busy="true" aria-label="${esc(title)}"><div class="spin" aria-hidden="true"></div><h2>${esc(title)}</h2>
+    <div class="meter" hidden><i style="width:0%"></i></div></div>`;
+  document.body.append(back);
+  running++;
+  const bar = back.querySelector('.meter');
+  const set = (f) => { bar.hidden = false; bar.firstElementChild.style.width = `${Math.round(Math.min(1, Math.max(0, f)) * 100)}%`; };
+  try { return await run(set); } finally { running--; back.remove(); }
+}
+
+// The progress window with the plain title "Saving…" (admin console, Control, Re-submission).
+export const saving = (run) => busy(tr('Saving…', 'กำลังบันทึก…'), run);
+
 // Error window: stays until OK.
 export const errorBox = (msg, title = tr('Couldn’t save', 'บันทึกไม่สำเร็จ')) =>
   dialog(title, `<p class="err">${esc(msg)}</p>`, [{ v: true, label: tr('OK', 'ตกลง'), cls: 'primary' }], { sticky: true });

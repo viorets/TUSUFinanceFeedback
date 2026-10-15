@@ -12,7 +12,10 @@
  *        PrePitch      one row per project: approval + feedback (latest)
  *        PrePitch_Log  append-only: one row per changed field on every Pre-pitch save (Admins only)
  *        Pitching      one row per project: summary, final approved budget, Noted documents
- *        Pitching_Log  append-only: one row per changed field on every Pitching save (v2.7)
+ *        Pitching_Log  append-only: one row per changed field on every Pitching save (v2.7); the organization's
+ *                      Correct Excel file is logged with an empty Project Ref (v2.9)
+ *        OrgPitching   one row per organization: its Correct Excel file (v2.9; one per organization, no longer per
+ *                      project: purgeProjectExcel() trashed the per-project files)
  *        OrgPrePitch   one row per organization: note + feedback file on its Budget proposal form (v2.7; logged in
  *                      PrePitch_Log with an empty Project Ref)
  *        Export_Log    append-only: who exported data, when, which parts and format (v2.7; exports are Admin-only)
@@ -44,6 +47,9 @@
  * Save conflicts (v2.8): a save carries the Updated At its page loaded (base); when the row changed since, the save is
  * refused (fresh_) instead of silently overwriting. Save users does the same with a Users version (usersVer_). Right
  * before writing, the case is checked again in the Sheet itself (stillOpen_).
+ * Uploads (v2.9): 10 MB. The page asks uploadStart for a Drive resumable-upload session in the organization folder
+ * and sends the file straight to Google (no base64, no Apps Script in between), then uploadDone checks where it
+ * landed. When that fails the page falls back to upload_ (base64 through this script).
  *
  * Setup: README.md. After changing this file: clasp push, then update the existing deployment (same /exec URL).
  */
@@ -56,7 +62,7 @@ const DEFAULTS = {
 const FEEDBACK_SHEET_ID = '1tDak_LDOEvLEuMMa3Wri9Ej3tWjwLcEDS4tvFb-0N0k';
 const DRIVE_FOLDER_ID = '191_2g6tBQwxIJrmUmWMuwECPiRd1Oy2o';
 // Apps Script request bodies top out around 50 MB and base64 adds a third.
-const MAX_BYTES = 25 * 1024 * 1024;
+const MAX_BYTES = 10 * 1024 * 1024; // v2.9: 10 MB (was 25)
 const CACHE_SECONDS = 60;
 const KINDS = {
   docx: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
@@ -85,6 +91,7 @@ const TABS = {
     'Updated At', 'Updated By', 'Correct Excel File', 'Noted Documents JSON', 'Correct Excel File JSON'],
   Pitching_Log: ['Logged At', 'By', 'Project Ref', 'Org Ref', 'Field', 'Old', 'New'],
   OrgPrePitch: ['Org Ref', 'Feedback Note', 'Budget Form Feedback File', 'Updated At', 'Updated By', 'Budget Form Feedback File JSON'],
+  OrgPitching: ['Org Ref', 'Correct Excel File', 'Updated At', 'Updated By', 'Correct Excel File JSON'],
   Export_Log: ['Logged At', 'By', 'Parts', 'Format'],
   Resubmission: ['Project Ref', 'Org Ref', 'Project Name', 'Decision', 'Updated At', 'Updated By'],
   Resubmission_Log: ['Logged At', 'By', 'Project Ref', 'Org Ref', 'Field', 'Old', 'New'],
@@ -96,7 +103,7 @@ const TABS = {
 // Keep in step with QUESTIONS in public/js/project.js.
 // Pre-pitch is for self-noting since v2.2: nothing there is required or tracked.
 const QUESTIONS = {
-  'pitch.summary': false, 'pitch.finalBudget': true, 'pitch.noted': false, 'pitch.excel': false, 'resub.decision': true,
+  'pitch.summary': false, 'pitch.finalBudget': true, 'pitch.noted': false, 'resub.decision': true,
 };
 // Cells that hold files: written as file names linked to Drive, read back from those links (filesIn_).
 const FILE_COLS = ['Docx Feedback File', 'PDF Feedback File', 'Noted Documents', 'Correct Excel File', 'Budget Form Feedback File'];
@@ -104,7 +111,7 @@ const TWIN = ' JSON'; // hidden text twin of a file column (see Speed above)
 // Pre-pitch fields that are logged.
 const PRE_FIELDS = ['Approved Budget', 'Docx Approved', 'Docx Feedback File', 'PDF Approved', 'PDF Feedback File', 'Feedback Note'];
 // Pitching fields that are logged (v2.7).
-const PITCH_FIELDS = ['Summary', 'Final Approved Budget', 'Noted Documents', 'Correct Excel File'];
+const PITCH_FIELDS = ['Summary', 'Final Approved Budget', 'Noted Documents']; // Correct Excel file: per organization (v2.9)
 // Budget-form feedback (Pre-pitch, one per organization): sheet column -> log field name.
 const FORM_FIELDS = { 'Feedback Note': 'Budget form note', 'Budget Form Feedback File': 'Budget form file' };
 
@@ -152,6 +159,7 @@ const ACTIONS = {
   setOrgStatus: setOrgStatus_, saveTexts: saveTexts_, saveRequired: saveRequired_, savePhases: savePhases_,
   exportData: exportData_, printData: printData_, saveExternalLink: saveExternalLink_,
   saveOrgPrePitch: saveOrgPrePitch_, myProjects: myProjects_, setRestored: setRestored_,
+  saveOrgPitching: saveOrgPitching_, uploadStart: uploadStart_, uploadDone: uploadDone_, mailData: mailData_,
 };
 
 function doPost(e) {
@@ -244,6 +252,7 @@ function org_(req, user) {
         emails: emails_(o),
       } : null,
       projects: projects, pre: pre, pitch: pitch, resub: resub, slots: slots, orgPre: orgPreOut_(orgPreRow_(ref)),
+      orgPitch: orgPitchOut_(orgPitchRow_(ref)),
       closed: closed_()[ref] || null, required: required_(), phases: phases_(),
       people: users_().filter(function (u) { return u.orgs.indexOf(ref) >= 0; }).map(function (u) { return u.email; }),
     };
@@ -252,26 +261,71 @@ function org_(req, user) {
 
 /* ---------- writes ---------- */
 
-// One file into DRIVE_FOLDER_ID/<Org Ref>/. Returns { file: { id, name } } for a following save.
+// One file into DRIVE_FOLDER_ID/<Org Ref>/ through this script (base64). Returns { file: { id, name } } for a
+// following save. Since v2.9 the page uses it only when the direct upload (uploadStart_) fails.
 function upload_(req, user) {
+  const u = uploadCheck_(req, user);
+  const bytes = Utilities.base64Decode(req.data || '');
+  if (!bytes.length) throw new Error('Empty file');
+  if (bytes.length > MAX_BYTES) throw new Error('File larger than 10 MB');
+  const f = u.folder.createFile(Utilities.newBlob(bytes, KINDS[u.kind], u.driveName));
+  return { file: { id: f.getId(), name: u.name } };
+}
+
+// Who may upload what, where: role, organization / project, case, phase, type. Returns the target folder, the type
+// and the names. purpose 'form' (budget-form feedback) and 'excel' (Correct Excel file, v2.9) belong to an
+// organization, 'feedback' and 'noted' to a project.
+function uploadCheck_(req, user) {
   need_(user, 'Staff');
-  // purpose 'form' (budget-form feedback) belongs to an organization, the others to a project.
-  const p = req.purpose === 'form' ? org__(req.org) : project_(req.ref);
+  const purpose = { feedback: 'feedback', noted: 'noted', excel: 'excel', form: 'form' }[req.purpose];
+  if (!purpose) throw new Error('Bad purpose');
+  const p = purpose === 'form' || purpose === 'excel' ? org__(req.org) : project_(req.ref);
   open_(p.org);
   const name = String(req.name || '').replace(/[\\/:*?"<>|]/g, '_').slice(0, 180);
   const kind = ((name.match(/\.([a-z0-9]+)$/i) || [])[1] || '').toLowerCase();
   if (!KINDS[kind] || req.mime !== KINDS[kind]) throw new Error('Only .docx, .pdf, .xlsx or .xls files');
-  const purpose = { feedback: 'feedback', noted: 'noted', excel: 'excel', form: 'form' }[req.purpose];
-  if (!purpose) throw new Error('Bad purpose');
   if (purpose !== 'form' && (purpose === 'excel' ? EXCEL.indexOf(kind) < 0 : EXCEL.indexOf(kind) >= 0)) throw new Error(purpose === 'excel' ? 'Only an Excel file (.xlsx or .xls) can go here' : 'Only .docx or .pdf files');
   if (req.only && req.only !== 'excel' && req.only !== kind) throw new Error('Only a .' + req.only + ' file can go here');
   phaseOn_(purpose === 'feedback' || purpose === 'form' ? 'prepitch' : 'pitching');
-  const bytes = Utilities.base64Decode(req.data || '');
-  if (!bytes.length) throw new Error('Empty file');
-  if (bytes.length > MAX_BYTES) throw new Error('File larger than 25 MB');
-  const folder = child_(DriveApp.getFolderById(DRIVE_FOLDER_ID), p.org);
-  const f = folder.createFile(Utilities.newBlob(bytes, KINDS[kind], p.ref + ' ' + purpose + ' — ' + name));
-  return { file: { id: f.getId(), name: name } };
+  return { org: p.org, kind: kind, name: name, folder: child_(DriveApp.getFolderById(DRIVE_FOLDER_ID), p.org),
+    driveName: (p.ref || p.org) + ' ' + purpose + ' — ' + name };
+}
+
+// Direct upload, step 1 (v2.9): a Drive resumable-upload session for one file, opened with this script's own token in
+// the organization's folder. The page then PUTs the raw file to the returned URL (Drive allows it from the page's
+// origin) and calls uploadDone. The session is for this one file and size only.
+function uploadStart_(req, user) {
+  const u = uploadCheck_(req, user);
+  const size = Number(req.size);
+  if (!(size > 0)) throw new Error('Empty file');
+  if (size > MAX_BYTES) throw new Error('File larger than 10 MB');
+  const origin = String(req.origin || '');
+  if (!/^https:\/\/[\w.-]+$/.test(origin)) throw new Error('Bad origin');
+  // Any failure here reads 'Drive upload could not start': the page then sends the file the old way (upload_).
+  let res;
+  try {
+    res = UrlFetchApp.fetch('https://www.googleapis.com/upload/drive/v3/files?uploadType=resumable&fields=id,name', {
+      method: 'post', contentType: 'application/json; charset=UTF-8', muteHttpExceptions: true,
+      headers: { Authorization: 'Bearer ' + ScriptApp.getOAuthToken(), 'X-Upload-Content-Type': KINDS[u.kind],
+        'X-Upload-Content-Length': String(size), Origin: origin },
+      payload: JSON.stringify({ name: u.driveName, parents: [u.folder.getId()], mimeType: KINDS[u.kind] }),
+    });
+  } catch (e) {
+    throw new Error('Drive upload could not start (' + (e && e.message || e) + ')');
+  }
+  const h = res.getAllHeaders();
+  const url = h.Location || h.location;
+  if (res.getResponseCode() !== 200 || !url) throw new Error('Drive upload could not start (' + res.getResponseCode() + ')');
+  return { url: url, name: u.name };
+}
+
+// Direct upload, step 2: the file the page sent. It must sit in the organization's folder (as every save checks again).
+function uploadDone_(req, user) {
+  need_(user, 'Staff');
+  const p = req.purpose === 'form' || req.purpose === 'excel' ? org__(req.org) : project_(req.ref);
+  const f = file_({ id: req.id, name: req.name }, p.org);
+  if (DriveApp.getFileById(f.id).getSize() > MAX_BYTES) { DriveApp.getFileById(f.id).setTrashed(true); throw new Error('File larger than 10 MB'); }
+  return { file: f };
 }
 
 function savePrePitch_(req, user) {
@@ -342,12 +396,11 @@ function savePitching_(req, user) {
   phaseOn_('pitching');
   const d = req.data || {};
   const noted = (Array.isArray(d.noted) ? d.noted : []).slice(0, 30).map(function (f) { return file_(f, p.org); }).filter(Boolean);
-  const excel = file_(d.excel, p.org);
-  if (excel && [KINDS.xlsx, KINDS.xls].indexOf(DriveApp.getFileById(excel.id).getMimeType()) < 0) throw new Error('Correct Excel file must be .xlsx or .xls');
+  // Correct Excel File stays empty on project rows since v2.9 (one per organization: saveOrgPitching_).
   const row = {
     'Project Ref': p.ref, 'Org Ref': p.org, 'Project Name': p.name, 'Summary': text_(d.summary, 20000),
     'Final Approved Budget': money_(d.finalBudget), 'Noted Documents': noted,
-    'Updated At': new Date(), 'Updated By': user.email, 'Correct Excel File': one_(excel),
+    'Updated At': new Date(), 'Updated By': user.email, 'Correct Excel File': [],
   };
   const sh = tab_('Pitching');
   const at = rowOf_(sh, p.ref);
@@ -362,6 +415,30 @@ function savePitching_(req, user) {
   log.forEach(function (r) { lg.appendRow(r); });
   bump_('Pitching', 'Pitching_Log');
   return { pitch: pitchOut_(row), changed: log.length };
+}
+
+// Correct Excel file (Pitching, v2.9): one per organization. A change is logged in Pitching_Log with an empty
+// Project Ref, like the budget-form feedback in PrePitch_Log.
+function saveOrgPitching_(req, user) {
+  need_(user, 'Staff');
+  const o = org__(req.org);
+  open_(o.org);
+  phaseOn_('pitching');
+  const d = req.data || {};
+  const excel = file_(d.excel, o.org);
+  if (excel && [KINDS.xlsx, KINDS.xls].indexOf(DriveApp.getFileById(excel.id).getMimeType()) < 0) throw new Error('Correct Excel file must be .xlsx or .xls');
+  const sh = tab_('OrgPitching');
+  const at = rowOf_(sh, o.org);
+  const old = (at && rowAt_(sh, at)) || {};
+  const now = new Date();
+  const row = { 'Org Ref': o.org, 'Correct Excel File': one_(excel), 'Updated At': now, 'Updated By': user.email };
+  if (logText_(old['Correct Excel File']) === logText_(row['Correct Excel File'])) return { orgPitch: orgPitchOut_(at ? old : null), changed: 0 };
+  fresh_(at && old, req.base);
+  stillOpen_(o.org);
+  saveRow_(sh, TABS.OrgPitching, row, at);
+  tab_('Pitching_Log').appendRow([now, user.email, '', o.org, 'Correct Excel file', cell_(logText_(old['Correct Excel File'])), cell_(logText_(row['Correct Excel File']))]);
+  bump_('OrgPitching', 'Pitching_Log');
+  return { orgPitch: orgPitchOut_(row), changed: 1 };
 }
 
 // Re-submission decision for one project: 'Approved', 'Not Approved' or '' (cleared).
@@ -701,9 +778,11 @@ function exportData_(req, user) {
     out.pitching = projects.map(function (p) {
       const r = pit[p['Project Ref']] || {};
       return { 'Project Ref': p['Project Ref'], 'Summary': String(r['Summary'] || ''), 'Final Approved Budget': num_(r['Final Approved Budget']),
-        'Noted Documents': links(r['Noted Documents']), 'Correct Excel File': links(r['Correct Excel File']),
-        'Updated At': iso_(r['Updated At']), 'Updated By': r['Updated By'] || '' };
+        'Noted Documents': links(r['Noted Documents']), 'Updated At': iso_(r['Updated At']), 'Updated By': r['Updated By'] || '' };
     });
+    // Correct Excel file: one per organization (v2.9), on the Organizations sheet.
+    const xl = byKey_(tabRows_('OrgPitching'), 'Org Ref');
+    orgs.forEach(function (o) { o['Correct Excel File'] = links((xl[o['Org Ref']] || {})['Correct Excel File']); });
   }
   if (want.resubmit) {
     const rs = byKey_(tabRows_('Resubmission'), 'Project Ref');
@@ -713,6 +792,103 @@ function exportData_(req, user) {
     });
   }
   return out;
+}
+
+// Export data for mailing (v2.9, Admin only, logged like exportData_): the fields of the "Official Budget Allocation
+// Update" email. Organizations: emails, budget requested / approved and the change, the category and campus
+// benchmarks (active organizations = those with at least one final approved budget; average = total approved ÷
+// active), the four shares (%, 2 decimals) and the links. Projects: contacts, dates (dd/mm/yyyy, Buddhist year),
+// budgets, Committee feedback (= the Pitching summary) and file links. Approved = the Pitching final approved budget.
+function mailData_(req, user) {
+  need_(user, 'Admin');
+  tab_('Export_Log').appendRow([new Date(), user.email, 'mailing', 'Mailing']);
+  const s = subs_();
+  const gone = hidden_(s.log);
+  const pit = byKey_(feedbackRows_('Pitching'), 'Project Ref');
+  const xl = byKey_(tabRows_('OrgPitching'), 'Org Ref');
+  const links = function (list) { return files_(list).map(function (f) { return driveUrl_(f.id); }).join('\n'); };
+  const pct = function (a, b) { return b ? Math.round(a / b * 10000) / 100 : null; };
+  const orgs = s.orgs.filter(function (o) { return gone.indexOf(o['Org Ref']) < 0; });
+  const projects = s.projects.filter(function (p) { return gone.indexOf(p['Org Ref']) < 0; });
+  const sum = {};
+  orgs.forEach(function (o) { sum[o['Org Ref']] = { req: 0, appr: null, n: 0 }; });
+  projects.forEach(function (p) {
+    const x = sum[p['Org Ref']]; if (!x) return;
+    x.n++; x.req += num_(p['Budget']) || 0;
+    const fin = pit[p['Project Ref']] ? num_(pit[p['Project Ref']]['Final Approved Budget']) : null;
+    if (fin != null) x.appr = (x.appr || 0) + fin;
+  });
+  const group = function (key) {
+    const g = {};
+    orgs.forEach(function (o) {
+      const k = key(o['Org Ref']); const x = sum[o['Org Ref']];
+      g[k] = g[k] || { total: 0, active: 0 };
+      if (x.appr != null) { g[k].total += x.appr; g[k].active++; }
+    });
+    return g;
+  };
+  const catOf = function (ref) { return ref.split('-')[1]; };
+  const campusOf = function (ref) { return ref.split('-')[0]; };
+  const cat = group(catOf); const camp = group(campusOf);
+  const grand = Object.keys(sum).reduce(function (t, k) { return t + (sum[k].appr || 0); }, 0);
+  const round2 = function (v) { return v == null ? null : Math.round(v * 100) / 100; };
+  const outOrgs = orgs.map(function (o) {
+    const ref = o['Org Ref']; const x = sum[ref]; const c = cat[catOf(ref)]; const m = camp[campusOf(ref)];
+    const e = emails_(o); const appr = x.appr || 0;
+    return {
+      'Email 1': e[0] || '', 'Email 2': e[1] || '', 'Email 3': e[2] || '', 'Org Ref': ref, 'Organization': o['Organization'] || '',
+      'Campus': o['Campus'] || o['Campus Code'] || campusOf(ref), 'Category': o['Category'] || o['Category Code'] || catOf(ref),
+      'Total projects': x.n, 'Requested budget': round2(x.req), 'Approved budget': x.appr == null ? null : round2(appr),
+      'Change (THB)': x.appr == null ? null : round2(appr - x.req), 'Change (%)': x.appr == null ? null : pct(appr - x.req, x.req),
+      'Category active organizations': c.active, 'Category average allocation': c.active ? round2(c.total / c.active) : null,
+      'Campus active organizations': m.active, 'Campus average allocation': m.active ? round2(m.total / m.active) : null,
+      'Share of category (%)': x.appr == null ? null : pct(appr, c.total), 'Share of campus (%)': x.appr == null ? null : pct(appr, m.total),
+      'Category share of all (%)': pct(c.total, grand), 'Campus share of all (%)': pct(m.total, grand),
+      'Budget form link': String(o['Budget Proposal Form (.xlsx)'] || ''),
+      'Correct Excel file': links((xl[ref] || {})['Correct Excel File']),
+    };
+  });
+  const be = function (iso) { const m = String(iso).match(/^(\d{4})-(\d{2})-(\d{2})$/); return m ? m[3] + '/' + m[2] + '/' + (Number(m[1]) + 543) : ''; };
+  const byOrg = byKey_(orgs, 'Org Ref');
+  const outProjects = projects.map(function (p) {
+    const o = byOrg[p['Org Ref']] || {}; const r = pit[p['Project Ref']] || {};
+    const dates = String(p['Project Dates'] || '').split(/[,\s]+/).filter(function (d) { return /^\d{4}-\d{2}-\d{2}$/.test(d); });
+    return {
+      'Org Ref': p['Org Ref'], 'Project Ref': p['Project Ref'], 'Project name': p['Project Name'] || '', 'Event dates': dates.map(be).join(', '),
+      'Primary contact': o['Submitted By'] || '', 'Primary position': o['Submitter Position'] || '', 'Primary phone': String(o['Telegram Phone'] || ''),
+      'Emergency contact': o['Emergency Contact'] || '', 'Emergency position': o['Emergency Position'] || '', 'Emergency phone': String(o['Emergency Phone'] || ''),
+      'Requested budget': num_(p['Budget']), 'Approved budget': num_(r['Final Approved Budget']),
+      'Committee feedback': String(r['Summary'] || ''), 'Proposal PDF': p['Proposal .pdf'] || '', 'Proposal DOCX': p['Proposal .docx'] || '',
+      'Feedback files': links(r['Noted Documents']),
+    };
+  });
+  return { orgs: outOrgs, projects: outProjects };
+}
+
+// One-time, from the Apps Script editor after deploying v2.9 (Run -> purgeProjectExcel): the Correct Excel file is
+// one per organization now, so every per-project Correct Excel file is moved to the Drive trash (Google empties it
+// after 30 days) and its cells are cleared. Each one is logged in Pitching_Log. Safe to run twice.
+function purgeProjectExcel() {
+  MEMO_ = {};
+  const sh = tab_('Pitching');
+  const rows = rows_(sh);
+  const col = TABS.Pitching.indexOf('Correct Excel File') + 1;
+  const twin = TABS.Pitching.indexOf('Correct Excel File' + TWIN) + 1;
+  const lg = tab_('Pitching_Log');
+  let files = 0; let projects = 0;
+  rows.forEach(function (r) {
+    const list = files_(r['Correct Excel File']);
+    if (!list.length) return;
+    const i = rowOf_(sh, r['Project Ref']) - 2; // rows_ leaves out blank rows: find the sheet row by key
+    list.forEach(function (f) { try { DriveApp.getFileById(f.id).setTrashed(true); files++; } catch (e) { Logger.log('Not found: ' + f.id); } });
+    sh.getRange(i + 2, col).clearContent();
+    if (twin) sh.getRange(i + 2, twin).setValue('[]');
+    lg.appendRow([new Date(), Session.getEffectiveUser().getEmail(), r['Project Ref'], r['Org Ref'], 'Correct Excel File',
+      cell_(logText_(list)), '(removed in v2.9: one Correct Excel file per organization)']);
+    projects++;
+  });
+  bump_('Pitching', 'Pitching_Log');
+  Logger.log('Trashed ' + files + ' files from ' + projects + ' projects');
 }
 
 // Removed organizations need only Submission_Log: skip the Organization and Project tabs unless already read.
@@ -848,7 +1024,6 @@ function pitchDone_(r) {
   if (isReq_('pitch.summary') && !String(r['Summary'] || '').trim()) return false;
   if (isReq_('pitch.finalBudget') && num_(r['Final Approved Budget']) == null) return false;
   if (isReq_('pitch.noted') && !files_(r['Noted Documents']).length) return false;
-  if (isReq_('pitch.excel') && !files_(r['Correct Excel File']).length) return false;
   return true;
 }
 function resubDone_(r) { return !isReq_('resub.decision') || !!(r && r['Decision']); }
@@ -955,6 +1130,15 @@ function emails_(o) {
   return seen;
 }
 
+// Correct Excel file row of one organization (or null), and what the page gets: { file, at, by } or null.
+function orgPitchRow_(ref) {
+  return tabRows_('OrgPitching').filter(function (r) { return r['Org Ref'] === ref; })[0] || null;
+}
+function orgPitchOut_(r) {
+  if (!r) return null;
+  return { file: files_(r['Correct Excel File'])[0] || null, at: iso_(r['Updated At']), by: r['Updated By'] || '' };
+}
+
 // Budget-form feedback row of one organization (or null).
 function orgPreRow_(ref) {
   return tabRows_('OrgPrePitch').filter(function (r) { return r['Org Ref'] === ref; })[0] || null;
@@ -1029,7 +1213,7 @@ function preOut_(r) {
 function pitchOut_(r) {
   return {
     summary: String(r['Summary'] || ''), finalBudget: num_(r['Final Approved Budget']),
-    noted: files_(r['Noted Documents']), excel: files_(r['Correct Excel File'])[0] || null,
+    noted: files_(r['Noted Documents']),
     at: iso_(r['Updated At']), by: r['Updated By'] || '',
   };
 }

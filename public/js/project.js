@@ -84,7 +84,6 @@ export const QUESTIONS = [
   { id: 'pitch.summary', tab: 'pitching', req: false, label: () => tr('Summary', 'สรุป') },
   { id: 'pitch.finalBudget', tab: 'pitching', req: true, label: () => tr('Final approved budget', 'งบประมาณอนุมัติขั้นสุดท้าย') },
   { id: 'pitch.noted', tab: 'pitching', req: false, label: () => tr('Noted documents', 'เอกสารบันทึก') },
-  { id: 'pitch.excel', tab: 'pitching', req: false, label: () => tr('Correct Excel file', 'ไฟล์ Excel ฉบับแก้ไข') },
   { id: 'resub.decision', tab: 'resubmit', req: true, label: () => tr('Decision', 'ผลการพิจารณา') },
 ];
 export const isReq = (d, id) => (d?.required && id in d.required ? !!d.required[id] : !!QUESTIONS.find((q) => q.id === id)?.req);
@@ -102,28 +101,49 @@ export function cardTop(p, budgets, extra = '', lead = '') {
       ${extra ? `<div class="dl-row">${extra}</div>` : ''}</div>`;
 }
 
-// Pitching slot from the scheduling site: { date: 'yyyy-mm-dd', start, end, room, link } (room may be a meeting link;
-// link = the Meeting Link column, https only).
+// Pitching slot from the scheduling site: { date: 'yyyy-mm-dd', start, end, room, link } (link = the Meeting Link
+// column, https only). Pitching is all online in Microsoft Teams (v2.9): the room is no longer shown; the place reads
+// "Microsoft Teams" and the link "Join on Teams" (a room that is itself a link still opens).
+const TEAMS = 'Microsoft Teams';
+const teamsUrl = (s) => s?.link || (/^https:\/\/\S+$/.test(s?.room || '') ? s.room : '');
+const dayOf = (s) => { const d = new Date(`${s.date}T00:00`); return Number.isNaN(+d) ? s.date : d.toLocaleDateString(locale(), { weekday: 'short', day: 'numeric', month: 'short', year: 'numeric' }); };
 export function slotLine(s) {
   if (!s?.date) return `<p class="slot none">${icon('clock', 18)}${tr('Pitching time not scheduled yet', 'ยังไม่มีกำหนดเวลานำเสนอ')}</p>`;
-  const d = new Date(`${s.date}T00:00`);
-  const day = Number.isNaN(+d) ? s.date : d.toLocaleDateString(locale(), { weekday: 'short', day: 'numeric', month: 'short', year: 'numeric' });
-  const room = /^https?:\/\//.test(s.room) ? `<a href="${esc(s.room)}" target="_blank" rel="noopener">${tr('Join meeting', 'เข้าร่วมประชุม')}</a>` : esc(s.room);
-  return `<p class="slot">${icon('clock', 18)}<span class="muted">${tr('Pitching', 'นำเสนอ')}</span><b>${esc(day)}</b><b class="num">${esc(s.start)}${s.end ? `–${esc(s.end)}` : ''}</b>${room ? `<span>${room}</span>` : ''}${meetLink(s)}</p>`;
+  return `<p class="slot">${icon('clock', 18)}<span class="muted">${tr('Pitching', 'นำเสนอ')}</span><b>${esc(dayOf(s))}</b><b class="num">${esc(s.start)}${s.end ? `–${esc(s.end)}` : ''}</b><span>${TEAMS}</span>${meetLink(s)}</p>`;
 }
 
-// The slot's meeting link ("Join meeting", new tab), or '' when there is none.
+// The slot's meeting link ("Join on Teams", new tab), or `empty` when there is none.
 export function meetLink(s, empty = '') {
-  return s?.link ? `<a href="${esc(s.link)}" target="_blank" rel="noopener">${icon('ext', 14)}${tr('Join meeting', 'เข้าร่วมประชุม')}</a>` : empty;
+  const u = teamsUrl(s);
+  return u ? `<a href="${esc(u)}" target="_blank" rel="noopener">${icon('ext', 14)}${tr('Join on Teams', 'เข้าร่วมใน Teams')}</a>` : empty;
 }
 
-// The same slot as plain text (print).
+// The same slot as plain text (print, My projects): "Tue 20 Oct 2026 · 13:00–13:20 · Microsoft Teams".
 export function slotText(s) {
   if (!s?.date) return tr('Pitching time not scheduled yet', 'ยังไม่มีกำหนดเวลานำเสนอ');
-  const d = new Date(`${s.date}T00:00`);
-  const day = Number.isNaN(+d) ? s.date : d.toLocaleDateString(locale(), { weekday: 'short', day: 'numeric', month: 'short', year: 'numeric' });
-  return [day, `${s.start || ''}${s.end ? `–${s.end}` : ''}`, s.room].filter(Boolean).join(' · ');
+  return [dayOf(s), `${s.start || ''}${s.end ? `–${s.end}` : ''}`, TEAMS].filter(Boolean).join(' · ');
 }
+
+// Time left to a slot (My projects, v2.9), in one unit: "3 days", "5 hours", "12 mins"; "Now" during the slot,
+// "Pitched" after it, '' when not scheduled. Slot times are Bangkok time; a slot without an end lasts 20 minutes.
+export function timeLeft(s, now = Date.now()) {
+  if (!s?.date || !/^\d{1,2}:\d{2}$/.test(s.start || '')) return '';
+  const at = (t) => Date.parse(`${s.date}T${t.padStart(5, '0')}:00+07:00`);
+  const start = at(s.start);
+  const end = /^\d{1,2}:\d{2}$/.test(s.end || '') ? at(s.end) : start + 20 * 60e3;
+  if (Number.isNaN(start)) return '';
+  if (now >= end) return tr('Pitched', 'นำเสนอแล้ว');
+  if (now >= start) return tr('Now', 'ขณะนี้');
+  const ms = start - now;
+  const n = (u) => Math.floor(ms / u);
+  if (ms >= 864e5) return n(864e5) === 1 ? tr('1 day', '1 วัน') : tr('{n} days', '{n} วัน', { n: n(864e5) });
+  if (ms >= 36e5) return n(36e5) === 1 ? tr('1 hour', '1 ชั่วโมง') : tr('{n} hours', '{n} ชั่วโมง', { n: n(36e5) });
+  const m = Math.max(1, Math.ceil(ms / 60e3));
+  return m === 1 ? tr('1 min', '1 นาที') : tr('{n} mins', '{n} นาที', { n: m });
+}
+
+// Under every upload button (v2.9): the size limit and the file types the slot takes.
+export const capNote = (types) => `<small class="muted cap">${esc(tr('Max 10 MB · {types}', 'ไม่เกิน 10 MB · {types}', { types }))}</small>`;
 
 // What "unfinished" means on each tab: a required question unanswered. Pre-pitch: decided by the server (Code.gs finished_).
 export const UNFINISHED = {
@@ -131,7 +151,7 @@ export const UNFINISHED = {
   pitching: (d, p) => {
     const x = d.pitch[p.ref] || {};
     return (isReq(d, 'pitch.summary') && !String(x.summary || '').trim()) || (isReq(d, 'pitch.finalBudget') && x.finalBudget == null)
-      || (isReq(d, 'pitch.noted') && !(x.noted || []).length) || (isReq(d, 'pitch.excel') && !x.excel);
+      || (isReq(d, 'pitch.noted') && !(x.noted || []).length);
   },
   resubmit: (d, p) => isReq(d, 'resub.decision') && !d.resub?.[p.ref]?.decision,
 };

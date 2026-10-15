@@ -8,7 +8,7 @@
 //    stored, so the line follows the code again. Marks like {n} stand for values and must stay. Lines are split into
 //    tabs by type (the page they appear on); a line used on several pages shows on each of those tabs.
 import { tr, setTexts } from '../i18n.js';
-import { $, esc, icon, toast, errorBox } from '../ui.js';
+import { $, esc, icon, toast, errorBox, saving } from '../ui.js';
 import { call, forget, remember } from '../api.js';
 import { QUESTIONS, isReq } from '../project.js';
 
@@ -81,7 +81,7 @@ export async function render(page, ctx) {
   $('#linkLabel', page).oninput = (e) => { st.link.label = e.target.value.trim(); };
   $('#linkUrl', page).oninput = (e) => { st.link.url = e.target.value.trim(); };
   st.save.link = async () => {
-    const out = await call('saveExternalLink', st.link);
+    const out = await saving(() => call('saveExternalLink', st.link));
     st.link = { label: out.link?.label || '', url: out.link?.url || '' };
     st.linkSaved = JSON.stringify(st.link);
     if (ctx.boot) { ctx.boot.link = out.link; remember('boot', {}, ctx.boot); }
@@ -104,7 +104,7 @@ export async function render(page, ctx) {
     <td><label class="check"><input type="checkbox" data-q="${q.id}" ${st.req[q.id] ? 'checked' : ''}>${tr('Required', 'จำเป็น')}</label></td></tr>`).join('');
   $('#req', page).onchange = (e) => { const id = e.target.dataset.q; if (id) st.req[id] = e.target.checked; };
   st.save.req = async () => {
-    const out = await call('saveRequired', { required: st.req });
+    const out = await saving(() => call('saveRequired', { required: st.req }));
     st.reqSaved = JSON.stringify(st.req);
     if (ctx.boot) { ctx.boot.required = out.required; remember('boot', {}, ctx.boot); }
     forget('boot'); forget('org'); forget('dashboard');
@@ -195,7 +195,7 @@ export async function render(page, ctx) {
   st.save.texts = async () => {
     const bad = badLines();
     if (bad.length) throw new Error(marksMsg(bad));
-    const out = await call('saveTexts', { texts: Object.entries(st.edit).map(([key, v]) => ({ key, en: v.en, th: v.th })) });
+    const out = await saving(() => call('saveTexts', { texts: Object.entries(st.edit).map(([key, v]) => ({ key, en: v.en, th: v.th })) }));
     st.saved = JSON.stringify(st.edit);
     setTexts(out.texts);
     if (ctx.boot) { ctx.boot.texts = out.texts; remember('boot', {}, ctx.boot); }

@@ -4,9 +4,9 @@
 // Top of the tab: the organization's Budget proposal form (.xlsx) from the submission (v2.4), preview + download,
 // and under it a feedback box on that form (v2.7): a note + one file, saved with its own Save, logged like the cards.
 import { tr } from '../i18n.js';
-import { $, esc, icon, toast, moneyBox, parseMoney, liveMoney, dateTimeFmt, num2, dialog, errorBox } from '../ui.js';
-import { call, upload, forget } from '../api.js';
-import { cardTop, dlBtn, fileChip } from '../project.js';
+import { $, esc, icon, toast, moneyBox, parseMoney, liveMoney, dateTimeFmt, num2, dialog, errorBox, busy } from '../ui.js';
+import { save as send, upload, forget } from '../api.js';
+import { cardTop, dlBtn, fileChip, capNote } from '../project.js';
 import { ORGS } from '../masterdata.js';
 
 let st = null; // { el, d, can, form: { ref: working copy }, box: budget-form feedback working copy }
@@ -48,11 +48,19 @@ function budgetForm(d) {
 function boxSlot() {
   const f = st.box.file;
   return `<div class="upl">${fileChip(f)}${st.can ? `<label class="btn">${icon('upload', 16)}${f ? tr('Replace', 'เปลี่ยนไฟล์') : tr('Upload feedback file', 'อัปโหลดไฟล์ข้อเสนอแนะ')}
-    <input type="file" hidden accept=".xlsx,.xls,.docx,.pdf" data-up="box"></label>` : ''}${f && st.can ? `<button type="button" class="btn plain" data-box-clear>${tr('Remove', 'นำออก')}</button>` : ''}</div>`;
+    <input type="file" hidden accept=".xlsx,.xls,.docx,.pdf" data-up="box"></label>` : ''}${f && st.can ? `<button type="button" class="btn plain" data-box-clear>${tr('Remove', 'นำออก')}</button>` : ''}</div>${st.can ? capNote('.xlsx / .xls / .docx / PDF') : ''}`;
 }
 
 async function saveBox() {
-  const out = await call('saveOrgPrePitch', { org: orgRef(), data: st.box, base: st.d.orgPre?.at || '' });
+  const prev = st.d.orgPre;
+  let out;
+  try {
+    out = await busy(tr('Saving {name}…', 'กำลังบันทึก {name}…', { name: tr('Feedback on the budget form', 'ข้อเสนอแนะต่อแบบฟอร์มงบประมาณ') }),
+      () => send('saveOrgPrePitch', { org: orgRef(), data: st.box, base: prev?.at || '' }, `form:${orgRef()}`));
+  } catch (e) {
+    if (e.code !== 'QUEUED') throw e;
+    out = { orgPre: { ...st.box, at: prev?.at || '', by: prev?.by || '', pending: true }, queued: true };
+  }
   st.d.orgPre = out.orgPre;
   st.box = pickBox(out.orgPre);
   const line = $('[data-box-saved]', st.el);
@@ -79,7 +87,8 @@ function card(p) {
     </div></section>`;
 }
 
-const savedLine = (s) => (s?.at ? tr('Saved {when} by {who}', 'บันทึก {when} โดย {who}', { when: dateTimeFmt(s.at), who: esc(st.ctx.nameOf(s.by)) }) : tr('Not saved yet', 'ยังไม่ได้บันทึก'));
+const QUEUED_TOAST = () => tr('Kept on this device — it will be sent automatically', 'เก็บไว้ในเครื่องนี้ — จะส่งให้อัตโนมัติ');
+const savedLine = (s) => (s?.pending ? `<span class="pill orange">${tr('Pending', 'รอส่ง')}</span> ${tr('Kept on this device; it is sent when the server can be reached', 'เก็บไว้ในเครื่องนี้ จะส่งเมื่อติดต่อเซิร์ฟเวอร์ได้')}` : s?.at ? tr('Saved {when} by {who}', 'บันทึก {when} โดย {who}', { when: dateTimeFmt(s.at), who: esc(st.ctx.nameOf(s.by)) }) : tr('Not saved yet', 'ยังไม่ได้บันทึก'));
 
 // Upload area under a Yes/No: shown only for No.
 function slot(ref, k) {
@@ -89,7 +98,7 @@ function slot(ref, k) {
   const label = k === 'docx' ? tr('Upload feedback .docx', 'อัปโหลดไฟล์ข้อเสนอแนะ .docx') : tr('Upload feedback PDF', 'อัปโหลดไฟล์ข้อเสนอแนะ PDF');
   return `<div class="upl">${fileChip(file)}${st.can ? `<label class="btn">${icon('upload', 16)}${file ? tr('Replace', 'เปลี่ยนไฟล์') : esc(label)}
     <input type="file" hidden accept="${k === 'docx' ? '.docx' : '.pdf'}" data-up="${k}"></label>` : ''}
-    </div>`;
+    </div>${st.can ? capNote(k === 'docx' ? '.docx' : 'PDF') : ''}`;
 }
 
 const refOf = (e) => e.target.closest('[data-ref]')?.dataset.ref;
@@ -117,12 +126,11 @@ async function onChange(e) {
   const file = e.target.files?.[0];
   if (!kind || !file) return;
   const box = e.target.closest('[data-slot]');
-  box.querySelector('.upl')?.classList.add('busy');
   try {
-    st.form[ref][`${kind}File`] = await upload(file, { ref, purpose: 'feedback', only: kind });
-    toast(tr('Uploaded to Drive — press Save to keep it', 'อัปโหลดไปยัง Drive แล้ว — กดบันทึกเพื่อเก็บ'));
+    st.form[ref][`${kind}File`] = await busy(tr('Uploading {file}…', 'กำลังอัปโหลด {file}…', { file: file.name }), (set) => upload(file, { ref, purpose: 'feedback', only: kind }, set));
+    toast(tr('Uploaded — press Save to keep it', 'อัปโหลดแล้ว — กดบันทึกเพื่อเก็บ'));
   } catch (err) {
-    toast(err.message, 'bad');
+    await errorBox(err.message, tr('Couldn’t upload', 'อัปโหลดไม่สำเร็จ'));
   }
   box.innerHTML = slot(ref, kind);
 }
@@ -131,19 +139,27 @@ async function boxUpload(e) {
   const file = e.target.files?.[0];
   if (!file) return;
   const box = e.target.closest('[data-slot]');
-  box.querySelector('.upl')?.classList.add('busy');
   try {
-    st.box.file = await upload(file, { org: orgRef(), purpose: 'form', only: 'any' });
-    toast(tr('Uploaded to Drive — press Save to keep it', 'อัปโหลดไปยัง Drive แล้ว — กดบันทึกเพื่อเก็บ'));
+    st.box.file = await busy(tr('Uploading {file}…', 'กำลังอัปโหลด {file}…', { file: file.name }), (set) => upload(file, { org: orgRef(), purpose: 'form', only: 'any' }, set));
+    toast(tr('Uploaded — press Save to keep it', 'อัปโหลดแล้ว — กดบันทึกเพื่อเก็บ'));
   } catch (err) {
-    toast(err.message, 'bad');
+    await errorBox(err.message, tr('Couldn’t upload', 'อัปโหลดไม่สำเร็จ'));
   }
   box.innerHTML = boxSlot();
 }
 
 // Saves one project's form and repaints its card. Returns the server's answer; throws when the save fails.
 async function save(ref) {
-  const out = await call('savePrePitch', { ref, data: st.form[ref], base: st.d.pre[ref]?.at || '' });
+  const prev = st.d.pre[ref];
+  const name = st.d.projects.find((x) => x.ref === ref)?.name || ref;
+  let out;
+  try {
+    out = await busy(tr('Saving {name}…', 'กำลังบันทึก {name}…', { name }),
+      () => send('savePrePitch', { ref, data: st.form[ref], base: prev?.at || '' }, `pre:${ref}`));
+  } catch (e) {
+    if (e.code !== 'QUEUED') throw e;
+    out = { pre: { ...st.form[ref], at: prev?.at || '', by: prev?.by || '', pending: true }, queued: true };
+  }
   const sec = st.el.querySelector(`.pcard[data-ref="${CSS.escape(ref)}"]`);
   st.d.pre[ref] = out.pre;
   st.form[ref] = pick(out.pre);
@@ -177,7 +193,7 @@ async function onClick(e) {
     bb.disabled = true;
     try {
       const out = await saveBox();
-      toast(out.changed ? tr('Saved', 'บันทึกแล้ว') : tr('Nothing changed', 'ไม่มีการเปลี่ยนแปลง'));
+      toast(out.queued ? QUEUED_TOAST() : out.changed ? tr('Saved', 'บันทึกแล้ว') : tr('Nothing changed', 'ไม่มีการเปลี่ยนแปลง'));
     } catch (err) {
       await errorBox(err.message);
     }
@@ -190,7 +206,8 @@ async function onClick(e) {
   btn.disabled = true;
   try {
     const out = await save(ref);
-    if (out.changed) await savedWindow(ref);
+    if (out.queued) toast(QUEUED_TOAST());
+    else if (out.changed) await savedWindow(ref);
     else toast(tr('Nothing changed', 'ไม่มีการเปลี่ยนแปลง'));
   } catch (err) {
     await errorBox(err.message); // the edits stay on screen

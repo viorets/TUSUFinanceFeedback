@@ -3,8 +3,10 @@
 // pitching phases (On / Off, applied by Save), allocated budget, organizations removed on the pitching site (Admins
 // and Chiefs can add one back to our list), and (Admins only) the edit logs: Pre-pitch, Pitching, Re-submission.
 // Admins and Chiefs; Data team staff see the edit logs only. The server checks too.
+// v2.9: every save runs in the progress window, exports in a "Preparing export…" window; "Export data for mailing"
+// (Admins only, logged) builds the two sheets of the budget allocation email; "In charge of" is folded into a chip.
 import { tr } from '../i18n.js';
-import { $, esc, icon, toast, dateTimeFmt, moneyBox, parseMoney, liveMoney, errorBox, confirmBox, ROLE_LABEL } from '../ui.js';
+import { $, esc, icon, toast, dateTimeFmt, moneyBox, parseMoney, liveMoney, errorBox, confirmBox, ROLE_LABEL, busy, saving } from '../ui.js';
 import { call, cached, forget, peek, remember } from '../api.js';
 import { ORGS } from '../masterdata.js';
 import { PENDING } from '../project.js';
@@ -75,7 +77,9 @@ function draw(page, ctx, d) {
       ${[...PHASE_LIST, ['emails', () => tr('Notification emails (one row per email)', 'อีเมลรับการแจ้งเตือน (หนึ่งแถวต่ออีเมล)')]].map(([k, label]) => `<label class="row phase-row"><span class="grow">${esc(label())}</span><input type="checkbox" data-ex="${k}" checked aria-label="${esc(label())}"></label>`).join('')}
       <div class="row"><span class="grow">${tr('Format', 'รูปแบบไฟล์')}</span>
         <div class="seg" role="radiogroup"><label><input type="radio" name="exfmt" value="xlsx" checked><span>Excel</span></label><label><input type="radio" name="exfmt" value="csv"><span>CSV</span></label></div></div>
-      <div class="table-actions"><span class="grow muted small">${tr('Nothing downloads until you press Save.', 'จะดาวน์โหลดเมื่อกดบันทึกเท่านั้น')}</span><button class="btn primary" id="saveExport">${icon('download', 16)}${tr('Save', 'บันทึก')}</button></div></div>
+      <div class="table-actions"><span class="grow muted small">${tr('Nothing downloads until you press Save.', 'จะดาวน์โหลดเมื่อกดบันทึกเท่านั้น')}</span><button class="btn primary" id="saveExport">${icon('download', 16)}${tr('Save', 'บันทึก')}</button></div>
+      <div class="row"><span class="grow">${tr('Data for mailing', 'ข้อมูลสำหรับส่งอีเมล')}<small class="muted block">${tr('Excel: Organizations (emails, budgets, category and campus benchmarks, shares) and Projects (contacts, dates, budgets, Committee feedback, links)', 'Excel: ชีตองค์กร (อีเมล งบประมาณ ค่าเฉลี่ยหมวดหมู่และศูนย์ สัดส่วน) และชีตโครงการ (ผู้ติดต่อ วันที่ งบประมาณ ความเห็นคณะกรรมการ ลิงก์)')}</small></span>
+        <button class="btn" id="saveMail">${icon('download', 16)}${tr('Export data for mailing', 'ส่งออกข้อมูลสำหรับส่งอีเมล')}</button></div></div>
     <p class="foot">${tr('Admins only. Excel: one sheet for organizations, one for projects, one per included phase and one for emails. CSV: one row per project with every included column, plus a second file of emails. Organizations hidden from the list are left out. The file holds phone numbers and emails: every export is logged.', 'เฉพาะผู้ดูแล Excel: ชีตองค์กร ชีตโครงการ หนึ่งชีตต่อช่วงที่เลือก และชีตอีเมล CSV: หนึ่งแถวต่อโครงการ พร้อมทุกคอลัมน์ที่เลือก และไฟล์อีเมลอีกหนึ่งไฟล์ ไม่รวมองค์กรที่ซ่อนจากรายชื่อ ไฟล์มีเบอร์โทรและอีเมล ทุกการส่งออกจะถูกบันทึก')}</p>`;
 
   const allocPart = `${title('chart', tr('Allocated budget', 'กรอบงบประมาณ'))}
@@ -101,6 +105,9 @@ function draw(page, ctx, d) {
     const n = orgs.reduce((t, r) => t + (ctx.boot?.orgs?.[r]?.count || 0), 0);
     return orgs.length ? `${n} <span class="muted">${tr('({o} orgs)', '({o} องค์กร)', { o: orgs.length })}</span>` : '<span class="muted">—</span>';
   };
+  // "In charge of" folds into a chip ("3 orgs ▾"); a click opens the RefCode field, a second click closes it.
+  const chipText = (orgs) => `${orgs.length ? esc(tr('{n} orgs', '{n} องค์กร', { n: orgs.length })) : esc(tr('None', 'ไม่มี'))} ▾`;
+  st.open = new Set();
   const paintUsers = () => {
     $('#users', page).innerHTML = st.users.map((u, i) => {
       const owner = u.email === d.owner;
@@ -110,7 +117,8 @@ function draw(page, ctx, d) {
       <td><input type="email" data-f="email" value="${esc(u.email)}" placeholder="name@gmail.com" ${locked ? 'readonly' : ''}></td>
       <td>${locked ? `<span class="muted small">${owner ? tr('Admin · script owner', 'ผู้ดูแล · เจ้าของสคริปต์') : roleLabel('Admin')}</span>`
     : `<select data-f="role">${u.role ? '' : `<option value="" selected>${tr('Choose a role', 'เลือกสิทธิ์')}</option>`}${ROLES.filter((r) => !chief || r !== 'Admin').map((r) => `<option value="${r}" ${u.role === r ? 'selected' : ''}>${esc(roleLabel(r))}</option>`).join('')}</select>`}</td>
-      <td><input type="text" data-f="orgs" value="${esc(u.orgs.join(', '))}" placeholder="RS-ART-03, RS-OTH-01" list="refs"></td>
+      <td><button type="button" class="chip-btn" data-fold="${i}" aria-expanded="${st.open.has(i)}">${chipText(u.orgs)}</button>
+        <input type="text" data-f="orgs" value="${esc(u.orgs.join(', '))}" placeholder="RS-ART-03, RS-OTH-01" list="refs" ${st.open.has(i) ? '' : 'hidden'}></td>
       <td class="r small" data-count>${inCharge(u.orgs)}</td>
       <td>${locked ? '' : `<button class="icon-btn" data-rm title="${esc(tr('Remove', 'ลบ'))}">${icon('x', 16)}</button>`}</td></tr>`;
     }).join('')
@@ -132,7 +140,7 @@ function draw(page, ctx, d) {
     phaseState();
   };
   st.save.phases = async () => {
-    const out = await call('savePhases', { phases: st.phases });
+    const out = await saving(() => call('savePhases', { phases: st.phases }));
     st.phases = { ...out.phases };
     st.phasesSaved = JSON.stringify(st.phases);
     d.phases = out.phases;
@@ -161,8 +169,10 @@ function draw(page, ctx, d) {
     if (!ok) return;
     e.target.disabled = true;
     try {
-      const data = await call('exportData', { phases: want, format: fmt });
-      await (fmt === 'csv' ? saveCsv(data) : saveXlsx(data));
+      await busy(PREPARING(), async () => {
+        const data = await call('exportData', { phases: want, format: fmt });
+        await (fmt === 'csv' ? saveCsv(data) : saveXlsx(data));
+      });
       toast(tr('Export saved', 'บันทึกไฟล์ส่งออกแล้ว'));
     } catch (err) {
       await errorBox(err.message, tr('Couldn’t export', 'ส่งออกไม่สำเร็จ'));
@@ -170,11 +180,28 @@ function draw(page, ctx, d) {
     e.target.disabled = false;
   };
 
+  // Export data for mailing (v2.9, Admins only, logged): the fields of the budget allocation email.
+  if (admin) $('#saveMail', page).onclick = async (e) => {
+    const ok = await confirmBox(tr('Export personal data?', 'ส่งออกข้อมูลส่วนบุคคล?'),
+      tr('The file holds names, phone numbers and emails. Keep it private and delete it when you are done. Your export is logged.', 'ไฟล์มีชื่อ เบอร์โทร และอีเมล โปรดเก็บเป็นความลับและลบเมื่อใช้เสร็จ การส่งออกนี้จะถูกบันทึก'),
+      { ok: tr('Export', 'ส่งออก') });
+    if (!ok) return;
+    const btn = e.target.closest('button');
+    btn.disabled = true;
+    try {
+      await busy(PREPARING(), async () => saveMailXlsx(await call('mailData')));
+      toast(tr('Export saved', 'บันทึกไฟล์ส่งออกแล้ว'));
+    } catch (err) {
+      await errorBox(err.message, tr('Couldn’t export', 'ส่งออกไม่สำเร็จ'));
+    }
+    btn.disabled = false;
+  };
+
   $('#alloc', page).oninput = (e) => liveMoney(e.target);
   $('#saveAlloc', page).onclick = async (e) => {
     e.target.disabled = true;
     try {
-      const out = await call('saveAllocated', { allocated: parseMoney($('#alloc', page).value) });
+      const out = await saving(() => call('saveAllocated', { allocated: parseMoney($('#alloc', page).value) }));
       $('#alloc', page).value = moneyBox(out.allocated);
       d.allocated = out.allocated;
       remember('admin', {}, d); forget('admin');
@@ -191,7 +218,7 @@ function draw(page, ctx, d) {
     if (!b) return;
     b.disabled = true;
     try {
-      const out = await call('setRestored', { ref: b.dataset.restore, on: b.dataset.on === '1' });
+      const out = await saving(() => call('setRestored', { ref: b.dataset.restore, on: b.dataset.on === '1' }));
       d.restored = out.restored;
       remember('admin', {}, d); forget('admin');
       forget('boot'); forget('dashboard');
@@ -208,16 +235,30 @@ function draw(page, ctx, d) {
     const i = Number(e.target.closest('[data-i]')?.dataset.i); const f = e.target.dataset.f;
     if (!f) return;
     st.users[i][f] = f === 'orgs' ? e.target.value.split(/[,\s]+/).map((x) => x.trim().toUpperCase()).filter(Boolean) : e.target.value.trim();
-    if (f === 'orgs') e.target.closest('tr').querySelector('[data-count]').innerHTML = inCharge(st.users[i].orgs);
+    if (f === 'orgs') {
+      e.target.closest('tr').querySelector('[data-count]').innerHTML = inCharge(st.users[i].orgs);
+      e.target.closest('tr').querySelector('[data-fold]').innerHTML = chipText(st.users[i].orgs);
+    }
   };
   users.onclick = (e) => {
+    const fold = e.target.closest('[data-fold]');
+    if (fold) {
+      const i = Number(fold.dataset.fold);
+      if (st.open.has(i)) st.open.delete(i); else st.open.add(i);
+      const input = fold.parentElement.querySelector('[data-f="orgs"]');
+      input.hidden = !st.open.has(i);
+      fold.setAttribute('aria-expanded', String(st.open.has(i)));
+      if (!input.hidden) input.focus();
+      return;
+    }
     if (!e.target.closest('[data-rm]')) return;
+    st.open.clear();
     st.users.splice(Number(e.target.closest('[data-i]').dataset.i), 1);
     paintUsers();
   };
-  $('#add', page).onclick = () => { st.users.push({ email: '', role: 'Staff', orgs: [], name: '' }); paintUsers(); $('#users tr:last-child input', page)?.focus(); };
+  $('#add', page).onclick = () => { st.users.push({ email: '', role: 'Staff', orgs: [], name: '' }); st.open.add(st.users.length - 1); paintUsers(); $('#users tr:last-child input', page)?.focus(); };
   st.save.users = async () => {
-    const out = await call('saveUsers', { users: st.users.filter((u) => u.email), version: d.usersVer });
+    const out = await saving(() => call('saveUsers', { users: st.users.filter((u) => u.email), version: d.usersVer }));
     st.users = out.users.map((u) => ({ ...u }));
     st.saved = JSON.stringify(st.users);
     d.users = out.users;
@@ -275,6 +316,7 @@ function paintLogRows(page, ctx, d) {
 
 /* ---------- export files ---------- */
 
+const PREPARING = () => tr('Preparing export…', 'กำลังเตรียมไฟล์ส่งออก…');
 const PHASE_SHEETS = [['prepitch', 'Pre-pitch'], ['pitching', 'Pitching'], ['resubmit', 'Re-submission']];
 const stamp = () => new Date().toISOString().slice(0, 10);
 function download(blob, name) {
@@ -333,4 +375,14 @@ async function saveXlsx(d) {
   if (d.emails) X.utils.book_append_sheet(wb, X.utils.json_to_sheet(d.emails.length ? d.emails : [{ 'Org Ref': '', Organization: '', Campus: '', Email: '' }]), 'Emails');
   const out = X.write(wb, { bookType: 'xlsx', type: 'array' });
   download(new Blob([out], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' }), `pitch-feedback-${stamp()}.xlsx`);
+}
+
+// Mailing file (v2.9): Organizations and Projects sheets, money and percentages as numbers for a mail-merge template.
+async function saveMailXlsx(d) {
+  const X = await loadXlsx();
+  const wb = X.utils.book_new();
+  X.utils.book_append_sheet(wb, X.utils.json_to_sheet(d.orgs.length ? d.orgs : [{ 'Org Ref': '' }]), 'Organizations');
+  X.utils.book_append_sheet(wb, X.utils.json_to_sheet(d.projects.length ? d.projects : [{ 'Project Ref': '' }]), 'Projects');
+  const out = X.write(wb, { bookType: 'xlsx', type: 'array' });
+  download(new Blob([out], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' }), `pitch-mailing-${stamp()}.xlsx`);
 }
