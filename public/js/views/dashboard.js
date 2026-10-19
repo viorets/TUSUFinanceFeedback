@@ -61,8 +61,6 @@ function draw(el, d) {
     </div>
     ${d.allocated == null ? `<p class="foot">${icon('alert', 14)} ${tr('Allocated budget is not set yet — an Admin or Chief can set it in the Admin console.', 'ยังไม่ได้กำหนดกรอบงบประมาณ — ผู้ดูแลหรือหัวหน้ากำหนดได้ในคอนโซลผู้ดูแล')}</p>` : ''}
 
-    <h2 class="section-title">${tr('From proposed to final budget', 'จากงบที่เสนอถึงงบสุดท้าย')}</h2>
-    <div class="group chart-card">${waterfall(ps)}</div>
     <div class="chart-head"><h2 class="section-title">${tr('Proposed, pitched and final by', 'งบที่เสนอ หลังนำเสนอ และสุดท้าย ตาม')}</h2>
       <div class="seg" role="radiogroup" id="dumbsw"><label><input type="radio" name="dumb" value="campus" ${view.dumb === 'campus' ? 'checked' : ''}><span>${tr('Campus', 'วิทยาเขต')}</span></label><label><input type="radio" name="dumb" value="category" ${view.dumb === 'category' ? 'checked' : ''}><span>${tr('Category', 'หมวด')}</span></label></div></div>
     <div class="group chart-card" id="dumb"></div>
@@ -205,35 +203,6 @@ function hover(el) {
 
 
 // ---------- phase charts (v2.10) ----------
-const C_TOTAL = 'var(--c0)'; const C_UP = 'var(--green)'; const C_DOWN = 'var(--red)';
-const short = (n) => { const a = Math.abs(n); return a >= 1e6 ? `฿${(a / 1e6).toFixed(a >= 1e7 ? 0 : 1)}M` : a >= 1e3 ? `฿${Math.round(a / 1e3)}k` : `฿${Math.round(a)}`; };
-
-// Waterfall: proposed, the change at pitching, pitched, the change at re-submission, final. Same sums as the tiles
-// (a project not pitched yet counts 0 in Pitched, so the first step includes projects still waiting to pitch).
-function waterfall(ps) {
-  const proposed = sumOf(ps, 'budget'); const pitched = sumOf(ps, 'pitched'); const final = sumOf(ps, 'final');
-  if (!proposed) return `<div class="empty">${tr('No budget yet', 'ยังไม่มีงบประมาณ')}</div>`;
-  const steps = [
-    { n: tr('Proposed', 'เสนอ'), from: 0, to: proposed, c: C_TOTAL },
-    { n: tr('Pitching change', 'เปลี่ยนที่การนำเสนอ'), from: proposed, to: pitched, c: pitched >= proposed ? C_UP : C_DOWN },
-    { n: tr('Pitched', 'หลังนำเสนอ'), from: 0, to: pitched, c: C_TOTAL },
-    { n: tr('Re-submission change', 'เปลี่ยนที่การส่งแก้ไข'), from: pitched, to: final, c: final >= pitched ? C_UP : C_DOWN },
-    { n: tr('Final', 'สุดท้าย'), from: 0, to: final, c: C_TOTAL },
-  ];
-  const W = 640; const H = 260; const top = 24; const bot = 40; const bw = 80; const gap = (W - bw * steps.length) / (steps.length + 1);
-  const y = (v) => top + (H - top - bot) * (1 - v / proposed);
-  const bars = steps.map((s, i) => {
-    const x = gap + i * (bw + gap); const hi = Math.max(s.from, s.to); const lo = Math.min(s.from, s.to);
-    const d = s.to - s.from;
-    const tip = i % 2 ? `${s.n}: ${d < 0 ? '−' : '+'}${baht(Math.abs(d))}` : `${s.n}: ${baht(s.to)}`;
-    return `<rect x="${x}" y="${y(hi)}" width="${bw}" height="${Math.max(2, y(lo) - y(hi))}" rx="5" style="fill:${s.c}" data-tip="${esc(tip)}"/>
-      <text x="${x + bw / 2}" y="${y(hi) - 6}" text-anchor="middle" class="ct">${i % 2 ? (d < 0 ? '−' : '+') + short(Math.abs(d)) : short(s.to)}</text>
-      <text x="${x + bw / 2}" y="${H - 14}" text-anchor="middle" class="cl">${esc(s.n)}</text>`;
-  }).join('');
-  const note = tr('{a} of {n} projects pitched · {b} Approved at re-submission', 'นำเสนอแล้ว {a} จาก {n} โครงการ · อนุมัติหลังส่งแก้ไข {b}',
-    { a: ps.filter((p) => p.pitched != null).length, n: ps.length, b: ps.filter((p) => p.final != null).length });
-  return `<svg viewBox="0 0 ${W} ${H}" class="chart" role="img" aria-label="${esc(steps.map((s) => `${s.n} ${baht(s.to)}`).join('; '))}">${bars}</svg><p class="muted small chart-note">${esc(note)}</p>`;
-}
 
 // Dumbbell: one row per campus or category, a dot each for proposed, pitched and final; the gaps are the cuts.
 function dumbbell(ps, by) {

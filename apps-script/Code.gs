@@ -65,7 +65,10 @@ const FEEDBACK_SHEET_ID = '1tDak_LDOEvLEuMMa3Wri9Ej3tWjwLcEDS4tvFb-0N0k';
 const DRIVE_FOLDER_ID = '191_2g6tBQwxIJrmUmWMuwECPiRd1Oy2o';
 // Apps Script request bodies top out around 50 MB and base64 adds a third.
 const MAX_BYTES = 10 * 1024 * 1024; // v2.9: 10 MB (was 25)
-const CACHE_SECONDS = 60;
+// v2.11: answers are keyed by the outside Sheets' last-updated times (stamp_), so these are only backstops.
+const CACHE_SECONDS = 300; // composed answers and the Submissions / Schedule rows
+const ROWS_SECONDS = 600; // our own tabs (writes through the site change their stamp at once; hand edits wait this long)
+const STAMP_SECONDS = 30; // how often an outside Sheet's last-updated time is asked from Drive
 const KINDS = {
   docx: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
   pdf: 'application/pdf',
@@ -243,7 +246,7 @@ function boot_(req, user) {
   // names: display name per email (set in the admin console); the site shows the email where none is set.
   const names = {};
   users_().forEach(function (u) { if (u.name) names[u.email] = u.name; });
-  const out = { me: { email: user.email, role: user.role, owner: user.email === owner_(), control: canControl_(user), log: canLog_(user) },
+  const out = { me: { email: user.email, role: user.role, owner: user.email === owner_(), control: canControl_(user), log: canLog_(user), case: canCase_(user) },
     orgs: core.orgs, removed: core.removed, closed: core.closed, texts: core.texts, required: core.required, phases: core.phases,
     link: core.link, names: names };
   // The person-in-charge picker (v2.10: Staff too).
@@ -594,9 +597,10 @@ function fresh_(now, base) {
   throw new Error('CONFLICT:' + JSON.stringify({ by: String(now['Updated By'] || ''), at: iso_(now['Updated At']) }));
 }
 
-// Closed / Unclosed switch on the organization list: Admins and Chiefs.
+// Close / open a case (top of the Re-submission tab): Admins, Chiefs and Data team staff (v2.11).
+function canCase_(user) { return RANK[user.role] >= RANK.Chief || user.role === DATA_TEAM; }
 function setOrgStatus_(req, user) {
-  need_(user, 'Chief');
+  if (!canCase_(user)) throw new Error('Only Admins, Chiefs and Data team staff can close or open a case');
   const ref = String(req.ref || '');
   if (!ORG_REF.test(ref)) throw new Error('Bad organization code');
   const closing = req.closed === true;
@@ -1053,12 +1057,18 @@ function schedule_() {
     const fmt = function (v, f) { return v instanceof Date ? Utilities.formatDate(v, Session.getScriptTimeZone(), f) : String(v || '').trim(); };
     const day = function (v) { return fmt(v, 'yyyy-MM-dd'); };
     const time = function (v) { return fmt(v, 'HH:mm'); };
-    const rows = id ? rows_(SpreadsheetApp.openById(id).getSheetByName('Schedule')) : [];
-    const out = rows.filter(function (r) { return PROJECT_REF.test(String(r['Project Ref'] || '')); }).map(function (r) {
-      const link = String(r['Meeting Link'] || '').trim();
-      return { ref: r['Project Ref'], date: day(r['Date']), start: time(r['Start']), end: time(r['End']), room: String(r['Room'] || ''),
-        link: /^https:\/\/\S+$/.test(link) ? link : '' };
-    });
+    // The formatted slots are cached under the Sheet's last-updated time (v2.11; it was read on every request before).
+    // Formatted first: the cache keeps JSON, which would turn the Sheet's dates into ISO strings.
+    const c = CacheService.getScriptCache(); const key = 'sched@' + stamp_('schedule');
+    let out = id ? cacheGet_(c, key) : [];
+    if (out === undefined) {
+      out = rows_(SpreadsheetApp.openById(id).getSheetByName('Schedule')).filter(function (r) { return PROJECT_REF.test(String(r['Project Ref'] || '')); }).map(function (r) {
+        const link = String(r['Meeting Link'] || '').trim();
+        return { ref: r['Project Ref'], date: day(r['Date']), start: time(r['Start']), end: time(r['End']), room: String(r['Room'] || ''),
+          link: /^https:\/\/\S+$/.test(link) ? link : '' };
+      });
+      cachePut_(c, key, out);
+    }
     if (DEMO) Object.keys(DEMO.Schedule).forEach(function (ref) {
       if (!out.some(function (r) { return r.ref === ref; })) out.push(Object.assign({ ref: ref }, DEMO.Schedule[ref]));
     });
@@ -1133,7 +1143,8 @@ function need_(user, role) { if (RANK[user.role] < RANK[role]) throw new Error('
 function subs_() {
   return memo_('subs', function () {
     const c = CacheService.getScriptCache();
-    let s = cacheGet_(c, 'subs');
+    const key = 'subs@' + stamp_('subs');
+    let s = cacheGet_(c, key);
     if (s === undefined) {
       const ss = SpreadsheetApp.openById(prop_('SUBMISSIONS_SHEET_ID'));
       s = {
@@ -1141,7 +1152,7 @@ function subs_() {
         projects: rows_(ss.getSheetByName('Project')),
         log: rows_(ss.getSheetByName('Submission_Log')),
       };
-      cachePut_(c, 'subs', s);
+      cachePut_(c, key, s);
     }
     if (DEMO && !s.orgs.some(function (o) { return o['Org Ref'] === DEMO.org['Org Ref']; })) {
       s.orgs.push(DEMO.org);
@@ -1298,14 +1309,29 @@ function memo_(k, fn) { return Object.prototype.hasOwnProperty.call(MEMO_, k) ? 
 const PIECE = 90000;
 function cached_(key, fn) {
   const c = CacheService.getScriptCache();
-  const k = key + '@' + memo_('ver', function () { return c.get('ver') || '0'; });
+  const k = key + '@' + memo_('ver', function () { return c.get('ver') || '0'; }) + '@' + stamp_('subs') + '@' + stamp_('schedule');
   const hit = cacheGet_(c, k);
   if (hit !== undefined) return hit;
   const v = fn();
   cachePut_(c, k, v);
   return v;
 }
-function cachePut_(c, k, v) {
+// An outside Sheet's last-updated time (Drive), asked at most every STAMP_SECONDS: 'subs' = the pitching site's
+// Submissions Sheet, 'schedule' = the scheduling site's Sheet ('-' when not set). A change there changes every key
+// built on it, so new submissions show within about STAMP_SECONDS without re-reading unchanged Sheets.
+function stamp_(name) {
+  return memo_('stamp:' + name, function () {
+    const c = CacheService.getScriptCache();
+    const hit = c.get('stamp:' + name);
+    if (hit) return hit;
+    const id = name === 'subs' ? prop_('SUBMISSIONS_SHEET_ID') : PropertiesService.getScriptProperties().getProperty('SCHEDULE_SHEET_ID');
+    let s = '-';
+    try { if (id) s = DriveApp.getFileById(id).getLastUpdated().getTime().toString(36); } catch (e) { s = 'x' + Math.floor(Date.now() / 6e4); } // unreadable: a minute at a time
+    c.put('stamp:' + name, s, STAMP_SECONDS);
+    return s;
+  });
+}
+function cachePut_(c, k, v, ttl) {
   try {
     const z = Utilities.base64Encode(Utilities.gzip(Utilities.newBlob(JSON.stringify(v), 'application/json')).getBytes());
     const n = Math.ceil(z.length / PIECE);
@@ -1313,7 +1339,7 @@ function cachePut_(c, k, v) {
     const o = {};
     o[k] = String(n);
     for (let i = 0; i < n; i++) o[k + '#' + i] = z.slice(i * PIECE, (i + 1) * PIECE);
-    c.putAll(o, CACHE_SECONDS);
+    c.putAll(o, ttl || CACHE_SECONDS);
   } catch (e) { /* not cached */ }
 }
 function cacheGet_(c, k) {
@@ -1350,7 +1376,7 @@ function tabRows_(name) {
     const hit = cacheGet_(c, k);
     if (hit !== undefined) return hit;
     const v = rows_(tab_(name));
-    cachePut_(c, k, v);
+    cachePut_(c, k, v, ROWS_SECONDS);
     return v;
   });
 }

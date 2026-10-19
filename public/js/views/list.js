@@ -42,7 +42,8 @@ const TYPE_LABEL = {
 export async function render(page, ctx) {
   const optList = (list, picked, name) => list.map((x) => `<label class="msel-opt"><input type="checkbox" data-f="${name}" value="${esc(x.code)}" ${picked.includes(x.code) ? 'checked' : ''}>${esc(getLang() === 'th' ? x.th : x.en)}</label>`).join('');
   page.innerHTML = `<h1 class="grad">${tr('Organizations', 'องค์กร')}</h1><p class="muted" id="sum">&nbsp;</p>
-    <div class="seg filter tabs-list" role="radiogroup" aria-label="${esc(tr('Phase', 'ช่วง'))}" id="show"></div>
+    <div class="phase-bar"><div class="seg filter" role="radiogroup" aria-label="${esc(tr('Phase', 'ช่วง'))}" id="show"></div>
+      <div class="track" id="track" aria-live="polite"></div></div>
     <div id="mini" class="kpis mini"></div>
     <div class="toolbar"><input type="search" id="q" placeholder="${esc(tr('Search name, RefCode or person in charge', 'ค้นหาชื่อ รหัส หรือผู้รับผิดชอบ'))}" value="${esc(query)}">
       <details class="msel" id="fcat"><summary>${tr('Category', 'หมวด')} <small id="fcatN"></small></summary><div class="msel-body">${optList(CATEGORIES, F.cats, 'cats')}</div></details>
@@ -132,6 +133,20 @@ export async function render(page, ctx) {
   const SUBS = { all: () => tr('All', 'ทั้งหมด'), pending: () => tr('Unfinished', 'ยังไม่ครบ'), done: () => tr('Finished', 'ครบแล้ว') };
 
   // Mini dashboard tiles for the open tab, from the organizations shown.
+  // Tracking line in the phase bar (v2.11, Pitching and Re-submission): projects finished of all, as a meter, and
+  // the organizations still open, for the organizations shown. A closed case counts as finished.
+  const track = (list) => {
+    if (tab !== 'pitch' && tab !== 'resub') return '';
+    const left = tab === 'pitch' ? leftP : leftR;
+    const all = list.reduce((t, o) => t + (stat(o.code).count || 0), 0);
+    const open = list.reduce((t, o) => t + left(o.code), 0);
+    const orgsLeft = list.filter((o) => left(o.code) > 0).length;
+    const p = all ? Math.round(((all - open) / all) * 100) : 0;
+    const what = tab === 'pitch' ? tr('finished', 'ที่ครบแล้ว') : tr('decided', 'ที่ตัดสินแล้ว');
+    return `<div class="meter" role="meter" aria-valuemin="0" aria-valuemax="${all}" aria-valuenow="${all - open}" aria-label="${esc(what)}"><i style="width:${p}%"></i></div>
+      <span><b>${(all - open).toLocaleString('en-US')} / ${all.toLocaleString('en-US')}</b> ${esc(tr('projects {what} ({p}%)', 'โครงการ{what} ({p}%)', { what, p }))}</span>
+      <span class="muted">${orgsLeft ? esc(tr('{n} organizations unfinished', 'ยังไม่ครบ {n} องค์กร', { n: orgsLeft })) : esc(tr('all organizations finished', 'ครบทุกองค์กร'))}</span>`;
+  };
   const mini = (list) => {
     const sum = (f) => list.reduce((t, o) => t + (f(stat(o.code), o) || 0), 0);
     const t = (name, v, note = '') => `<div class="kpi"><span>${esc(name)}</span><b class="hero num">${v}</b>${note ? `<p class="muted small">${note}</p>` : ''}</div>`;
@@ -196,6 +211,7 @@ export async function render(page, ctx) {
     $('#sum', page).innerHTML = tr('{n} organizations · ', '{n} องค์กร · ', { n: shown.length })
       + (pending ? `<b class="warn">${tr('{n} with unfinished projects', '{n} องค์กรมีโครงการที่ยังไม่ครบ', { n: pending })}</b>` : tr('all projects finished', 'ทุกโครงการครบแล้ว'));
     $('#mini', page).innerHTML = mini(shown);
+    $('#track', page).innerHTML = track(shown);
     const keys = COLSET[tab];
     const weight = keys.reduce((t, k) => t + COL[k].w, 0);
     const COLS = `<colgroup>${keys.map((k) => `<col style="width:${(COL[k].w / weight * 100).toFixed(2)}%">`).join('')}</colgroup>`;

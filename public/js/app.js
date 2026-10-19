@@ -44,6 +44,8 @@ const ctx = {
   get console() { return ctx.me?.role === 'Admin' || ctx.me?.role === 'Chief'; },
   // Data team staff open the admin console for the edit log only.
   get adminTab() { return ctx.console || !!ctx.me?.log; },
+  // Close / open a case: Admins, Chiefs and Data team staff (the server sends it as me.case).
+  get canCase() { return !!ctx.me?.case; },
   get canEdit() { return ['Admin', 'Chief', 'Staff', 'Data team staff'].includes(ctx.me?.role); },
   // Control tab (site text, required questions): the script owner and Data team staff. The server checks too.
   get control() { return !!ctx.me?.control; },
@@ -117,10 +119,15 @@ addEventListener('outbox', async (e) => {
   } else await errorBox(e.detail.message, tr('A pending save couldn’t be sent', 'ส่งการบันทึกที่รอไว้ไม่สำเร็จ'));
 });
 
+const chromeSize = new ResizeObserver(([e]) => document.documentElement.style.setProperty('--chrome-h', `${Math.round(e.target.offsetHeight)}px`));
+
 async function render() {
   const route = parse(location.hash);
   if ((route.view === 'admin' && !ctx.adminTab) || (route.view === 'control' && !ctx.control)) { ctx.go('#/'); return; }
   root.innerHTML = shell(route);
+  // Sticky parts of a page (the list's phase tabs) sit under the top bar: its height as --chrome-h (v2.11).
+  chromeSize.disconnect();
+  chromeSize.observe(document.querySelector('.chrome'));
   $('#lang').onclick = async () => { if (!(await confirmLeave())) return; setLang(getLang() === 'th' ? 'en' : 'th'); current = null; render(); };
   $('#acct').onclick = (e) => accountMenu(e.currentTarget);
   $('#theme').onclick = toggleTheme;
@@ -202,7 +209,7 @@ onUser(async (user) => {
     api.flushOutbox(); // saves kept on this device from an earlier visit
     const textsChanged = JSON.stringify(ctx.boot.texts || {}) !== JSON.stringify(kept?.texts || {});
     setTexts(ctx.boot.texts);
-    const roleChanged = ctx.boot.me.role !== kept?.me.role || !!ctx.boot.me.control !== !!kept?.me.control || !!ctx.boot.me.log !== !!kept?.me.log;
+    const roleChanged = ctx.boot.me.role !== kept?.me.role || !!ctx.boot.me.control !== !!kept?.me.control || !!ctx.boot.me.log !== !!kept?.me.log || !!ctx.boot.me.case !== !!kept?.me.case;
     ctx.me = ctx.boot.me;
     // Same role: repaint only for new site text, and never over unsaved edits.
     if (!roleChanged && (!textsChanged || current?.isDirty?.())) return;
