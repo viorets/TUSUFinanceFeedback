@@ -24,7 +24,7 @@ English by default with a Thai toggle.
 | `PrePitch_Log` | changed field (append-only) | Logged At, By, Project Ref, Org Ref, Field, Old, New |
 | `Pitching` | project | Project Ref, Org Ref, Project Name, Summary, Final Approved Budget, Noted Documents, Updated At, Updated By, Correct Excel File (empty since v2.9), Noted Documents JSON, Correct Excel File JSON (hidden) |
 | `OrgPitching` | organization | Org Ref, Correct Excel File, Updated At, Updated By, Correct Excel File JSON (hidden) (v2.9) |
-| `Resubmission` | project | Project Ref, Org Ref, Project Name, Decision, Updated At, Updated By |
+| `Resubmission` | project | Project Ref, Org Ref, Project Name, Decision, Updated At, Updated By, Feedback (v2.10) |
 | `Settings` | setting | Key, Value, Updated At, Updated By (`Allocated Budget`; `Required` = JSON of the Owner's required questions) |
 | `OrgStatus` | organization | Org Ref, Status (Closed / Unclosed), Updated At, Updated By (v2) |
 | `Texts` | changed line of site text | Key (built-in English line), EN, TH, Updated At, Updated By (v2) |
@@ -33,7 +33,7 @@ Files are stored as JSON `{ id, name }`. Tabs are created by `setup()` / on firs
 (organization code + `-P<nn>`, position in the latest submission; see the open question in the plan).
 
 **Rules (server-side, `Code.gs`)**
-- Roles: Admin = everything (admin console + edit log). Chief = everything except the edit log, and cannot add, change or remove Admins. Staff = edit Pre-pitch and Pitching, upload; no admin console. Data team staff (v2.5) = Staff + the Control tab + the edit log (admin console shows only the log). Emails not in `Users` (or with an old Viewer role) get "No access". Old Reviewer rows count as Staff. The script owner is always Admin.
+- Roles: Admin = everything (admin console + edit log). Chief = everything except the edit log, and cannot add, change or remove Admins. Staff = edit Pre-pitch and Pitching on any project, decide Re-submission, pick persons in charge (v2.10), upload; no admin console. Data team staff (v2.5) = Staff + the Control tab + the edit log (admin console shows only the log). Emails not in `Users` (or with an old Viewer role) get "No access". Old Reviewer rows count as Staff. The script owner is always Admin.
 - Approval finished (`finished_`): every required Pre-pitch question answered. Defaults: Approved budget filled, and .docx and PDF each Yes, or No with a feedback file uploaded in that field. Unfinished projects are counted on the list and the detail page.
 - Closed cases (v2, moved in v2.2): Admins and Chiefs close or open an organization's case at the top of its Re-submission tab; the list shows Open / Closed. Every write to a closed organization (Pre-pitch, Pitching, Re-submission, uploads) is refused; the person in charge can still change.
 - Owner (v2) = the script owner. The Owner and Data team staff see the Control tab (site text split into tabs by page): site text in English and Thai (`Texts`; the built-in English line is the key, `{n}` marks stand for values) and Required / Not required per feedback question (`QUESTIONS` in `Code.gs` and `public/js/project.js`).
@@ -55,6 +55,13 @@ overrides the earlier styles. Glass turns solid for reduced transparency; motion
 
 ## Versions
 
+- `v2.10` (tag, `main`): phases compared everywhere, Staff roles widened.
+  - Organizations list: tabs All / Pre-pitch / Pitching / Re-submission, each with its own budget column and a "% of total" column; filters (category, campus, budget range with a type picker on All) kept on the device; a mini dashboard; Pitching shows the next pitching time and progress; Re-submission shows Submitted / Not submitted with a version dropdown. `boot` adds per organization `est`, `pp`, `rp`, `ok`, `fin`, `ver`, `vers`, `rs`, `slots` (`Code.gs` `boot_`).
+  - Dashboard: tiles on one grid; "% of total" in the project table and Top 5 lists; a waterfall (proposed, pitching change, pitched, re-submission change, final) and a dumbbell by campus or category.
+  - Organization page: the submission version beside the RefCode; a notice when someone else is in charge.
+  - Staff: pick persons in charge (`setInCharge` with `on`; several people per organization); Not Approved needs written feedback (`Resubmission` tab, column `Feedback`, logged in `Resubmission_Log`).
+  - Export: the Pitching sheet follows the Pre-pitch layout (Correct Excel file on each row); both end with a Total row in Excel.
+  - Masterdata: not updated in this release (see the plan).
 - `v2.9` (tag, `main`): the 13 Oct v2.8 plan, released as v2.9, plus one Correct Excel file per organization.
   - Correct Excel file: one per organization at the top of the Pitching tab (`OrgPitching` tab, `saveOrgPitching`, logged in `Pitching_Log` with an empty Project Ref), no longer per project and no longer a Required question. Print and export follow. After deploying, run `purgeProjectExcel()` once from the editor: it moves every per-project Correct Excel file to the Drive trash, clears the cells and logs each one.
   - Uploads: 10 MB, a "Max 10 MB · <types>" note under each button, straight from the browser to Drive with a progress bar (fallback: the old base64 path).

@@ -93,7 +93,7 @@ const TABS = {
   OrgPrePitch: ['Org Ref', 'Feedback Note', 'Budget Form Feedback File', 'Updated At', 'Updated By', 'Budget Form Feedback File JSON'],
   OrgPitching: ['Org Ref', 'Correct Excel File', 'Updated At', 'Updated By', 'Correct Excel File JSON'],
   Export_Log: ['Logged At', 'By', 'Parts', 'Format'],
-  Resubmission: ['Project Ref', 'Org Ref', 'Project Name', 'Decision', 'Updated At', 'Updated By'],
+  Resubmission: ['Project Ref', 'Org Ref', 'Project Name', 'Decision', 'Updated At', 'Updated By', 'Feedback'], // Feedback (v2.10): required for Not Approved
   Resubmission_Log: ['Logged At', 'By', 'Project Ref', 'Org Ref', 'Field', 'Old', 'New'],
   Settings: ['Key', 'Value', 'Updated At', 'Updated By'],
   OrgStatus: ['Org Ref', 'Status', 'Updated At', 'Updated By'],
@@ -192,18 +192,47 @@ function boot_(req, user) {
     const orgs = {};
     // pending = projects unfinished on Pitching or Re-submission; proposed / approved = budget totals (approved:
     // the Pitching tab's final approved budgets, null while none is set).
-    const org = function (ref) { return orgs[ref] || (orgs[ref] = { count: 0, pending: 0, at: '', people: [], proposed: 0, approved: null }); };
+    // v2.10 adds: est = Estimated Approved budget (Pre-pitch approved budget, the proposed budget where empty),
+    // pp / rp = projects unfinished on Pitching / Re-submission, ok = projects Approved at Re-submission, fin = their
+    // pitched budgets (the final budget), ver / vers = submission versions, rs = re-submissions sent,
+    // slots = the pitching slots of its projects.
+    const pre = byKey_(feedbackRows_('PrePitch'), 'Project Ref');
+    const org = function (ref) {
+      return orgs[ref] || (orgs[ref] = { count: 0, pending: 0, at: '', people: [], proposed: 0, approved: null, est: 0, pp: 0, rp: 0, ok: 0, fin: null,
+        ver: null, vers: [], rs: 0, slots: [] });
+    };
     s.orgs.forEach(function (o) {
       const x = org(o['Org Ref']);
       x.count = Number(o['Project Count']) || 0;
       x.at = iso_(o['Submitted At']);
+      x.ver = Number(o['Version']) || null;
+    });
+    s.log.forEach(function (r) {
+      const a = r['Action']; const ref = r['Org Ref'];
+      if ((a !== 'submit' && a !== 'resubmit') || !ORG_REF.test(String(ref))) return;
+      const x = org(ref);
+      if (a === 'resubmit') x.rs++;
+      x.vers.push({ v: Number(r['Version']) || null, at: iso_(r['Submitted At'] || r['Logged At'] || r['Timestamp'] || r['At']), kind: a,
+        total: num_(r['Total Proposed Budget'] != null ? r['Total Proposed Budget'] : r['Total Budget']), n: Number(r['Project Count']) || null });
     });
     s.projects.forEach(function (p) {
       const x = org(p['Org Ref']); const ref = p['Project Ref'];
-      if ((ph.pitching && !pitchDone_(pitch[ref])) || (ph.resubmit && !resubDone_(resub[ref]))) x.pending++;
-      x.proposed += num_(p['Budget']) || 0;
+      const pendP = ph.pitching && !pitchDone_(pitch[ref]);
+      const pendR = ph.resubmit && !resubDone_(resub[ref]);
+      if (pendP || pendR) x.pending++;
+      if (pendP) x.pp++;
+      if (pendR) x.rp++;
+      const prop = num_(p['Budget']) || 0;
+      x.proposed += prop;
+      const est = pre[ref] ? num_(pre[ref]['Approved Budget']) : null;
+      x.est += est != null ? est : prop;
       const fin = pitch[ref] ? num_(pitch[ref]['Final Approved Budget']) : null;
       if (fin != null) x.approved = (x.approved || 0) + fin;
+      if (resub[ref] && resub[ref]['Decision'] === 'Approved') { x.ok++; if (fin != null) x.fin = (x.fin || 0) + fin; }
+    });
+    schedule_().forEach(function (r) {
+      const ref = String(r.ref).replace(/-P\d+$/, '');
+      if (orgs[ref] && r.date) orgs[ref].slots.push([r.date, r.start, r.end]);
     });
     users_().forEach(function (u) { u.orgs.forEach(function (ref) { org(ref).people.push(u.email); }); });
     return { orgs: orgs, removed: hidden_(s.log), closed: closed_(), texts: texts_(), required: required_(), phases: phases_(), link: externalLink_() };
@@ -214,7 +243,8 @@ function boot_(req, user) {
   const out = { me: { email: user.email, role: user.role, owner: user.email === owner_(), control: canControl_(user), log: canLog_(user) },
     orgs: core.orgs, removed: core.removed, closed: core.closed, texts: core.texts, required: core.required, phases: core.phases,
     link: core.link, names: names };
-  if (RANK[user.role] >= RANK.Chief) out.users = users_().filter(function (u) { return u.role; }).map(function (u) { return u.email; });
+  // The person-in-charge picker (v2.10: Staff too).
+  out.users = users_().filter(function (u) { return u.role; }).map(function (u) { return u.email; });
   return out;
 }
 
@@ -450,15 +480,22 @@ function saveResubmit_(req, user) {
   const decision = String(req.decision || '');
   if (decision && decision !== 'Approved' && decision !== 'Not Approved') throw new Error('Decision must be Approved or Not Approved');
   const now = new Date();
-  const row = { 'Project Ref': p.ref, 'Org Ref': p.org, 'Project Name': p.name, 'Decision': decision, 'Updated At': now, 'Updated By': user.email };
+  // v2.10: Not Approved needs written feedback; any other decision clears it.
+  const feedback = decision === 'Not Approved' ? text_(req.feedback, 2000).trim() : '';
+  if (decision === 'Not Approved' && !feedback) throw new Error('Write feedback for a Not Approved project');
+  const row = { 'Project Ref': p.ref, 'Org Ref': p.org, 'Project Name': p.name, 'Decision': decision, 'Updated At': now, 'Updated By': user.email, 'Feedback': feedback };
   const sh = tab_('Resubmission');
   const at = rowOf_(sh, p.ref);
   const was = at ? rowAt_(sh, at) : null;
   const old = was ? String(was['Decision'] || '') : '';
-  if (old !== decision) fresh_(was, req.base);
+  const oldFb = was ? String(was['Feedback'] || '') : '';
+  if (old !== decision || oldFb !== feedback) fresh_(was, req.base);
   stillOpen_(p.org);
   saveRow_(sh, TABS.Resubmission, row, at);
-  if (old !== decision) resubLog_([[now, user.email, p.ref, p.org, 'Decision', old, decision]]);
+  const changes = [];
+  if (old !== decision) changes.push([now, user.email, p.ref, p.org, 'Decision', old, decision]);
+  if (oldFb !== feedback) changes.push([now, user.email, p.ref, p.org, 'Feedback', cell_(oldFb), cell_(feedback)]);
+  if (changes.length) resubLog_(changes);
   bump_('Resubmission', 'Resubmission_Log');
   return { resub: resubOut_(row) };
 }
@@ -468,7 +505,7 @@ function resubRows_() { return tabRows_('Resubmission'); }
 // Settings rows (allocated budget, required questions, phases, extra tab).
 function settings_() { return tabRows_('Settings'); }
 
-function resubOut_(r) { return { decision: r['Decision'] || '', at: iso_(r['Updated At']), by: r['Updated By'] || '' }; }
+function resubOut_(r) { return { decision: r['Decision'] || '', feedback: String(r['Feedback'] || ''), at: iso_(r['Updated At']), by: r['Updated By'] || '' }; }
 
 /* ---------- dashboard ---------- */
 
@@ -775,20 +812,22 @@ function exportData_(req, user) {
   }
   if (want.pitching) {
     const pit = byKey_(feedbackRows_('Pitching'), 'Project Ref');
-    out.pitching = projects.map(function (p) {
-      const r = pit[p['Project Ref']] || {};
-      return { 'Project Ref': p['Project Ref'], 'Summary': String(r['Summary'] || ''), 'Final Approved Budget': num_(r['Final Approved Budget']),
-        'Noted Documents': links(r['Noted Documents']), 'Updated At': iso_(r['Updated At']), 'Updated By': r['Updated By'] || '' };
-    });
-    // Correct Excel file: one per organization (v2.9), on the Organizations sheet.
+    // Correct Excel file: one per organization (v2.9), on the Organizations sheet; v2.10 repeats it on each Pitching row.
     const xl = byKey_(tabRows_('OrgPitching'), 'Org Ref');
     orgs.forEach(function (o) { o['Correct Excel File'] = links((xl[o['Org Ref']] || {})['Correct Excel File']); });
+    // v2.10: same layout as the Pre-pitch sheet (Docx / PDF / Note become Summary / Noted Documents), so the two compare.
+    out.pitching = projects.map(function (p) {
+      const r = pit[p['Project Ref']] || {};
+      return { 'Project Ref': p['Project Ref'], 'Pitched Final Approved Budget': num_(r['Final Approved Budget']), 'Summary': String(r['Summary'] || ''),
+        'Noted Documents': links(r['Noted Documents']), 'Correct Excel File': links((xl[p['Org Ref']] || {})['Correct Excel File']),
+        'Updated At': iso_(r['Updated At']), 'Updated By': r['Updated By'] || '' };
+    });
   }
   if (want.resubmit) {
     const rs = byKey_(tabRows_('Resubmission'), 'Project Ref');
     out.resubmit = projects.map(function (p) {
       const r = rs[p['Project Ref']] || {};
-      return { 'Project Ref': p['Project Ref'], 'Decision': r['Decision'] || '', 'Updated At': iso_(r['Updated At']), 'Updated By': r['Updated By'] || '' };
+      return { 'Project Ref': p['Project Ref'], 'Decision': r['Decision'] || '', 'Feedback': String(r['Feedback'] || ''), 'Updated At': iso_(r['Updated At']), 'Updated By': r['Updated By'] || '' };
     });
   }
   return out;
@@ -962,11 +1001,15 @@ function usersVer_() {
 
 // Person in charge of one organization (list-page dropdown): the chosen user gets the RefCode, everyone else loses it.
 // email '' = nobody.
+// v2.10: Staff can use it, and several people can be in charge of one organization. With `on` (true / false) the
+// person is added to / removed from the organization; without `on` (older pages) the person replaces everyone.
 function setInCharge_(req, user) {
-  need_(user, 'Chief');
+  need_(user, 'Staff');
   const ref = String(req.ref || '');
   if (!ORG_REF.test(ref)) throw new Error('Bad organization code');
   const email = String(req.email || '').trim().toLowerCase();
+  const toggle = req.on === true || req.on === false;
+  if (toggle && !email) throw new Error('Choose a person');
   return locked_(function () {
     const sh = tab_('Users');
     const n = sh.getLastRow() - 1;
@@ -976,12 +1019,15 @@ function setInCharge_(req, user) {
     const now = new Date();
     vals.forEach(function (r, i) {
       const has = String(r[2] || '').split(/[,\s]+/).filter(function (x) { return x; });
-      const keep = has.filter(function (x) { return x !== ref; });
-      if (String(r[0]).trim().toLowerCase() === email) keep.push(ref);
+      const mine = String(r[0]).trim().toLowerCase() === email;
+      // Toggle: only the named person's row changes. Replace: everyone loses the organization, the named person gains it.
+      const keep = has.filter(function (x) { return x !== ref || (toggle && !mine); });
+      if (mine && (!toggle || req.on)) keep.push(ref);
+      r[2] = keep.join(', ');
       if (keep.join(', ') !== has.join(', ')) sh.getRange(i + 2, 3, 1, 3).setValues([[keep.join(', '), now, user.email]]);
     });
     bump_('Users');
-    return { people: email ? [email] : [] };
+    return { people: vals.filter(function (r) { return String(r[2] || '').split(/[,\s]+/).indexOf(ref) >= 0; }).map(function (r) { return String(r[0]).trim().toLowerCase(); }) };
   });
 }
 

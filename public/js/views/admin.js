@@ -366,12 +366,21 @@ const loadXlsx = () => xlsxLoad || (xlsxLoad = new Promise((res, rej) => {
   document.head.append(s);
 }));
 
+// v2.10: the Pre-pitch and Pitching sheets end with the same summary row: project count and the budget total.
+function withTotal(rows) {
+  if (!rows.length) return rows;
+  const head = Object.keys(rows[0]);
+  const total = { [head[0]]: tr('Total ({n} projects)', 'รวม ({n} โครงการ)', { n: rows.length }) };
+  head.forEach((h) => { if (/Budget/.test(h)) total[h] = rows.reduce((t, r) => t + (+r[h] || 0), 0); });
+  return [...rows, total];
+}
+
 async function saveXlsx(d) {
   const X = await loadXlsx();
   const wb = X.utils.book_new();
   X.utils.book_append_sheet(wb, X.utils.json_to_sheet(d.orgs), 'Organizations');
   X.utils.book_append_sheet(wb, X.utils.json_to_sheet(d.projects), 'Projects');
-  PHASE_SHEETS.forEach(([k, label]) => { if (d[k]) X.utils.book_append_sheet(wb, X.utils.json_to_sheet(d[k]), label); });
+  PHASE_SHEETS.forEach(([k, label]) => { if (d[k]) X.utils.book_append_sheet(wb, X.utils.json_to_sheet(k === 'resubmit' ? d[k] : withTotal(d[k])), label); });
   if (d.emails) X.utils.book_append_sheet(wb, X.utils.json_to_sheet(d.emails.length ? d.emails : [{ 'Org Ref': '', Organization: '', Campus: '', Email: '' }]), 'Emails');
   const out = X.write(wb, { bookType: 'xlsx', type: 'array' });
   download(new Blob([out], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' }), `pitch-feedback-${stamp()}.xlsx`);

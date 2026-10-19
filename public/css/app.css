@@ -564,3 +564,56 @@ small.block { display: block; margin-top: 2px; }
 /* Pitching: the organization's Correct Excel file box. */
 .xl-box .fb { border-top: 0; }
 .xl-box h4 { margin: 0 0 4px; }
+
+/* ---------- v2.10 ---------- */
+/* Dashboard tiles: one grid, four rows (title, amount, bar, notes), so a two-line title no longer shifts the rest. */
+.dash-ci .kpis { row-gap: 0; }
+.dash-ci .kpi { display: grid; grid-row: span 4; grid-template-rows: subgrid; row-gap: 0; margin-bottom: 14px; }
+.dash-ci .kpi > p { margin: 6px 0 0; }
+.kpi-bar { align-self: start; }
+/* Phase charts. */
+.chart-card { padding: 18px 20px; }
+.chart-head { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 10px; }
+svg.chart { width: 100%; height: auto; display: block; }
+svg.chart .ct { font-size: 13px; font-weight: 600; fill: var(--text); }
+svg.chart .cl { font-size: 12px; fill: var(--text2); }
+svg.chart .grid { stroke: var(--sep); stroke-width: 1; }
+svg.chart .dumb-line { stroke: var(--text2); stroke-width: 2; opacity: .45; stroke-linecap: round; }
+svg.chart circle { stroke: var(--bg2); stroke-width: 2; }
+svg.chart [data-tip]:hover { opacity: .85; }
+.chart-legend { display: flex; flex-wrap: wrap; gap: 16px; margin: 8px 0 0; color: var(--text2); }
+.chart-note { margin: 6px 0 0; }
+.rank .num small.block { font-weight: 400; text-align: right; }
+/* Organizations list: tabs, mini dashboard, filters. */
+.tabs-list { margin-top: 14px; }
+.kpis.mini { margin: 14px 0 0; grid-template-columns: repeat(auto-fit, minmax(170px, 1fr)); }
+.kpis.mini .kpi { padding: 14px 18px; }
+.kpis.mini .hero { font-size: 24px; margin: 4px 0 6px; }
+.msel, .pic-pick { position: relative; }
+.msel > summary { list-style: none; cursor: pointer; padding: 9px 16px; border-radius: 980px; background: var(--fill); font-size: 15px; font-weight: 500; white-space: nowrap; }
+.msel > summary::-webkit-details-marker, .pic-pick > summary::-webkit-details-marker { display: none; }
+.msel > summary small { font-weight: 700; color: var(--ink); }
+.msel[open] > summary { background: var(--fill2); }
+.msel-body { position: absolute; z-index: 30; top: calc(100% + 6px); left: 0; min-width: 220px; max-height: 320px; overflow: auto; background: var(--bg2); border-radius: 14px; box-shadow: 0 12px 32px rgba(0, 0, 0, .2); padding: 8px; display: flex; flex-direction: column; }
+.msel-opt { display: flex; gap: 10px; align-items: center; padding: 7px 10px; border-radius: 8px; font-size: 15px; font-weight: 400; cursor: pointer; white-space: nowrap; }
+.msel-opt:hover { background: var(--mist); }
+.msel-opt input { accent-color: var(--teal); width: 16px; height: 16px; }
+.pic-pick > summary { cursor: pointer; list-style: none; }
+.pic-pick > summary::after { content: ' ▾'; color: var(--text2); }
+.pic-pick .msel-body { min-width: 200px; }
+.toolbar.range { margin-top: -6px; gap: 12px; }
+.toolbar.range input[type=number] { width: 130px; flex: none; }
+.toolbar.range select { width: auto; }
+.dual { position: relative; flex: 1; min-width: 180px; max-width: 360px; height: 28px; }
+.dual input[type=range] { position: absolute; inset: 0; width: 100%; margin: 0; background: none; pointer-events: none; accent-color: var(--teal); -webkit-appearance: none; appearance: none; }
+.dual input[type=range]::-webkit-slider-thumb { pointer-events: auto; }
+.dual input[type=range]::-moz-range-thumb { pointer-events: auto; }
+.dual input[type=range]::-webkit-slider-runnable-track { height: 4px; border-radius: 2px; background: var(--fill2); }
+.dual input[type=range]::-moz-range-track { height: 4px; border-radius: 2px; background: var(--fill2); }
+.dual input[type=range]:disabled { opacity: .45; }
+.vers > summary { cursor: pointer; list-style: none; display: inline-flex; gap: 6px; align-items: center; }
+.vers > summary::after { content: '▾'; color: var(--text2); }
+.vers-list { list-style: none; margin: 8px 0 0; padding: 0; display: flex; flex-direction: column; gap: 6px; font-size: 13px; }
+.orghead .pill.ver { order: 3; align-self: center; }
+.fb-note { display: block; margin-bottom: 4px; color: var(--text); }
+@media (max-width: 640px) { .dual { max-width: none; flex-basis: 100%; } }

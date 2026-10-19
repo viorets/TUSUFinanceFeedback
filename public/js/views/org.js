@@ -54,7 +54,7 @@ async function draw(page, ctx, route, data) {
   page.innerHTML = `<a class="btn plain back" href="#/">${icon('back', 18)}${tr('Organizations', 'องค์กร')}</a>
     <section class="group orghead">
       <div class="oh-top">${statusPill(closed)}<span class="grow"></span><button class="btn" id="print">${icon('print', 16)}${tr('Print', 'พิมพ์')}</button></div>
-      <div class="oh-line"><span class="code ref">${esc(route.ref)}</span><h1>${esc(o?.en || route.ref)}</h1></div>
+      <div class="oh-line"><span class="code ref">${esc(route.ref)}</span>${s?.version ? `<span class="pill blue ver" title="${esc(tr('Submission version', 'ครั้งที่ส่ง'))}">v${esc(s.version)}</span>` : ''}<h1>${esc(o?.en || route.ref)}</h1></div>
       <div class="oh-line muted">${esc(label(CAMPUSES, o?.campus))} · ${esc(label(CATEGORIES, o?.category))}${ORGS.includes(o) ? '' : ` · ${tr('not in the masterfile', 'ไม่อยู่ในรายชื่อหลัก')}`}</div>
       <dl class="oh-totals" id="totals"></dl>
       <details><summary>${tr('More information', 'ข้อมูลเพิ่มเติม')}</summary>
@@ -67,6 +67,7 @@ async function draw(page, ctx, route, data) {
         </dl></details>
     </section>
     ${closed ? `<div class="notice closed">${icon('lock', 18)}<span>${tr('Closed by {who} on {when}. Its data cannot be changed.', 'ปิดโดย {who} เมื่อ {when} ไม่สามารถแก้ไขข้อมูลได้', { who: esc(ctx.nameOf(closed.by)), when: dateTimeFmt(closed.at) })}</span></div>` : ''}
+    ${!closed && ctx.canEdit && data.people.length && !data.people.includes(ctx.me.email) ? `<div class="notice blue">${icon('alert', 18)}<span>${tr('{who} is in charge of this organization. You can edit it too.', '{who} รับผิดชอบองค์กรนี้ คุณแก้ไขได้เช่นกัน', { who: esc(data.people.map((p) => ctx.nameOf(p)).join(', ')) })}</span></div>` : ''}
     <nav class="seg-tabs" id="tabs"></nav>
     <div id="tab"></div>`;
   // Print: pick the phases and the paper, then everything on one vertical page (print.js).

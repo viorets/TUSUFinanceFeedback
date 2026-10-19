@@ -20,7 +20,7 @@ const sumOf = (list, k) => list.reduce((a, p) => a + (p[k] || 0), 0);
 const finalOf = (p) => (p.decision === 'Approved' ? p.pitched : null);
 
 // Project table state (kept while moving around the site).
-const view = { q: '', group: 'none', sort: 'budget' };
+const view = { q: '', group: 'none', sort: 'budget', dumb: 'campus' };
 
 export async function render(page) {
   page.innerHTML = `<div class="dash-ci"><h1 class="grad">${tr('Dashboard', 'แดชบอร์ด')}</h1><div id="dash"></div></div>`;
@@ -56,16 +56,22 @@ function draw(el, d) {
       ${tile(tr('Estimated Approved budget', 'งบประมาณที่คาดว่าจะได้รับอนุมัติ'), sumOf(ps, 'approved'), d.allocated, `${tr('Pre-pitch', 'ก่อนการนำเสนอ')} · ${of('approved')}`)}
       ${tile(tr('Pitched budget', 'งบประมาณหลังการนำเสนอ'), sumOf(ps, 'pitched'), d.allocated, `${tr('Final approved budget at pitching', 'งบประมาณอนุมัติขั้นสุดท้ายจากการนำเสนอ')} · ${of('pitched')}`)}
       ${tile(tr('Final budget', 'งบประมาณสุดท้าย'), sumOf(ps, 'final'), d.allocated, `${tr('Re-submission approved', 'อนุมัติหลังส่งแก้ไข')} · ${of('final')}`)}
-      <div class="kpi"><span>${tr('Total projects', 'จำนวนโครงการทั้งหมด')}</span><b class="hero">${ps.length.toLocaleString('en-US')}</b>
+      <div class="kpi"><span>${tr('Total projects', 'จำนวนโครงการทั้งหมด')}</span><b class="hero">${ps.length.toLocaleString('en-US')}</b><div></div>
         <p class="muted small">${tr('from {n} organizations', 'จาก {n} องค์กร', { n: orgsWith })}</p></div>
     </div>
     ${d.allocated == null ? `<p class="foot">${icon('alert', 14)} ${tr('Allocated budget is not set yet — an Admin or Chief can set it in the Admin console.', 'ยังไม่ได้กำหนดกรอบงบประมาณ — ผู้ดูแลหรือหัวหน้ากำหนดได้ในคอนโซลผู้ดูแล')}</p>` : ''}
 
+    <h2 class="section-title">${tr('From proposed to final budget', 'จากงบที่เสนอถึงงบสุดท้าย')}</h2>
+    <div class="group chart-card">${waterfall(ps)}</div>
+    <div class="chart-head"><h2 class="section-title">${tr('Proposed, pitched and final by', 'งบที่เสนอ หลังนำเสนอ และสุดท้าย ตาม')}</h2>
+      <div class="seg" role="radiogroup" id="dumbsw"><label><input type="radio" name="dumb" value="campus" ${view.dumb === 'campus' ? 'checked' : ''}><span>${tr('Campus', 'วิทยาเขต')}</span></label><label><input type="radio" name="dumb" value="category" ${view.dumb === 'category' ? 'checked' : ''}><span>${tr('Category', 'หมวด')}</span></label></div></div>
+    <div class="group chart-card" id="dumb"></div>
+
     <div class="dash-grid">
       <section><h2 class="section-title">${tr('Top 5 projects by budget', '5 โครงการที่ใช้งบประมาณสูงสุด')}</h2>
-        ${rank(topProjects.map((p) => ({ name: p.name, sub: `${p.ref} · ${orgName(p.org)}`, v: p.budget, href: `#/org/${encodeURIComponent(p.org)}` })))}</section>
+        ${rank(topProjects.map((p) => ({ name: p.name, sub: `${p.ref} · ${orgName(p.org)}`, v: p.budget, href: `#/org/${encodeURIComponent(p.org)}` })), total)}</section>
       <section><h2 class="section-title">${tr('Top 5 organizations by budget', '5 องค์กรที่ใช้งบประมาณสูงสุด')}</h2>
-        ${rank(topOrgs.map(([ref, v]) => ({ name: orgName(ref), sub: ref, v, href: `#/org/${encodeURIComponent(ref)}` })))}</section>
+        ${rank(topOrgs.map(([ref, v]) => ({ name: orgName(ref), sub: ref, v, href: `#/org/${encodeURIComponent(ref)}` })), total)}</section>
       <section><h2 class="section-title">${tr('Project budget by campus', 'งบประมาณโครงการตามวิทยาเขต')}</h2>${pie(sum(CAMPUSES, 0), total)}</section>
       <section><h2 class="section-title">${tr('Project budget by category', 'งบประมาณโครงการตามหมวด')}</h2>${pie(sum(CATEGORIES, 1), total)}</section>
     </div>
@@ -78,8 +84,11 @@ function draw(el, d) {
     </div>
     <div class="group scroll-x"><table class="grid-table budgets-table"><thead><tr>
       <th>${tr('Project', 'โครงการ')}</th><th>${tr('Organization', 'องค์กร')}</th>
-      ${COLS.map(([, l]) => `<th class="r">${esc(l())}</th>`).join('')}</tr></thead><tbody id="ptable"></tbody></table></div>`;
+      ${COLS.map(([k, l]) => `<th class="r">${esc(l())}</th>${k === 'budget' ? `<th class="r">${tr('% of total', '% ของยอดรวม')}</th>` : ''}`).join('')}</tr></thead><tbody id="ptable"></tbody></table></div>`;
   hover(el);
+  const dumb = () => { $('#dumb', el).innerHTML = dumbbell(ps, view.dumb); };
+  dumb();
+  $('#dumbsw', el).onchange = (e) => { view.dumb = e.target.value; dumb(); };
   const paint = () => { $('#ptable', el).innerHTML = table(ps); };
   paint();
   $('#pq', el).oninput = (e) => { view.q = e.target.value; paint(); };
@@ -115,16 +124,19 @@ const SORTS = {
 };
 const opts = (o, on) => Object.entries(o).map(([k, x]) => `<option value="${k}" ${k === on ? 'selected' : ''}>${esc(x.label())}</option>`).join('');
 const money = (v) => (v == null ? '<span class="muted">—</span>' : baht(v));
+const share = (v) => `<td class="r num">${shownTotal ? `${pct(v, shownTotal)}%` : '—'}</td>`;
 const totals = (list, name, cls) => `<tr class="${cls}"><th colspan="2">${esc(name)} <span class="muted">· ${tr('{n} projects', '{n} โครงการ', { n: list.length })}</span></th>
-  ${COLS.map(([k]) => `<th class="r num">${baht(sumOf(list, k))}</th>`).join('')}</tr>`;
+  ${COLS.map(([k]) => `<th class="r num">${baht(sumOf(list, k))}</th>${k === 'budget' ? `<th class="r num">${shownTotal ? `${pct(sumOf(list, k), shownTotal)}%` : '—'}</th>` : ''}`).join('')}</tr>`;
 
+let shownTotal = 0; // total proposed budget of the rows shown: the base of the % of total column
 function table(ps) {
   const q = view.q.trim().toLowerCase();
   const list = ps.filter((p) => !q || `${p.name} ${p.ref} ${p.org} ${orgName(p.org)}`.toLowerCase().includes(q)).sort(SORTS[view.sort].fn);
-  if (!list.length) return `<tr><td colspan="6" class="muted">${tr('No projects match', 'ไม่มีโครงการที่ตรงกัน')}</td></tr>`;
+  shownTotal = sumOf(list, 'budget');
+  if (!list.length) return `<tr><td colspan="7" class="muted">${tr('No projects match', 'ไม่มีโครงการที่ตรงกัน')}</td></tr>`;
   // Total first, so it reads before the rows and groups.
   const row = (p) => `<tr data-org="${esc(p.org)}" tabindex="0"><td><b>${esc(p.name || '—')}</b><small class="muted mono">${esc(p.ref)}</small></td>
-    <td class="small">${esc(orgName(p.org))}</td>${COLS.map(([k]) => `<td class="r num">${money(p[k])}</td>`).join('')}</tr>`;
+    <td class="small">${esc(orgName(p.org))}</td>${COLS.map(([k]) => `<td class="r num">${money(p[k])}</td>${k === 'budget' ? share(p.budget) : ''}`).join('')}</tr>`;
   const g = GROUPS[view.group];
   let body;
   if (view.group === 'none') body = list.map(row).join('');
@@ -144,18 +156,18 @@ function tile(name, v, alloc, note) {
   const p = has ? pct(v, alloc) : 0;
   const over = has && v > alloc;
   return `<div class="kpi"><span>${esc(name)}</span><b class="hero num">${baht(v)}</b>
-    ${has ? `<div class="meter${over ? ' over' : ''}" role="meter" aria-valuemin="0" aria-valuemax="${alloc}" aria-valuenow="${v}" aria-label="${esc(name)}"><i style="width:${Math.min(100, p)}%"></i></div>
-      <p class="small ${over ? 'warn' : 'muted'}">${over ? `${icon('alert', 13)} ` : ''}${tr('{p}% of {alloc} allocated', '{p}% ของกรอบงบประมาณ {alloc}', { p, alloc: baht(alloc) })}${over ? tr(' · {over} over', ' · เกิน {over}', { over: baht(v - alloc) }) : ''}</p>` : ''}
+    <div class="kpi-bar">${has ? `<div class="meter${over ? ' over' : ''}" role="meter" aria-valuemin="0" aria-valuemax="${alloc}" aria-valuenow="${v}" aria-label="${esc(name)}"><i style="width:${Math.min(100, p)}%"></i></div>
+      <p class="small ${over ? 'warn' : 'muted'}">${over ? `${icon('alert', 13)} ` : ''}${tr('{p}% of {alloc} allocated', '{p}% ของกรอบงบประมาณ {alloc}', { p, alloc: baht(alloc) })}${over ? tr(' · {over} over', ' · เกิน {over}', { over: baht(v - alloc) }) : ''}</p>` : ''}</div>
     <p class="muted small">${esc(note)}</p></div>`;
 }
 
 // Ranked list with a thin magnitude bar (one hue).
-function rank(rows) {
+function rank(rows, total) {
   if (!rows.length) return `<div class="group empty">${tr('No projects yet', 'ยังไม่มีโครงการ')}</div>`;
   const max = rows[0].v || 1;
   return `<ol class="group rank">${rows.map((r, i) => `<li><a href="${esc(r.href)}"><span class="no">${i + 1}</span>
     <span class="grow"><b>${esc(r.name)}</b><small class="muted">${esc(r.sub)}</small><i class="bar" style="width:${Math.max(2, (r.v / max) * 100)}%"></i></span>
-    <span class="num">${baht(r.v)}</span></a></li>`).join('')}</ol>`;
+    <span class="num">${baht(r.v)}<small class="muted block">${pct(r.v, total)}%</small></span></a></li>`).join('')}</ol>`;
 }
 
 // Pie of the parts with budget, 2px surface gaps between slices, hover tooltip; the legend table lists every part.
@@ -191,3 +203,61 @@ function hover(el) {
   el.onpointerleave = () => { t.hidden = true; };
 }
 
+
+// ---------- phase charts (v2.10) ----------
+const C_TOTAL = 'var(--c0)'; const C_UP = 'var(--green)'; const C_DOWN = 'var(--red)';
+const short = (n) => { const a = Math.abs(n); return a >= 1e6 ? `฿${(a / 1e6).toFixed(a >= 1e7 ? 0 : 1)}M` : a >= 1e3 ? `฿${Math.round(a / 1e3)}k` : `฿${Math.round(a)}`; };
+
+// Waterfall: proposed, the change at pitching, pitched, the change at re-submission, final. Same sums as the tiles
+// (a project not pitched yet counts 0 in Pitched, so the first step includes projects still waiting to pitch).
+function waterfall(ps) {
+  const proposed = sumOf(ps, 'budget'); const pitched = sumOf(ps, 'pitched'); const final = sumOf(ps, 'final');
+  if (!proposed) return `<div class="empty">${tr('No budget yet', 'ยังไม่มีงบประมาณ')}</div>`;
+  const steps = [
+    { n: tr('Proposed', 'เสนอ'), from: 0, to: proposed, c: C_TOTAL },
+    { n: tr('Pitching change', 'เปลี่ยนที่การนำเสนอ'), from: proposed, to: pitched, c: pitched >= proposed ? C_UP : C_DOWN },
+    { n: tr('Pitched', 'หลังนำเสนอ'), from: 0, to: pitched, c: C_TOTAL },
+    { n: tr('Re-submission change', 'เปลี่ยนที่การส่งแก้ไข'), from: pitched, to: final, c: final >= pitched ? C_UP : C_DOWN },
+    { n: tr('Final', 'สุดท้าย'), from: 0, to: final, c: C_TOTAL },
+  ];
+  const W = 640; const H = 260; const top = 24; const bot = 40; const bw = 80; const gap = (W - bw * steps.length) / (steps.length + 1);
+  const y = (v) => top + (H - top - bot) * (1 - v / proposed);
+  const bars = steps.map((s, i) => {
+    const x = gap + i * (bw + gap); const hi = Math.max(s.from, s.to); const lo = Math.min(s.from, s.to);
+    const d = s.to - s.from;
+    const tip = i % 2 ? `${s.n}: ${d < 0 ? '−' : '+'}${baht(Math.abs(d))}` : `${s.n}: ${baht(s.to)}`;
+    return `<rect x="${x}" y="${y(hi)}" width="${bw}" height="${Math.max(2, y(lo) - y(hi))}" rx="5" style="fill:${s.c}" data-tip="${esc(tip)}"/>
+      <text x="${x + bw / 2}" y="${y(hi) - 6}" text-anchor="middle" class="ct">${i % 2 ? (d < 0 ? '−' : '+') + short(Math.abs(d)) : short(s.to)}</text>
+      <text x="${x + bw / 2}" y="${H - 14}" text-anchor="middle" class="cl">${esc(s.n)}</text>`;
+  }).join('');
+  const note = tr('{a} of {n} projects pitched · {b} Approved at re-submission', 'นำเสนอแล้ว {a} จาก {n} โครงการ · อนุมัติหลังส่งแก้ไข {b}',
+    { a: ps.filter((p) => p.pitched != null).length, n: ps.length, b: ps.filter((p) => p.final != null).length });
+  return `<svg viewBox="0 0 ${W} ${H}" class="chart" role="img" aria-label="${esc(steps.map((s) => `${s.n} ${baht(s.to)}`).join('; '))}">${bars}</svg><p class="muted small chart-note">${esc(note)}</p>`;
+}
+
+// Dumbbell: one row per campus or category, a dot each for proposed, pitched and final; the gaps are the cuts.
+function dumbbell(ps, by) {
+  const part = by === 'campus' ? 0 : 1;
+  const list = by === 'campus' ? CAMPUSES : CATEGORIES;
+  const rows = list.map((x) => {
+    const g = ps.filter((p) => p.org.split('-')[part] === x.code);
+    return { x, v: [sumOf(g, 'budget'), sumOf(g, 'pitched'), sumOf(g, 'final')] };
+  }).filter((r) => r.v[0] > 0);
+  if (!rows.length) return `<div class="empty">${tr('No budget yet', 'ยังไม่มีงบประมาณ')}</div>`;
+  const max = Math.max(...rows.map((r) => r.v[0]), 1);
+  const names = [tr('Proposed', 'เสนอ'), tr('Pitched', 'หลังนำเสนอ'), tr('Final', 'สุดท้าย')];
+  const cols = ['var(--c0)', 'var(--c1)', 'var(--c2)'];
+  const W = 640; const L = 130; const R = 24; const rowH = 34; const H = rows.length * rowH + 40;
+  const x = (v) => L + (W - L - R) * (v / max);
+  const body = rows.map((r, i) => {
+    const cy = 20 + i * rowH + rowH / 2;
+    const lo = Math.min(...r.v); const hi = Math.max(...r.v);
+    return `<text x="${L - 10}" y="${cy + 4}" text-anchor="end" class="cl">${esc(label(r.x))}</text>
+      <line x1="${L}" x2="${W - R}" y1="${cy}" y2="${cy}" class="grid"/>
+      <line x1="${x(lo)}" x2="${x(hi)}" y1="${cy}" y2="${cy}" class="dumb-line"/>
+      ${r.v.map((v, k) => `<circle cx="${x(v)}" cy="${cy}" r="6" style="fill:${cols[k]}" data-tip="${esc(`${label(r.x)} · ${names[k]}: ${baht(v)}`)}"/>`).join('')}`;
+  }).join('');
+  const legend = names.map((n, k) => `<span><i class="sw" style="background:${cols[k]}"></i>${esc(n)}</span>`).join('');
+  const aria = rows.map((r) => `${label(r.x)}: ${r.v.map((v, k) => `${names[k]} ${baht(v)}`).join(', ')}`).join('; ');
+  return `<svg viewBox="0 0 ${W} ${H}" class="chart" role="img" aria-label="${esc(aria)}">${body}</svg><p class="chart-legend small">${legend}</p>`;
+}

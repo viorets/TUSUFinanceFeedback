@@ -20,7 +20,8 @@ export const RESUB_FIELDS = () => [
 
 export function render(el, d, ctx) {
   d.resub = d.resub || {};
-  const saved = (s) => (s?.pending ? `<span class="pill orange">${tr('Pending', 'รอส่ง')}</span> ${tr('Kept on this device; it is sent when the server can be reached', 'เก็บไว้ในเครื่องนี้ จะส่งเมื่อติดต่อเซิร์ฟเวอร์ได้')}` : s?.at ? tr('Saved {when} by {who}', 'บันทึก {when} โดย {who}', { when: dateTimeFmt(s.at), who: esc(ctx.nameOf(s.by)) }) : tr('No decision yet', 'ยังไม่ได้ตัดสิน'));
+  const fbLine = (s) => (s?.decision === 'Not Approved' && s.feedback ? `<span class="fb-note"><b>${tr('Feedback', 'ข้อเสนอแนะ')}:</b> ${esc(s.feedback).replace(/\n/g, '<br>')}</span><br>` : '');
+  const saved = (s) => fbLine(s) + (s?.pending ? `<span class="pill orange">${tr('Pending', 'รอส่ง')}</span> ${tr('Kept on this device; it is sent when the server can be reached', 'เก็บไว้ในเครื่องนี้ จะส่งเมื่อติดต่อเซิร์ฟเวอร์ได้')}` : s?.at ? tr('Saved {when} by {who}', 'บันทึก {when} โดย {who}', { when: dateTimeFmt(s.at), who: esc(ctx.nameOf(s.by)) }) : tr('No decision yet', 'ยังไม่ได้ตัดสิน'));
   const closed = d.closed;
   // Projects not Approved yet (Not Approved or no decision): each one blocks closing.
   const notApproved = () => d.projects.filter((p) => d.resub[p.ref]?.decision !== 'Approved').length;
@@ -39,7 +40,8 @@ export function render(el, d, ctx) {
       <div class="pcard-body"><dl class="kv nodata">${RESUB_FIELDS().map((k) => `<dt>${esc(k)}</dt><dd class="muted">${esc(NO_DATA())}</dd>`).join('')}</dl></div>
       <div class="fb"><div class="field"><label>${tr('Decision', 'ผลการพิจารณา')}${star(d, 'resub.decision')}</label>
         <div><div class="seg" role="radiogroup">${CHOICES.map(([v, label]) => `<label><input type="radio" name="rs-${esc(p.ref)}" value="${v}" ${s?.decision === v ? 'checked' : ''} ${ctx.canEdit ? '' : 'disabled'}><span>${esc(label())}</span></label>`).join('')}</div>
-        <p class="muted small" data-saved>${saved(s)}</p></div></div></div>
+        <p class="muted small" data-saved>${saved(s)}</p>
+        ${s?.decision === 'Not Approved' && ctx.canEdit ? `<button class="btn plain" data-fb>${tr('Edit feedback', 'แก้ไขข้อเสนอแนะ')}</button>` : ''}</div></div></div>
     </section>`;
   }).join('')}`;
   progress(el, d, 'resubmit');
@@ -68,9 +70,8 @@ export function render(el, d, ctx) {
     }
   };
   // A click saves at once; on failure the previous choice comes back.
-  el.onchange = async (e) => {
-    const box = e.target.closest('[data-ref]');
-    if (!box || e.target.type !== 'radio') return;
+  // Not Approved asks for feedback first (v2.10): required, saved with the decision.
+  const decide = async (box, decision, feedback) => {
     const ref = box.dataset.ref;
     const radios = [...box.querySelectorAll('input[type=radio]')];
     radios.forEach((r) => { r.disabled = true; });
@@ -78,17 +79,20 @@ export function render(el, d, ctx) {
     try {
       let out;
       try {
-        out = await saving(() => send('saveResubmit', { ref, decision: e.target.value, base: prev?.at || '' }, `resub:${ref}`));
+        out = await saving(() => send('saveResubmit', { ref, decision, feedback, base: prev?.at || '' }, `resub:${ref}`));
       } catch (err) {
         if (err.code !== 'QUEUED') throw err;
-        out = { resub: { decision: e.target.value, at: prev?.at || '', by: prev?.by || '', pending: true }, queued: true };
+        out = { resub: { decision, feedback, at: prev?.at || '', by: prev?.by || '', pending: true }, queued: true };
       }
       d.resub[ref] = out.resub;
       $('[data-saved]', box).innerHTML = saved(out.resub);
+      $('[data-fb]', box)?.remove();
+      if (out.resub.decision === 'Not Approved' && ctx.canEdit) $('[data-saved]', box).insertAdjacentHTML('afterend', `<button class="btn plain" data-fb>${tr('Edit feedback', 'แก้ไขข้อเสนอแนะ')}</button>`);
       progress(el, d, 'resubmit');
       $('[data-casebar]', el).innerHTML = caseBar();
       ctx.persist?.();
       forget('dashboard');
+      forget('boot');
       toast(out.queued ? tr('Kept on this device — it will be sent automatically', 'เก็บไว้ในเครื่องนี้ — จะส่งให้อัตโนมัติ') : tr('Saved', 'บันทึกแล้ว'));
     } catch (err) {
       await errorBox(err.message);
@@ -96,6 +100,36 @@ export function render(el, d, ctx) {
     }
     radios.forEach((r) => { r.disabled = !ctx.canEdit; });
   };
+  el.onchange = async (e) => {
+    const box = e.target.closest('[data-ref]');
+    if (!box || e.target.type !== 'radio') return;
+    if (e.target.value !== 'Not Approved') { await decide(box, e.target.value, ''); return; }
+    const fb = await askFeedback(d.resub[box.dataset.ref]?.feedback || '');
+    if (fb) await decide(box, 'Not Approved', fb);
+    else [...box.querySelectorAll('input[type=radio]')].forEach((r) => { r.checked = r.value === d.resub[box.dataset.ref]?.decision; });
+  };
+  el.addEventListener('click', async (e) => {
+    const box = e.target.closest('[data-fb]')?.closest('[data-ref]');
+    if (!box) return;
+    const fb = await askFeedback(d.resub[box.dataset.ref]?.feedback || '');
+    if (fb) await decide(box, 'Not Approved', fb);
+  });
+}
+
+// Feedback for a Not Approved project (v2.10): required. Resolves the text, or '' when cancelled.
+async function askFeedback(prev) {
+  let text = prev;
+  for (;;) {
+    const p = dialog(tr('Why is this project Not Approved?', 'เหตุผลที่ไม่อนุมัติโครงการนี้'),
+      `<div class="field"><label for="nap-fb">${esc(tr('Feedback', 'ข้อเสนอแนะ'))}</label><textarea id="nap-fb" maxlength="2000">${esc(text)}</textarea></div>`,
+      [{ v: false, label: tr('Cancel', 'ยกเลิก') }, { v: true, label: tr('Save', 'บันทึก'), cls: 'primary' }], { none: false });
+    const box = document.getElementById('nap-fb');
+    box?.addEventListener('input', () => { text = box.value; });
+    box?.focus();
+    if (!await p) return '';
+    if (text.trim()) return text.trim();
+    toast(tr('Write feedback for a Not Approved project', 'กรุณาเขียนข้อเสนอแนะสำหรับโครงการที่ไม่อนุมัติ'), 'bad');
+  }
 }
 
 // Opening a closed case again (v2.8): the reason is required and goes into the Re-submission log. Resolves the
