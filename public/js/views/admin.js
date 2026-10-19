@@ -6,7 +6,7 @@
 // v2.9: every save runs in the progress window, exports in a "Preparing export…" window; "Export data for mailing"
 // (Admins only, logged) builds the two sheets of the budget allocation email; "In charge of" is folded into a chip.
 import { tr } from '../i18n.js';
-import { $, esc, icon, toast, dateTimeFmt, moneyBox, parseMoney, liveMoney, errorBox, confirmBox, ROLE_LABEL, busy, saving } from '../ui.js';
+import { $, esc, icon, toast, dateTimeFmt, moneyBox, parseMoney, liveMoney, errorBox, confirmBox, ROLE_LABEL, busy, saving, dialog } from '../ui.js';
 import { call, cached, forget, peek, remember } from '../api.js';
 import { ORGS } from '../masterdata.js';
 import { PENDING } from '../project.js';
@@ -63,7 +63,7 @@ function draw(page, ctx, d) {
       <div class="table-actions"><button class="btn" id="add">${icon('plus', 16)}${tr('Add user', 'เพิ่มผู้ใช้')}</button>
         <button class="btn" id="importCsv">${icon('upload', 16)}${tr('Import CSV', 'นำเข้า CSV')}</button><input type="file" id="csvFile" accept=".csv,text/csv" hidden><span class="grow"></span>
         <button class="btn primary" id="save">${tr('Save users', 'บันทึกผู้ใช้')}</button></div></div>
-    <p class="foot">${tr('Admin: everything, including the edit log. Chief: everything except the edit log; cannot add, change or remove Admins. Staff: edit organization data, no admin console. Data team staff: as Staff, plus Control and the edit log. Emails not listed, or without a role, cannot open the site. Second Gmail: one person can sign in with up to 2 Gmail addresses; both get the same role, name and organizations. Import CSV: column 1 Email, column 2 Name; new emails are added as Staff, emails already listed are skipped; press Save users to keep them.', 'ผู้ดูแล: ทำได้ทุกอย่าง รวมถึงดูบันทึกการแก้ไข หัวหน้า: ทำได้ทุกอย่างยกเว้นดูบันทึกการแก้ไข และเพิ่ม เปลี่ยน หรือลบผู้ดูแลไม่ได้ เจ้าหน้าที่: แก้ไขข้อมูลองค์กรได้ แต่เข้าคอนโซลผู้ดูแลไม่ได้ เจ้าหน้าที่ทีมข้อมูล: เหมือนเจ้าหน้าที่ และจัดการหน้าควบคุมและดูบันทึกการแก้ไขได้ อีเมลที่ไม่อยู่ในรายชื่อหรือยังไม่มีสิทธิ์จะเข้าเว็บไซต์ไม่ได้ อีเมล Gmail ที่สอง: หนึ่งคนเข้าสู่ระบบได้ด้วย Gmail สูงสุด 2 บัญชี ทั้งสองบัญชีได้สิทธิ์ ชื่อ และองค์กรที่รับผิดชอบเดียวกัน นำเข้า CSV: คอลัมน์ 1 อีเมล คอลัมน์ 2 ชื่อ อีเมลใหม่จะได้สิทธิ์เจ้าหน้าที่ อีเมลที่มีอยู่แล้วจะถูกข้าม กดบันทึกผู้ใช้เพื่อเก็บไว้')}</p>`;
+    <p class="foot">${tr('Admin: everything, including the edit log. Chief: everything except the edit log; cannot add, change or remove Admins. Staff: edit organization data, no admin console. Data team staff: as Staff, plus Control and the edit log. Emails not listed, or without a role, cannot open the site. Second Gmail: one person can sign in with up to 2 Gmail addresses; both get the same role, name and organizations. Import CSV: columns Username, Gmail, Gmail#2 (comma or tab separated; Gmail#2 may be empty). Invalid emails are ignored, and an invalid Gmail falls back to Gmail#2. An email already listed updates the name and second Gmail of that user; new emails are added as Staff; rows with no valid email are listed in a window. Press Save users to keep them.', 'ผู้ดูแล: ทำได้ทุกอย่าง รวมถึงดูบันทึกการแก้ไข หัวหน้า: ทำได้ทุกอย่างยกเว้นดูบันทึกการแก้ไข และเพิ่ม เปลี่ยน หรือลบผู้ดูแลไม่ได้ เจ้าหน้าที่: แก้ไขข้อมูลองค์กรได้ แต่เข้าคอนโซลผู้ดูแลไม่ได้ เจ้าหน้าที่ทีมข้อมูล: เหมือนเจ้าหน้าที่ และจัดการหน้าควบคุมและดูบันทึกการแก้ไขได้ อีเมลที่ไม่อยู่ในรายชื่อหรือยังไม่มีสิทธิ์จะเข้าเว็บไซต์ไม่ได้ อีเมล Gmail ที่สอง: หนึ่งคนเข้าสู่ระบบได้ด้วย Gmail สูงสุด 2 บัญชี ทั้งสองบัญชีได้สิทธิ์ ชื่อ และองค์กรที่รับผิดชอบเดียวกัน นำเข้า CSV: คอลัมน์ Username, Gmail, Gmail#2 (คั่นด้วยจุลภาคหรือแท็บ Gmail#2 เว้นว่างได้) อีเมลที่ไม่ถูกต้องจะถูกข้าม ถ้า Gmail ไม่ถูกต้องจะใช้ Gmail#2 แทน อีเมลที่มีอยู่แล้วจะแก้ไขชื่อและ Gmail ที่สองของผู้ใช้นั้น อีเมลใหม่จะได้สิทธิ์เจ้าหน้าที่ แถวที่ไม่มีอีเมลที่ถูกต้องจะแสดงในหน้าต่าง กดบันทึกผู้ใช้เพื่อเก็บไว้')}</p>`;
 
   const phasesPart = `${title('clock', tr('Pitching phases', 'ช่วงการเสนองบ'))}
     <div class="group" id="phases">${PHASE_LIST.map(([k, label]) => `<label class="row phase-row"><span class="grow">${esc(label())}</span>
@@ -259,29 +259,62 @@ function draw(page, ctx, d) {
     paintUsers();
   };
   $('#add', page).onclick = () => { st.users.push({ email: '', role: 'Staff', orgs: [], name: '', email2: '' }); st.open.add(st.users.length - 1); paintUsers(); $('#users tr:last-child input', page)?.focus(); };
-  // Import CSV (v2.11): Email, Name per row. New emails join the draft as Staff; emails already listed (or repeated
-  // in the file) and rows without a valid email (a header row, say) are skipped. Save users keeps them.
+  // Import CSV (v2.11): Username, Gmail, Gmail#2 per row, comma or tab separated (columns found by the header row
+  // when there is one). Invalid emails are ignored; an invalid Gmail falls back to Gmail#2. A row whose email is
+  // already listed (on the site or earlier in the file) edits that user: Username and Gmail#2. Others join as Staff.
+  // Rows with no valid email are listed in a window. Save users keeps the changes.
   $('#importCsv', page).onclick = () => $('#csvFile', page).click();
   $('#csvFile', page).onchange = async (e) => {
     const file = e.target.files[0];
     e.target.value = '';
     if (!file) return;
-    const have = new Set(st.users.flatMap((u) => [u.email, u.email2 || ''].map((x) => x.toLowerCase()).filter(Boolean)));
-    let added = 0; let dup = 0; let bad = 0;
-    const rows = parseCsv((await file.text()).replace(/^﻿/, ''));
-    if (/^\s*e-?mail\s*$/i.test(rows[0]?.[0] || '')) rows.shift(); // header row
-    rows.forEach(([mail = '', name = '']) => {
-      const email = mail.trim().toLowerCase();
-      if (!email && !name.trim()) return;
-      if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) { bad++; return; }
-      if (have.has(email)) { dup++; return; }
-      have.add(email);
-      st.users.push({ email, role: 'Staff', orgs: [], name: name.trim().slice(0, 80), email2: '' });
+    let added = 0; let edited = 0; const failed = [];
+    const text = (await file.text()).replace(/^﻿/, '');
+    const rows = parseCsv(text, /\t/.test(text.split(/\r?\n/)[0]) ? '\t' : ',');
+    // Columns: by the header row's names, else Username, Gmail, Gmail#2 in that order.
+    const key = (h) => String(h || '').trim().toLowerCase().replace(/[\s_-]/g, '');
+    const head = (rows[0] || []).map(key);
+    const col = { name: 0, mail: 1, mail2: 2 };
+    let first = 1; // file line of the first data row, for the window
+    if (head.some((h) => ['username', 'gmail', 'gmail#2', 'email'].includes(h))) {
+      rows.shift();
+      first = 2;
+      col.name = head.indexOf('username');
+      col.mail = head.findIndex((h) => h === 'gmail' || h === 'email');
+      col.mail2 = head.findIndex((h) => h === 'gmail#2' || h === 'gmail2' || h === 'email2');
+    }
+    const valid = (x) => /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(x);
+    const at = (r, i) => (i >= 0 ? String(r[i] ?? '').trim() : '');
+    const owner = (m) => st.users.find((u) => u.email.toLowerCase() === m || (u.email2 || '').toLowerCase() === m);
+    rows.forEach((r, i) => {
+      const name = at(r, col.name).slice(0, 80);
+      const m1 = at(r, col.mail).toLowerCase();
+      const m2 = at(r, col.mail2).toLowerCase();
+      if (!name && !m1 && !m2) return; // blank line
+      // Invalid emails are dropped; Gmail#2 becomes the main email when Gmail is not valid.
+      const [email, extra = ''] = [m1, m2].filter(valid);
+      if (!email) { failed.push({ name, row: i + first, mails: [m1, m2].filter(Boolean) }); return; }
+      const u = owner(email) || (extra && owner(extra));
+      if (u) {
+        // Already listed: update its name and second Gmail (a second Gmail someone else uses is left out).
+        if (name) u.name = name;
+        const mine = [email, extra].filter(Boolean);
+        const second = mine.find((m) => m !== u.email.toLowerCase() && (!owner(m) || owner(m) === u));
+        if (second && !mine.includes((u.email2 || '').toLowerCase())) u.email2 = second;
+        edited++;
+        return;
+      }
+      st.users.push({ email, role: 'Staff', orgs: [], name, email2: extra && !owner(extra) ? extra : '' });
       added++;
     });
     st.open.clear();
     paintUsers();
-    toast(tr('Added {a}, skipped {d} already listed, {b} without a valid email. Press Save users to keep them.', 'เพิ่ม {a} คน ข้าม {d} คนที่มีอยู่แล้ว และ {b} แถวที่อีเมลไม่ถูกต้อง กดบันทึกผู้ใช้เพื่อเก็บไว้', { a: added, d: dup, b: bad }), added ? '' : 'bad');
+    const summary = tr('Added {a}, updated {e}. Press Save users to keep them.', 'เพิ่ม {a} คน แก้ไข {e} คน กดบันทึกผู้ใช้เพื่อเก็บไว้', { a: added, e: edited });
+    if (!failed.length) { toast(summary, added || edited ? '' : 'bad'); return; }
+    await dialog(tr('{n} users could not be added', 'เพิ่มผู้ใช้ไม่ได้ {n} คน', { n: failed.length }),
+      `<p>${esc(summary)}</p><p>${esc(tr('These rows have no valid Gmail:', 'แถวเหล่านี้ไม่มีอีเมล Gmail ที่ถูกต้อง:'))}</p>
+      <ul class="unsaved">${failed.map((f) => `<li><span>${esc(f.name || tr('Row {n} (no username)', 'แถว {n} (ไม่มีชื่อ)', { n: f.row }))}</span><span class="muted">${esc(f.mails.join(', ') || tr('no email', 'ไม่มีอีเมล'))}</span></li>`).join('')}</ul>`,
+      [{ v: true, label: tr('OK', 'ตกลง'), cls: 'primary' }], { none: true });
   };
   st.save.users = async () => {
     const out = await saving(() => call('saveUsers', { users: st.users.filter((u) => u.email), version: d.usersVer }));
@@ -306,15 +339,15 @@ function draw(page, ctx, d) {
   };
 }
 
-// CSV text to rows of cells: commas, quoted cells ("" inside quotes is a quote), CRLF or LF line ends.
-function parseCsv(text) {
+// CSV text to rows of cells: commas (or `sep`, e.g. a tab), quoted cells ("" inside quotes is a quote), CRLF or LF line ends.
+function parseCsv(text, sep = ',') {
   const rows = []; let row = []; let cell = ''; let q = false;
   for (let i = 0; i < text.length; i++) {
     const c = text[i];
     if (q) {
       if (c === '"' && text[i + 1] === '"') { cell += '"'; i++; } else if (c === '"') q = false; else cell += c;
     } else if (c === '"') q = true;
-    else if (c === ',') { row.push(cell); cell = ''; }
+    else if (c === sep) { row.push(cell); cell = ''; }
     else if (c === '\n' || c === '\r') {
       if (c === '\r' && text[i + 1] === '\n') i++;
       row.push(cell); rows.push(row); row = []; cell = '';
