@@ -6,6 +6,7 @@
  *        written by github.com/pppainkiller/budget-pitching-form-submission. Read only: never written here.
  * Writes our own Sheet (FEEDBACK_SHEET_ID):
  *        Users         Email | Role (Admin / Chief / Staff) | Org Refs (persons in charge) | Updated At | Updated By | Name
+ *                      | Email 2 (v2.11, optional second Gmail: signs in as the same person)
  * Reads  the pitching scheduling site's Sheet (script property SCHEDULE_SHEET_ID, optional), tab "Schedule":
  *        Project Ref | Date | Start | End | Room | Meeting Link (optional). One row per project; shown on the Pitching
  *        tab and My projects. Read only.
@@ -31,6 +32,7 @@
  *   In the Sheet a file cell shows the file name linked to the file in Drive (one per line for Noted Documents).
  *
  * Every request carries a Firebase ID token (Google sign-in on the website). The email's role comes from the Users tab;
+ * a second Gmail (Email 2) is read as the person's main Email, so roles, names, persons in charge and logs follow it;
  * the script owner is always Admin, so the first Admin can sign in before the tab has any rows.
  *
  * Speed: each Sheet is opened once per request (memo_), and answers are kept in the script cache (cached_) under a
@@ -81,8 +83,8 @@ const ORG_REF = /^[A-Z]{2}-[A-Z]{3}-\d{2,}$/;
 const PROJECT_REF = /^[A-Z]{2}-[A-Z]{3}-\d{2,}-P\d{2}$/;
 
 const TABS = {
-  // Name was added later, so it sits last: older Users tabs get the header added by tab_().
-  Users: ['Email', 'Role', 'Org Refs', 'Updated At', 'Updated By', 'Name'],
+  // Name and Email 2 were added later, so they sit last: older Users tabs get the header added by tab_().
+  Users: ['Email', 'Role', 'Org Refs', 'Updated At', 'Updated By', 'Name', 'Email 2'],
   PrePitch: ['Project Ref', 'Org Ref', 'Project Name', 'Approved Budget', 'Docx Approved', 'Docx Feedback File',
     'PDF Approved', 'PDF Feedback File', 'Feedback Note', 'Updated At', 'Updated By',
     'Docx Feedback File JSON', 'PDF Feedback File JSON'],
@@ -169,6 +171,7 @@ function doPost(e) {
     const fn = ACTIONS[req.action];
     if (!fn) throw new Error('Unknown action');
     const user = verifyUser_(req.idToken);
+    user.email = mainEmail_(user.email);
     user.role = roleOf_(user.email);
     if (!user.role) throw new Error('NO_ACCESS');
     return json_(Object.assign({ ok: true }, fn(req, user)));
@@ -957,7 +960,8 @@ function logTail_(name) {
 function saveUsers_(req, user) {
   need_(user, 'Chief');
   const before = {};
-  users_().forEach(function (u) { before[u.email] = u.role; });
+  const before2 = {};
+  users_().forEach(function (u) { before[u.email] = u.role; before2[u.email] = u.email2; });
   const list = Array.isArray(req.users) ? req.users : [];
   if (list.length > 500) throw new Error('Too many users');
   const seen = {};
@@ -970,9 +974,19 @@ function saveUsers_(req, user) {
     const role = email === owner_() ? 'Admin' : u.role;
     if (!RANK[role]) throw new Error('Bad role for ' + email);
     if (user.role !== 'Admin' && (role === 'Admin') !== (before[email] === 'Admin')) throw new Error('Only Admins can add or change Admins');
+    // Email 2 (v2.11): a second Gmail for the same person. Never the owner's (it would sign the owner in as someone
+    // else), never listed twice, and a Chief can't change an Admin's (or they could sign in as that Admin).
+    const email2 = String(u.email2 || '').trim().toLowerCase();
+    if (email2) {
+      if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email2)) throw new Error('Bad second email for ' + email + ': ' + email2);
+      if (email2 === owner_()) throw new Error('The script owner’s email can’t be a second email');
+      if (seen[email2]) throw new Error('Listed twice: ' + email2);
+      seen[email2] = true;
+    }
+    if (user.role !== 'Admin' && (before[email] === 'Admin' || email === owner_()) && email2 !== (before2[email] || '')) throw new Error('Only Admins can add or change Admins');
     const orgs = (Array.isArray(u.orgs) ? u.orgs : []).map(function (r) { return String(r).trim().toUpperCase(); }).filter(String);
     orgs.forEach(function (r) { if (!ORG_REF.test(r)) throw new Error('Bad organization code ' + r + ' for ' + email); });
-    return [email, role, orgs.join(', '), now, user.email, cell_(text_(u.name, 80).trim())];
+    return [email, role, orgs.join(', '), now, user.email, cell_(text_(u.name, 80).trim()), email2];
   });
   if (user.role !== 'Admin') {
     Object.keys(before).forEach(function (e) { if (before[e] === 'Admin' && e !== owner_() && !seen[e]) throw new Error('Only Admins can remove Admins'); });
@@ -1231,13 +1245,22 @@ function users_() {
       const owner = owner_();
       return tabRows_('Users').map(function (r) {
         const email = String(r['Email']).trim().toLowerCase();
+        const email2 = String(r['Email 2'] || '').trim().toLowerCase();
         return {
+          email2: email2 && email2 !== email && email2 !== owner ? email2 : '',
           email: email, role: email === owner ? 'Admin' : RANK[RENAMED[r['Role']] || r['Role']] ? RENAMED[r['Role']] || r['Role'] : '', name: String(r['Name'] || '').trim(),
           orgs: String(r['Org Refs'] || '').split(/[,\s]+/).filter(function (x) { return ORG_REF.test(x); }),
         };
       }).filter(function (u) { return u.email; });
     })();
   });
+}
+
+// A second Gmail (Email 2) -> that person's main Email; any other email as it is.
+function mainEmail_(email) {
+  if (email === owner_()) return email;
+  const u = users_().filter(function (x) { return x.email2 === email; })[0];
+  return u ? u.email : email;
 }
 
 function roleOf_(email) {

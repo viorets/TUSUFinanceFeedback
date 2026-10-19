@@ -47,7 +47,7 @@ function draw(page, ctx, d) {
   if (d.logOnly) { drawLog(page, ctx, d); return; }
   // The owner is always Admin; listed first so a name and organizations can be set for them too.
   const list = d.users.map((u) => ({ ...u }));
-  if (!list.some((u) => u.email === d.owner)) list.unshift({ email: d.owner, role: 'Admin', orgs: [], name: '' });
+  if (!list.some((u) => u.email === d.owner)) list.unshift({ email: d.owner, role: 'Admin', orgs: [], name: '', email2: '' });
   const chief = ctx.me.role !== 'Admin';
   const phases = { prepitch: true, pitching: true, resubmit: true, ...(d.phases || {}) };
   st = { users: list, saved: JSON.stringify(list), savedAdmins: new Set(list.filter((u) => u.role === 'Admin').map((u) => u.email)),
@@ -57,13 +57,13 @@ function draw(page, ctx, d) {
   const admin = ctx.me.role === 'Admin';
   const restored = new Set(d.restored || []);
   const usersPart = `${title('user', tr('Users and roles', 'ผู้ใช้และสิทธิ์'))}
-    <div class="group scroll-x"><table class="grid-table edit"><thead><tr><th>${tr('Name shown on the site', 'ชื่อที่แสดง')}</th><th>${tr('Gmail address', 'อีเมล Gmail')}</th><th>${tr('Role', 'สิทธิ์')}</th>
+    <div class="group scroll-x"><table class="grid-table edit"><thead><tr><th>${tr('Name shown on the site', 'ชื่อที่แสดง')}</th><th>${tr('Gmail address', 'อีเมล Gmail')}</th><th>${tr('Second Gmail (optional)', 'อีเมล Gmail ที่สอง (ถ้ามี)')}</th><th>${tr('Role', 'สิทธิ์')}</th>
       <th>${tr('In charge of (RefCodes, comma separated)', 'รับผิดชอบองค์กร (รหัส คั่นด้วยจุลภาค)')}</th><th class="r">${tr('Projects in charge', 'โครงการที่รับผิดชอบ')}</th><th></th></tr></thead>
       <tbody id="users"></tbody></table>
       <div class="table-actions"><button class="btn" id="add">${icon('plus', 16)}${tr('Add user', 'เพิ่มผู้ใช้')}</button>
         <button class="btn" id="importCsv">${icon('upload', 16)}${tr('Import CSV', 'นำเข้า CSV')}</button><input type="file" id="csvFile" accept=".csv,text/csv" hidden><span class="grow"></span>
         <button class="btn primary" id="save">${tr('Save users', 'บันทึกผู้ใช้')}</button></div></div>
-    <p class="foot">${tr('Admin: everything, including the edit log. Chief: everything except the edit log; cannot add, change or remove Admins. Staff: edit organization data, no admin console. Data team staff: as Staff, plus Control and the edit log. Emails not listed, or without a role, cannot open the site. Import CSV: column 1 Email, column 2 Name; new emails are added as Staff, emails already listed are skipped; press Save users to keep them.', 'ผู้ดูแล: ทำได้ทุกอย่าง รวมถึงดูบันทึกการแก้ไข หัวหน้า: ทำได้ทุกอย่างยกเว้นดูบันทึกการแก้ไข และเพิ่ม เปลี่ยน หรือลบผู้ดูแลไม่ได้ เจ้าหน้าที่: แก้ไขข้อมูลองค์กรได้ แต่เข้าคอนโซลผู้ดูแลไม่ได้ เจ้าหน้าที่ทีมข้อมูล: เหมือนเจ้าหน้าที่ และจัดการหน้าควบคุมและดูบันทึกการแก้ไขได้ อีเมลที่ไม่อยู่ในรายชื่อหรือยังไม่มีสิทธิ์จะเข้าเว็บไซต์ไม่ได้ นำเข้า CSV: คอลัมน์ 1 อีเมล คอลัมน์ 2 ชื่อ อีเมลใหม่จะได้สิทธิ์เจ้าหน้าที่ อีเมลที่มีอยู่แล้วจะถูกข้าม กดบันทึกผู้ใช้เพื่อเก็บไว้')}</p>`;
+    <p class="foot">${tr('Admin: everything, including the edit log. Chief: everything except the edit log; cannot add, change or remove Admins. Staff: edit organization data, no admin console. Data team staff: as Staff, plus Control and the edit log. Emails not listed, or without a role, cannot open the site. Second Gmail: one person can sign in with up to 2 Gmail addresses; both get the same role, name and organizations. Import CSV: column 1 Email, column 2 Name; new emails are added as Staff, emails already listed are skipped; press Save users to keep them.', 'ผู้ดูแล: ทำได้ทุกอย่าง รวมถึงดูบันทึกการแก้ไข หัวหน้า: ทำได้ทุกอย่างยกเว้นดูบันทึกการแก้ไข และเพิ่ม เปลี่ยน หรือลบผู้ดูแลไม่ได้ เจ้าหน้าที่: แก้ไขข้อมูลองค์กรได้ แต่เข้าคอนโซลผู้ดูแลไม่ได้ เจ้าหน้าที่ทีมข้อมูล: เหมือนเจ้าหน้าที่ และจัดการหน้าควบคุมและดูบันทึกการแก้ไขได้ อีเมลที่ไม่อยู่ในรายชื่อหรือยังไม่มีสิทธิ์จะเข้าเว็บไซต์ไม่ได้ อีเมล Gmail ที่สอง: หนึ่งคนเข้าสู่ระบบได้ด้วย Gmail สูงสุด 2 บัญชี ทั้งสองบัญชีได้สิทธิ์ ชื่อ และองค์กรที่รับผิดชอบเดียวกัน นำเข้า CSV: คอลัมน์ 1 อีเมล คอลัมน์ 2 ชื่อ อีเมลใหม่จะได้สิทธิ์เจ้าหน้าที่ อีเมลที่มีอยู่แล้วจะถูกข้าม กดบันทึกผู้ใช้เพื่อเก็บไว้')}</p>`;
 
   const phasesPart = `${title('clock', tr('Pitching phases', 'ช่วงการเสนองบ'))}
     <div class="group" id="phases">${PHASE_LIST.map(([k, label]) => `<label class="row phase-row"><span class="grow">${esc(label())}</span>
@@ -116,6 +116,7 @@ function draw(page, ctx, d) {
       return `<tr data-i="${i}">
       <td><input type="text" data-f="name" value="${esc(u.name || '')}" maxlength="80" placeholder="${esc(tr('e.g. Mint (Finance)', 'เช่น มิ้นท์ (ฝ่ายการเงิน)'))}"></td>
       <td><input type="email" data-f="email" value="${esc(u.email)}" placeholder="name@gmail.com" ${locked ? 'readonly' : ''}></td>
+      <td><input type="email" data-f="email2" value="${esc(u.email2 || '')}" placeholder="${esc(tr('another@gmail.com', 'อีกบัญชี@gmail.com'))}" ${chief && locked ? 'readonly' : ''}></td>
       <td>${locked ? `<span class="muted small">${owner ? tr('Admin · script owner', 'ผู้ดูแล · เจ้าของสคริปต์') : roleLabel('Admin')}</span>`
     : `<select data-f="role">${u.role ? '' : `<option value="" selected>${tr('Choose a role', 'เลือกสิทธิ์')}</option>`}${ROLES.filter((r) => !chief || r !== 'Admin').map((r) => `<option value="${r}" ${u.role === r ? 'selected' : ''}>${esc(roleLabel(r))}</option>`).join('')}</select>`}</td>
       <td><button type="button" class="chip-btn" data-fold="${i}" aria-expanded="${st.open.has(i)}">${chipText(u.orgs)}</button>
@@ -257,7 +258,7 @@ function draw(page, ctx, d) {
     st.users.splice(Number(e.target.closest('[data-i]').dataset.i), 1);
     paintUsers();
   };
-  $('#add', page).onclick = () => { st.users.push({ email: '', role: 'Staff', orgs: [], name: '' }); st.open.add(st.users.length - 1); paintUsers(); $('#users tr:last-child input', page)?.focus(); };
+  $('#add', page).onclick = () => { st.users.push({ email: '', role: 'Staff', orgs: [], name: '', email2: '' }); st.open.add(st.users.length - 1); paintUsers(); $('#users tr:last-child input', page)?.focus(); };
   // Import CSV (v2.11): Email, Name per row. New emails join the draft as Staff; emails already listed (or repeated
   // in the file) and rows without a valid email (a header row, say) are skipped. Save users keeps them.
   $('#importCsv', page).onclick = () => $('#csvFile', page).click();
@@ -265,7 +266,7 @@ function draw(page, ctx, d) {
     const file = e.target.files[0];
     e.target.value = '';
     if (!file) return;
-    const have = new Set(st.users.map((u) => u.email.toLowerCase()));
+    const have = new Set(st.users.flatMap((u) => [u.email, u.email2 || ''].map((x) => x.toLowerCase()).filter(Boolean)));
     let added = 0; let dup = 0; let bad = 0;
     const rows = parseCsv((await file.text()).replace(/^﻿/, ''));
     if (/^\s*e-?mail\s*$/i.test(rows[0]?.[0] || '')) rows.shift(); // header row
@@ -275,7 +276,7 @@ function draw(page, ctx, d) {
       if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) { bad++; return; }
       if (have.has(email)) { dup++; return; }
       have.add(email);
-      st.users.push({ email, role: 'Staff', orgs: [], name: name.trim().slice(0, 80) });
+      st.users.push({ email, role: 'Staff', orgs: [], name: name.trim().slice(0, 80), email2: '' });
       added++;
     });
     st.open.clear();
