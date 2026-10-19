@@ -1020,12 +1020,14 @@ function usersVer_() {
 // Person in charge of one organization (list-page dropdown): the chosen user gets the RefCode, everyone else loses it.
 // email '' = nobody.
 // v2.10: Staff can use it, and several people can be in charge of one organization. With `on` (true / false) the
-// person is added to / removed from the organization; without `on` (older pages) the person replaces everyone.
+// person is added to / removed from the organization; without `on` the person replaces everyone (a take-over).
+// v2.11: Staff and Data team staff pick only themselves (the page warns before a take-over); Chiefs and Admins anyone.
 function setInCharge_(req, user) {
   need_(user, 'Staff');
   const ref = String(req.ref || '');
   if (!ORG_REF.test(ref)) throw new Error('Bad organization code');
   const email = String(req.email || '').trim().toLowerCase();
+  if (RANK[user.role] < RANK.Chief && email !== user.email) throw new Error('Staff can choose only themselves as the person in charge');
   const toggle = req.on === true || req.on === false;
   if (toggle && !email) throw new Error('Choose a person');
   return locked_(function () {

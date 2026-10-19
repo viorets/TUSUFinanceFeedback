@@ -13,7 +13,7 @@
 // "Print campus" (v2.7) prints a summary of that campus: each organization with its projects as sub-rows
 // (print.js campusSheet, one printData call).
 import { tr, getLang } from '../i18n.js';
-import { $, esc, icon, toast, num2, dateTimeFmt } from '../ui.js';
+import { $, esc, icon, toast, num2, dateTimeFmt, dialog } from '../ui.js';
 import { cached, call, peek, remember, forget } from '../api.js';
 import { CAMPUSES, CATEGORIES, ORGS } from '../masterdata.js';
 import { slotText, timeLeft } from '../project.js';
@@ -73,12 +73,13 @@ export async function render(page, ctx) {
   const money = (v) => (v == null ? '—' : num2(v));
   const status = (o) => (closedOf(o.code) ? `<span class="pill closed">${icon('lock', 13)}${tr('Closed', 'ปิดแล้ว')}</span>` : `<span class="pill green">${tr('Open', 'เปิด')}</span>`);
 
-  // Several people can be in charge: a picker of checkboxes (everyone with a role), or the names where picking is off.
+  // Several people can be in charge: a picker of checkboxes, or the names where picking is off. Admins and Chiefs pick
+  // anyone with a role; Staff and Data team staff only themselves (v2.11, the server checks too).
   const picText = (people) => people.map((p) => esc(ctx.nameOf(p))).join(', ') || '—';
   const pic = (o) => {
     const people = stat(o.code).people;
     if (!ctx.canEdit) return people.map((p) => esc(ctx.nameOf(p))).join('<br>') || '<span class="muted">—</span>';
-    const users = [...(boot.users || [])].sort((a, b) => ctx.nameOf(a).localeCompare(ctx.nameOf(b)));
+    const users = ctx.console ? [...(boot.users || [])].sort((a, b) => ctx.nameOf(a).localeCompare(ctx.nameOf(b))) : [ctx.me.email];
     return `<details class="pic-pick" data-pic-for="${esc(o.code)}"><summary title="${esc(tr('Person in charge', 'ผู้รับผิดชอบ'))}">${picText(people)}</summary>
       <div class="msel-body">${users.map((u) => `<label class="msel-opt"><input type="checkbox" data-pic="${esc(o.code)}" value="${esc(u)}" ${people.includes(u) ? 'checked' : ''}>${esc(ctx.nameOf(u))}</label>`).join('') || `<span class="muted">${tr('No users', 'ไม่มีผู้ใช้')}</span>`}</div></details>`;
   };
@@ -306,16 +307,28 @@ export async function render(page, ctx) {
     if (r && stat(r.dataset.ref).count) hover = setTimeout(() => cached('org', { ref: r.dataset.ref }).catch(() => {}), 250);
   };
 
-  // Person in charge: ticking a name adds that person, unticking removes them (the others stay).
+  // Person in charge: ticking a name adds that person, unticking removes them (the others stay). Staff ticking
+  // themselves where someone else is in charge get a caution window first: add themselves too, or replace them.
   rowsEl.onchange = async (e) => {
     const box = e.target.closest('input[data-pic]');
     if (!box) return;
     const ref = box.dataset.pic;
     const on = box.checked;
+    const others = stat(ref).people.filter((p) => p !== box.value);
+    let replace = false;
+    if (on && !ctx.console && others.length) {
+      const pick = await dialog(tr('Someone is already in charge', 'มีผู้รับผิดชอบอยู่แล้ว'),
+        `<p>${esc(tr('{who} is in charge of {ref}.', '{who} รับผิดชอบ {ref} อยู่', { who: others.map((p) => ctx.nameOf(p)).join(', '), ref }))}</p>
+        <p>${esc(tr('Replace removes them from this organization.', 'แทนที่ จะนำผู้รับผิดชอบเดิมออกจากองค์กรนี้'))}</p>`,
+        [{ v: '', label: tr('Cancel', 'ยกเลิก') }, { v: 'replace', label: tr('Replace', 'แทนที่'), cls: 'danger' }, { v: 'add', label: tr('Add me too', 'เพิ่มฉันด้วย'), cls: 'primary' }], { none: '' });
+      if (!pick) { box.checked = false; return; }
+      replace = pick === 'replace';
+    }
     const group = [...rowsEl.querySelectorAll(`input[data-pic="${ref}"]`)];
     group.forEach((i) => { i.disabled = true; });
     try {
-      const out = await call('setInCharge', { ref, email: box.value, on });
+      // Replace = the take-over call (no `on`): the person becomes the only one in charge.
+      const out = await call('setInCharge', replace ? { ref, email: box.value } : { ref, email: box.value, on });
       stat(ref).people = out.people;
       remember('boot', {}, boot);
       forget('org');
