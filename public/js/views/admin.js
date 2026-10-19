@@ -60,9 +60,10 @@ function draw(page, ctx, d) {
     <div class="group scroll-x"><table class="grid-table edit"><thead><tr><th>${tr('Name shown on the site', 'ชื่อที่แสดง')}</th><th>${tr('Gmail address', 'อีเมล Gmail')}</th><th>${tr('Role', 'สิทธิ์')}</th>
       <th>${tr('In charge of (RefCodes, comma separated)', 'รับผิดชอบองค์กร (รหัส คั่นด้วยจุลภาค)')}</th><th class="r">${tr('Projects in charge', 'โครงการที่รับผิดชอบ')}</th><th></th></tr></thead>
       <tbody id="users"></tbody></table>
-      <div class="table-actions"><button class="btn" id="add">${icon('plus', 16)}${tr('Add user', 'เพิ่มผู้ใช้')}</button><span class="grow"></span>
+      <div class="table-actions"><button class="btn" id="add">${icon('plus', 16)}${tr('Add user', 'เพิ่มผู้ใช้')}</button>
+        <button class="btn" id="importCsv">${icon('upload', 16)}${tr('Import CSV', 'นำเข้า CSV')}</button><input type="file" id="csvFile" accept=".csv,text/csv" hidden><span class="grow"></span>
         <button class="btn primary" id="save">${tr('Save users', 'บันทึกผู้ใช้')}</button></div></div>
-    <p class="foot">${tr('Admin: everything, including the edit log. Chief: everything except the edit log; cannot add, change or remove Admins. Staff: edit organization data, no admin console. Data team staff: as Staff, plus Control and the edit log. Emails not listed, or without a role, cannot open the site.', 'ผู้ดูแล: ทำได้ทุกอย่าง รวมถึงดูบันทึกการแก้ไข หัวหน้า: ทำได้ทุกอย่างยกเว้นดูบันทึกการแก้ไข และเพิ่ม เปลี่ยน หรือลบผู้ดูแลไม่ได้ เจ้าหน้าที่: แก้ไขข้อมูลองค์กรได้ แต่เข้าคอนโซลผู้ดูแลไม่ได้ เจ้าหน้าที่ทีมข้อมูล: เหมือนเจ้าหน้าที่ และจัดการหน้าควบคุมและดูบันทึกการแก้ไขได้ อีเมลที่ไม่อยู่ในรายชื่อหรือยังไม่มีสิทธิ์จะเข้าเว็บไซต์ไม่ได้')}</p>`;
+    <p class="foot">${tr('Admin: everything, including the edit log. Chief: everything except the edit log; cannot add, change or remove Admins. Staff: edit organization data, no admin console. Data team staff: as Staff, plus Control and the edit log. Emails not listed, or without a role, cannot open the site. Import CSV: column 1 Email, column 2 Name; new emails are added as Staff, emails already listed are skipped; press Save users to keep them.', 'ผู้ดูแล: ทำได้ทุกอย่าง รวมถึงดูบันทึกการแก้ไข หัวหน้า: ทำได้ทุกอย่างยกเว้นดูบันทึกการแก้ไข และเพิ่ม เปลี่ยน หรือลบผู้ดูแลไม่ได้ เจ้าหน้าที่: แก้ไขข้อมูลองค์กรได้ แต่เข้าคอนโซลผู้ดูแลไม่ได้ เจ้าหน้าที่ทีมข้อมูล: เหมือนเจ้าหน้าที่ และจัดการหน้าควบคุมและดูบันทึกการแก้ไขได้ อีเมลที่ไม่อยู่ในรายชื่อหรือยังไม่มีสิทธิ์จะเข้าเว็บไซต์ไม่ได้ นำเข้า CSV: คอลัมน์ 1 อีเมล คอลัมน์ 2 ชื่อ อีเมลใหม่จะได้สิทธิ์เจ้าหน้าที่ อีเมลที่มีอยู่แล้วจะถูกข้าม กดบันทึกผู้ใช้เพื่อเก็บไว้')}</p>`;
 
   const phasesPart = `${title('clock', tr('Pitching phases', 'ช่วงการเสนองบ'))}
     <div class="group" id="phases">${PHASE_LIST.map(([k, label]) => `<label class="row phase-row"><span class="grow">${esc(label())}</span>
@@ -257,6 +258,30 @@ function draw(page, ctx, d) {
     paintUsers();
   };
   $('#add', page).onclick = () => { st.users.push({ email: '', role: 'Staff', orgs: [], name: '' }); st.open.add(st.users.length - 1); paintUsers(); $('#users tr:last-child input', page)?.focus(); };
+  // Import CSV (v2.11): Email, Name per row. New emails join the draft as Staff; emails already listed (or repeated
+  // in the file) and rows without a valid email (a header row, say) are skipped. Save users keeps them.
+  $('#importCsv', page).onclick = () => $('#csvFile', page).click();
+  $('#csvFile', page).onchange = async (e) => {
+    const file = e.target.files[0];
+    e.target.value = '';
+    if (!file) return;
+    const have = new Set(st.users.map((u) => u.email.toLowerCase()));
+    let added = 0; let dup = 0; let bad = 0;
+    const rows = parseCsv((await file.text()).replace(/^﻿/, ''));
+    if (/^\s*e-?mail\s*$/i.test(rows[0]?.[0] || '')) rows.shift(); // header row
+    rows.forEach(([mail = '', name = '']) => {
+      const email = mail.trim().toLowerCase();
+      if (!email && !name.trim()) return;
+      if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) { bad++; return; }
+      if (have.has(email)) { dup++; return; }
+      have.add(email);
+      st.users.push({ email, role: 'Staff', orgs: [], name: name.trim().slice(0, 80) });
+      added++;
+    });
+    st.open.clear();
+    paintUsers();
+    toast(tr('Added {a}, skipped {d} already listed, {b} without a valid email. Press Save users to keep them.', 'เพิ่ม {a} คน ข้าม {d} คนที่มีอยู่แล้ว และ {b} แถวที่อีเมลไม่ถูกต้อง กดบันทึกผู้ใช้เพื่อเก็บไว้', { a: added, d: dup, b: bad }), added ? '' : 'bad');
+  };
   st.save.users = async () => {
     const out = await saving(() => call('saveUsers', { users: st.users.filter((u) => u.email), version: d.usersVer }));
     st.users = out.users.map((u) => ({ ...u }));
@@ -278,6 +303,24 @@ function draw(page, ctx, d) {
     }
     e.target.disabled = false;
   };
+}
+
+// CSV text to rows of cells: commas, quoted cells ("" inside quotes is a quote), CRLF or LF line ends.
+function parseCsv(text) {
+  const rows = []; let row = []; let cell = ''; let q = false;
+  for (let i = 0; i < text.length; i++) {
+    const c = text[i];
+    if (q) {
+      if (c === '"' && text[i + 1] === '"') { cell += '"'; i++; } else if (c === '"') q = false; else cell += c;
+    } else if (c === '"') q = true;
+    else if (c === ',') { row.push(cell); cell = ''; }
+    else if (c === '\n' || c === '\r') {
+      if (c === '\r' && text[i + 1] === '\n') i++;
+      row.push(cell); rows.push(row); row = []; cell = '';
+    } else cell += c;
+  }
+  if (cell || row.length) { row.push(cell); rows.push(row); }
+  return rows;
 }
 
 // Data team staff: the edit log only.

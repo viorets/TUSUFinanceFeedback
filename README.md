@@ -55,7 +55,8 @@ overrides the earlier styles. Glass turns solid for reduced transparency; motion
 
 ## Versions
 
-- `v2.10` (tag, `main`): phases compared everywhere, Staff roles widened.
+- `v2.11` (`main`): Admin console "Import CSV" under Users and roles: column 1 Email, column 2 Name (a header row starting with "Email" is skipped). New emails join the list as Staff; emails already listed or repeated in the file are skipped; Save users writes them (same `saveUsers` checks). Website only, no `Code.gs` change.
+- `v2.10` (tag): phases compared everywhere, Staff roles widened.
   - Organizations list: tabs All / Pre-pitch / Pitching / Re-submission, each with its own budget column and a "% of total" column; filters (category, campus, budget range with a type picker on All) kept on the device; a mini dashboard; Pitching shows the next pitching time and progress; Re-submission shows Submitted / Not submitted with a version dropdown. `boot` adds per organization `est`, `pp`, `rp`, `ok`, `fin`, `ver`, `vers`, `rs`, `slots` (`Code.gs` `boot_`).
   - Dashboard: tiles on one grid; "% of total" in the project table and Top 5 lists; a waterfall (proposed, pitching change, pitched, re-submission change, final) and a dumbbell by campus or category.
   - Organization page: the submission version beside the RefCode; a notice when someone else is in charge.
