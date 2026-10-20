@@ -1,6 +1,6 @@
 // Timeline (v2.12): the round as a Gantt chart at the top of the Organizations tab. Left: the steps grouped by phase,
-// with start, end and days. Right: a month / week scale, week lines, one coloured bar per step (each its own colour,
-// apart from the CI teal), a group bar per phase, a "today" line and, for Pitching and Re-submission, the projects
+// with start, end and days. Right: a month / week scale, week lines, one coloured bar per step (each its own shade of
+// the dashboard CI, Mosaic Blue #00758F, as the dashboard's --c0..--c5 slots), a group bar per phase, a "today" line and, for Pitching and Re-submission, the projects
 // finished as a darker fill. Dates: boot.dates (Settings "Phase Dates", edited in the admin console; keys and
 // defaults in TIMELINE in Code.gs). Folded or not is kept on this device.
 import { tr, locale } from './i18n.js';
@@ -8,13 +8,13 @@ import { esc } from './ui.js';
 
 // Keep in step with TIMELINE in Code.gs. [key, label, colour]; GROUPS put the steps under their phase.
 export const STEPS = [
-  ['systemTest', () => tr('System test', 'ทดสอบระบบ'), '#8b5cf6'],
-  ['submission', () => tr('Project submission #2', 'ส่งโครงการ ครั้งที่ 2'), '#3b82f6'],
-  ['pitching', () => tr('Pitching #2 (Pre-pitch and Pitching)', 'นำเสนอ ครั้งที่ 2 (ก่อนนำเสนอและนำเสนอ)'), '#f59e0b'],
-  ['mailing', () => tr('Mailing #2', 'ส่งอีเมล ครั้งที่ 2'), '#ef4444'],
-  ['resubCampus', () => tr('Campus check', 'ศูนย์ตรวจ'), '#ec4899'],
-  ['resubCentre', () => tr('Centre team check', 'ทีมส่วนกลางตรวจ'), '#22a35a'],
-  ['council', () => tr('Documentation and council submission', 'จัดทำเอกสารและส่งสภา'), '#6366f1'],
+  ['systemTest', () => tr('System test', 'ทดสอบระบบ'), '#008B8E'],
+  ['submission', () => tr('Project submission #2', 'ส่งโครงการ ครั้งที่ 2'), '#00758F'],
+  ['pitching', () => tr('Pitching #2 (Pre-pitch and Pitching)', 'นำเสนอ ครั้งที่ 2 (ก่อนนำเสนอและนำเสนอ)'), '#005E90'],
+  ['mailing', () => tr('Mailing #2', 'ส่งอีเมล ครั้งที่ 2'), '#003A46'],
+  ['resubCampus', () => tr('Campus check', 'ศูนย์ตรวจ'), '#4EA0B2'],
+  ['resubCentre', () => tr('Centre team check', 'ทีมส่วนกลางตรวจ'), '#9AC9D0'],
+  ['council', () => tr('Documentation and council submission', 'จัดทำเอกสารและส่งสภา'), '#2C6E7F'],
 ];
 const GROUPS = [
   [() => tr('Preparation', 'เตรียมระบบ'), ['systemTest']],
