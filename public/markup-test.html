@@ -1,0 +1,85 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>PDF markup test</title>
+<link rel="stylesheet" href="css/markup.css">
+<style>
+  /* Local test run only (not deployed: firebase.json ignores this page). */
+  html, body { margin: 0; height: 100%; font-family: -apple-system, "Segoe UI", "Noto Sans Thai", sans-serif; background: #f4f8f9; color: #1d1d1f; }
+  .app { display: flex; flex-direction: column; height: 100%; }
+  header { display: flex; flex-wrap: wrap; align-items: center; gap: 10px 14px; padding: 10px 16px; background: #006371; color: #fff; }
+  header b { font-size: 16px; }
+  header .note { font-size: 13px; opacity: .85; }
+  header .grow { flex: 1; }
+  header button, header label.file { font: inherit; font-size: 14px; border: 0; border-radius: 980px; padding: 7px 14px; cursor: pointer; background: rgba(255, 255, 255, .18); color: #fff; }
+  header button.primary { background: #fff; color: #006371; font-weight: 600; }
+  header button:disabled { opacity: .45; cursor: default; }
+  header input[type=file] { display: none; }
+  #status { font-size: 13px; min-width: 12em; }
+  #editor { flex: 1; min-height: 0; }
+  .empty { margin: 60px auto; text-align: center; color: #6e6e73; max-width: 520px; line-height: 1.5; }
+</style>
+</head>
+<body>
+<div class="app">
+  <header>
+    <b>PDF markup · test run</b><span class="note">Local only · nothing is saved to the site</span>
+    <span class="grow"></span>
+    <label class="file">Open PDF<input type="file" id="file" accept="application/pdf,.pdf"></label>
+    <button id="draft" disabled>Save draft</button>
+    <button id="dl" class="primary" disabled>Download marked PDF</button>
+    <span id="status"></span>
+  </header>
+  <div id="editor"><p class="empty">Open a PDF (up to 12 MB). Tools: text box (LINE Seed Sans TH, 11 pt, #990000), highlight text, draw, line, arrow, rectangle. Hold Shift for straight lines and squares. Select a mark to move it, change its width or colour, or delete it.</p></div>
+</div>
+<script type="module">
+import { openPdfEditor, MAX_BYTES } from './js/markup/pdf-markup.js';
+
+const $ = (s) => document.querySelector(s);
+const status = (t) => { $('#status').textContent = t; };
+const mb = (n) => `${(n / 1048576).toFixed(2)} MB`;
+let ed = null; let name = ''; let key = '';
+
+async function open(bytes, fileName) {
+  name = fileName; key = `markup-draft:${fileName}:${bytes.byteLength}`;
+  let draft = null;
+  try { draft = JSON.parse(localStorage.getItem(key) || 'null'); } catch { /* none */ }
+  status(`Opening ${fileName} (${mb(bytes.byteLength)})…`);
+  const t0 = performance.now();
+  try {
+    ed = await openPdfEditor($('#editor'), { bytes, name: fileName, draft });
+    status(`${fileName} · ${mb(bytes.byteLength)} · opened in ${Math.round(performance.now() - t0)} ms${draft ? ' · draft restored' : ''}`);
+    $('#draft').disabled = false; $('#dl').disabled = false;
+  } catch (e) { status(e.message); console.error(e); }
+}
+
+$('#file').onchange = async (e) => { const f = e.target.files[0]; if (f) open(await f.arrayBuffer(), f.name); e.target.value = ''; };
+// ?src=<url> opens a PDF from this server (for testing).
+const src = new URLSearchParams(location.search).get('src');
+if (src) fetch(src).then((r) => r.arrayBuffer()).then((b) => open(b, src.split('/').pop()));
+
+$('#draft').onclick = () => {
+  try { localStorage.setItem(key, JSON.stringify(ed.marks())); ed.clean(); status(`Draft saved on this device (${ed.marks().length} marks)`); } catch (e) { status(e.message); }
+};
+$('#dl').onclick = async () => {
+  $('#dl').disabled = true; status('Writing the marked PDF…');
+  const t0 = performance.now();
+  try {
+    const out = await ed.exportPdf();
+    if (out.byteLength > MAX_BYTES) { status(`Marked PDF is ${mb(out.byteLength)}: over the 12 MB limit`); return; }
+    const a = document.createElement('a');
+    a.href = URL.createObjectURL(new Blob([out], { type: 'application/pdf' }));
+    a.download = name.replace(/\.pdf$/i, '') + ' (marked).pdf';
+    document.body.append(a); a.click(); a.remove();
+    setTimeout(() => URL.revokeObjectURL(a.href), 2000);
+    window.__lastExport = out;
+    status(`Marked PDF ${mb(out.byteLength)} written in ${Math.round(performance.now() - t0)} ms`);
+  } catch (e) { status(e.message); console.error(e); } finally { $('#dl').disabled = false; }
+};
+addEventListener('beforeunload', (e) => { if (ed?.isDirty()) e.preventDefault(); });
+window.__editor = () => ed;
+</script>
+</body>
+</html>

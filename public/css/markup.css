@@ -1,0 +1,41 @@
+/* PDF markup editor (v2.12 test run). Text box font: LINE Seed Sans TH (public/fonts, SIL Open Font License). */
+@font-face { font-family: "LINE Seed Sans TH"; src: url("../fonts/LINESeedSansTH_Rg.ttf") format("truetype"); font-weight: 400; font-display: swap; }
+
+.mk { display: flex; flex-direction: column; height: 100%; min-height: 0; }
+.mk-bar { position: sticky; top: 0; z-index: 5; display: flex; flex-wrap: wrap; align-items: center; gap: 8px 14px; padding: 8px 12px;
+  background: rgba(255, 255, 255, .85); backdrop-filter: blur(16px); -webkit-backdrop-filter: blur(16px); border-bottom: 1px solid rgba(0, 99, 113, .14); }
+.mk-tools { display: inline-flex; padding: 3px; border-radius: 980px; background: rgba(43, 171, 194, .12); }
+.mk-tools button, .mk-bar > button { border: 0; background: none; font: inherit; font-size: 14px; padding: 6px 14px; border-radius: 980px; cursor: pointer; color: #1d1d1f; }
+.mk-tools button[aria-pressed="true"] { background: #006371; color: #fff; }
+.mk-bar > button { background: rgba(43, 171, 194, .12); }
+.mk-bar > button:disabled { opacity: .4; cursor: default; }
+.mk-ctl { display: inline-flex; align-items: center; gap: 8px; font-size: 14px; color: #3a3a3c; }
+.mk-ctl input[type=range] { width: 110px; accent-color: #006371; }
+.mk-ctl input[type=color] { width: 32px; height: 26px; padding: 0; border: 1px solid rgba(0, 0, 0, .15); border-radius: 6px; background: none; }
+.mk-ctl output { min-width: 2.2em; font-variant-numeric: tabular-nums; }
+.mk-grow { flex: 1; }
+.mk-pages { flex: 1; overflow: auto; padding: 16px; display: flex; flex-direction: column; align-items: center; gap: 16px; background: #e8eef0; }
+.mk-wait { color: #6e6e73; }
+.mk-page { position: relative; flex: none; background: #fff; box-shadow: 0 2px 10px rgba(0, 0, 0, .12); touch-action: none; }
+.mk-page canvas { position: absolute; inset: 0; width: 100%; height: 100%; }
+.mk-svg, .mk-boxes { position: absolute; inset: 0; width: 100%; height: 100%; }
+.mk-svg { overflow: visible; }
+.mk-mark { cursor: move; }
+.mk-mark * { pointer-events: visiblePainted; }
+.mk-mark line, .mk-mark polyline, .mk-mark rect:not(.mk-hl) { stroke-opacity: 1; }
+.mk-mark.on { filter: drop-shadow(0 0 2px #2babc2) drop-shadow(0 0 2px #2babc2); }
+.mk-box { position: absolute; white-space: pre; background: transparent; border: 0; outline: none; min-width: 1ch; cursor: move; padding: 0; margin: 0; }
+.mk-box.on, .mk-box.editing { outline: 1px dashed #2babc2; outline-offset: 2px; } /* only on screen; never in the saved file */
+.mk-box.editing { cursor: text; }
+/* pdf.js text layer: invisible text over the page, selectable only with the Highlight tool. */
+.textLayer { position: absolute; inset: 0; overflow: hidden; line-height: 1; opacity: 1; pointer-events: none; text-size-adjust: none; forced-color-adjust: none; transform-origin: 0 0; z-index: 1; }
+.textLayer span, .textLayer br { color: transparent; position: absolute; white-space: pre; cursor: text; transform-origin: 0% 0%; }
+.textLayer ::selection { background: rgba(255, 225, 77, .6); }
+.mk[data-tool="highlight"] .textLayer { pointer-events: auto; z-index: 3; }
+.mk[data-tool="highlight"] .mk-svg, .mk[data-tool="highlight"] .mk-boxes { pointer-events: none; }
+.mk-svg { z-index: 2; pointer-events: none; }
+.mk[data-tool="select"] .mk-svg { pointer-events: auto; }
+.mk-boxes { z-index: 2; pointer-events: none; }
+.mk-boxes .mk-box { pointer-events: auto; }
+.mk[data-tool="pen"] .mk-page, .mk[data-tool="line"] .mk-page, .mk[data-tool="arrow"] .mk-page, .mk[data-tool="rect"] .mk-page { cursor: crosshair; }
+.mk[data-tool="text"] .mk-page { cursor: text; }
