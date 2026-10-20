@@ -7,4 +7,8 @@ export const firebaseConfig = {
 };
 
 // Apps Script → Deploy → Web app URL (ends in /exec). See README.md.
-export const SCRIPT_URL = 'https://script.google.com/macros/s/AKfycbw5IN8b4kg-9k1XyDlC300QF20FXis1hBfoarULPnRoPFH7T5B7Bw33HevwXi86ETHS/exec';
+const LIVE_SCRIPT_URL = 'https://script.google.com/macros/s/AKfycbw5IN8b4kg-9k1XyDlC300QF20FXis1hBfoarULPnRoPFH7T5B7Bw33HevwXi86ETHS/exec';
+// Local test runs only (localhost): a test deployment's /exec URL kept in this browser as localStorage 'scriptUrl'.
+// The live site always uses the URL above.
+const testUrl = () => { try { return ['localhost', '127.0.0.1'].includes(location.hostname) ? localStorage.getItem('scriptUrl') : null; } catch { return null; } };
+export const SCRIPT_URL = testUrl() || LIVE_SCRIPT_URL;

@@ -4,7 +4,7 @@ import { idToken } from './firebase.js';
 import { tr } from './i18n.js';
 import { dateTimeFmt } from './ui.js';
 
-const MAX_MB = 10; // keep in step with MAX_BYTES in Code.gs (v2.9: 10 MB)
+const MAX_MB = 12; // keep in step with MAX_BYTES in Code.gs (v2.12: 12 MB)
 const TTL = 60e3;
 const cache = new Map(); // reads only: key → { t, p }
 
@@ -192,7 +192,7 @@ export async function flushOutbox() {
 
 // Drive links: view page and direct download.
 const idOf = (u) => (String(u || '').match(/\/d\/([\w-]+)|[?&]id=([\w-]+)/) || []).slice(1).find(Boolean) || '';
-const fileId = (u) => (typeof u === 'string' ? idOf(u) : u?.id || '');
+export const fileId = (u) => (typeof u === 'string' ? idOf(u) : u?.id || '');
 export const viewUrl = (u) => { const id = fileId(u); return id ? `https://drive.google.com/file/d/${encodeURIComponent(id)}/view` : ''; };
 // Drive's own viewer (PDF and .docx), shown inside the site by openPreview() in project.js.
 export const previewUrl = (u) => { const id = fileId(u); return id ? `https://drive.google.com/file/d/${encodeURIComponent(id)}/preview` : ''; };

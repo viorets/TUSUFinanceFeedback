@@ -2,7 +2,7 @@
 // slot and the progress banner (unfinished projects + the "unfinished only" filter).
 import { tr, locale } from './i18n.js';
 import { esc, icon, num2 } from './ui.js';
-import { downloadUrl, viewUrl, previewUrl } from './api.js';
+import { downloadUrl, viewUrl, previewUrl, fileId } from './api.js';
 
 const pad = (n) => String(n).padStart(2, '0');
 const near = (iso, n) => { const [y, m, d] = iso.split('-').map(Number); const t = new Date(y, m - 1, d + n); return `${t.getFullYear()}-${pad(t.getMonth() + 1)}-${pad(t.getDate())}`; };
@@ -75,6 +75,40 @@ document.addEventListener('click', (e) => {
 export const fileChip = (f) => (f?.id ? `<span class="fchip">${icon('file', 16)}<a href="${esc(viewUrl(f))}" data-preview="${esc(previewUrl(f))}" data-view="${esc(viewUrl(f))}" data-dl="${esc(downloadUrl(f))}" data-title="${esc(f.name || f.id)}" title="${esc(tr('Preview', 'ดูตัวอย่าง'))}">${esc(f.name || f.id)}</a>
   <a class="icon-btn" href="${esc(downloadUrl(f))}" download title="${esc(tr('Download', 'ดาวน์โหลด'))}">${icon('download', 16)}</a></span>` : '');
 
+// Edit a file in the site (v2.12): opens the editor (views/markup.js) in a new tab. src = a Drive link or { id, name };
+// kind = 'pdf' | 'docx' | 'xlsx' (other types get no button); slot = where the result goes, read by that tab's
+// onMarked handler: 'pre:<ref>:pdf' | 'pre:<ref>:docx' | 'form' | 'xl' | 'noted:<ref>'.
+export const KIND_OF = (name) => ((String(name || '').match(/\.(pdf|docx|xlsx)$/i) || [])[1] || '').toLowerCase();
+export function editBtn(src, { org, slot, kind = KIND_OF(src?.name), plain = false }) {
+  const id = fileId(src);
+  if (!id || !kind) return '';
+  const q = new URLSearchParams({ org, id, kind, slot });
+  const label = kind === 'pdf' ? tr('Mark up', 'ทำเครื่องหมาย') : kind === 'xlsx' ? tr('Edit in Sheets', 'แก้ไขใน Sheets') : tr('Edit in Docs', 'แก้ไขใน Docs');
+  return `<a class="${plain ? 'icon-btn' : 'btn'}" href="#/markup?${esc(q)}" target="_blank" rel="opener" title="${esc(label)}">${icon('pen', 16)}${plain ? '' : esc(label)}</a>`;
+}
+
+// The editor tab sends each file it saved to the site on this channel; the open organization tab that owns the slot
+// puts it in its working copy (handler returns true) and answers 'ack', so the editor knows it landed.
+const channel = typeof BroadcastChannel === 'function' ? new BroadcastChannel('markup') : null;
+let marked = null;
+export const onMarked = (fn) => { marked = fn; };
+channel?.addEventListener('message', (e) => {
+  const m = e.data || {};
+  if (m.type === 'saved' && marked?.(m)) channel.postMessage({ type: 'ack', n: m.n });
+});
+// From the editor: resolves true when an organization tab took the file within 2 s.
+export function sendMarked(m) {
+  if (!channel) return Promise.resolve(false);
+  const n = Math.random().toString(36).slice(2);
+  return new Promise((res) => {
+    const done = (v) => { channel.removeEventListener('message', on); clearTimeout(t); res(v); };
+    const on = (e) => { if (e.data?.type === 'ack' && e.data.n === n) done(true); };
+    const t = setTimeout(() => done(false), 2000);
+    channel.addEventListener('message', on);
+    channel.postMessage({ ...m, type: 'saved', n });
+  });
+}
+
 // Number = the project's position in the submission (the -P<nn> end of its code).
 export const projNo = (ref) => Number(String(ref).match(/-P(\d+)$/)?.[1]) || '';
 
@@ -143,7 +177,7 @@ export function timeLeft(s, now = Date.now()) {
 }
 
 // Under every upload button (v2.9): the size limit and the file types the slot takes.
-export const capNote = (types) => `<small class="muted cap">${esc(tr('Max 10 MB · {types}', 'ไม่เกิน 10 MB · {types}', { types }))}</small>`;
+export const capNote = (types) => `<small class="muted cap">${esc(tr('Max 12 MB · {types}', 'ไม่เกิน 12 MB · {types}', { types }))}</small>`;
 
 // What "unfinished" means on each tab: a required question unanswered. Pre-pitch: decided by the server (Code.gs finished_).
 export const UNFINISHED = {

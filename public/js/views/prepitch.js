@@ -11,8 +11,8 @@ import { ORGS } from '../masterdata.js';
 
 let st = null; // { el, d, can, form: { ref: working copy }, box: budget-form feedback working copy }
 
-const blank = { approvedBudget: null, docxOk: '', docxFile: null, pdfOk: '', pdfFile: null, note: '' };
-const pick = (x) => ({ approvedBudget: x.approvedBudget ?? null, docxOk: x.docxOk || '', docxFile: x.docxFile || null, pdfOk: x.pdfOk || '', pdfFile: x.pdfFile || null, note: x.note || '' });
+const blank = { approvedBudget: null, docxOk: '', docxFile: null, pdfOk: '', pdfFile: null, note: '', docs: [] };
+const pick = (x) => ({ approvedBudget: x.approvedBudget ?? null, docxOk: x.docxOk || '', docxFile: x.docxFile || null, pdfOk: x.pdfOk || '', pdfFile: x.pdfFile || null, note: x.note || '', docs: [...(x.docs || [])] });
 const dirty = (ref) => JSON.stringify(st.form[ref]) !== JSON.stringify(pick(st.d.pre[ref] || blank));
 const pickBox = (x) => ({ note: x?.note || '', file: x?.file || null });
 const boxDirty = () => !!st && JSON.stringify(st.box) !== JSON.stringify(pickBox(st.d.orgPre));
@@ -82,6 +82,7 @@ function card(p) {
       <div class="field"><label>${tr('Approved project .docx?', 'อนุมัติไฟล์โครงการ .docx?')}</label><div>${yn('docx')}<div data-slot="docx">${slot(p.ref, 'docx')}</div></div></div>
       <div class="field"><label>${tr('Approved project PDF?', 'อนุมัติไฟล์โครงการ PDF?')}</label><div>${yn('pdf')}<div data-slot="pdf">${slot(p.ref, 'pdf')}</div></div></div>
       <div class="field"><label>${tr('Note', 'บันทึก')}</label><textarea data-k="note" maxlength="5000" ${dis}>${esc(f.note)}</textarea></div>
+      <div class="field"><label>${tr('Documents', 'เอกสาร')}</label><div data-docs>${docs(p.ref)}</div></div>
       ${st.can ? `<div class="actions"><span class="muted small" data-saved>${savedLine(saved)}</span><button class="btn primary" data-save>${tr('Save', 'บันทึก')}</button></div>`
     : `<div class="actions"><span class="muted small">${savedLine(saved)}</span></div>`}
     </div></section>`;
@@ -101,6 +102,14 @@ function slot(ref, k) {
     </div>${st.can ? capNote(k === 'docx' ? '.docx' : 'PDF') : ''}`;
 }
 
+// Documents (v2.12): any number of .docx / PDF per project, uploaded when picked; Save keeps the list.
+function docs(ref) {
+  const list = st.form[ref].docs;
+  return `<div class="upl">${list.map((f, i) => `${fileChip(f)}${st.can ? `<button type="button" class="icon-btn" data-rm-doc="${i}" title="${esc(tr('Remove from list', 'นำออกจากรายการ'))}">${icon('x', 16)}</button>` : ''}`).join('')}
+    ${!list.length && !st.can ? '<span class="muted">—</span>' : ''}
+    ${st.can ? `<label class="btn">${icon('upload', 16)}${tr('Upload .docx or PDF', 'อัปโหลด .docx หรือ PDF')}<input type="file" hidden multiple accept=".docx,.pdf" data-up-docs></label>` : ''}</div>${st.can ? capNote('.docx / PDF') : ''}`;
+}
+
 const refOf = (e) => e.target.closest('[data-ref]')?.dataset.ref;
 
 function onInput(e) {
@@ -115,6 +124,21 @@ async function onChange(e) {
   if (e.target.dataset.up === 'box') { await boxUpload(e); return; }
   const ref = refOf(e);
   if (!ref) return;
+  if (e.target.hasAttribute('data-up-docs')) {
+    const box = e.target.closest('[data-docs]');
+    let got = 0;
+    for (const file of [...e.target.files]) {
+      try {
+        st.form[ref].docs.push(await busy(tr('Uploading {file}…', 'กำลังอัปโหลด {file}…', { file: file.name }), (set) => upload(file, { ref, purpose: 'docs' }, set)));
+        got++;
+      } catch (err) {
+        await errorBox(`${file.name}: ${err.message}`, tr('Couldn’t upload', 'อัปโหลดไม่สำเร็จ'));
+      }
+    }
+    box.innerHTML = docs(ref);
+    if (got) toast(tr('Uploaded — press Save to keep it', 'อัปโหลดแล้ว — กดบันทึกเพื่อเก็บ'));
+    return;
+  }
   const k = e.target.dataset.k;
   if (k === 'docxOk' || k === 'pdfOk') {
     st.form[ref][k] = e.target.value;
@@ -198,6 +222,13 @@ async function onClick(e) {
       await errorBox(err.message);
     }
     bb.disabled = false;
+    return;
+  }
+  const rmDoc = e.target.closest('[data-rm-doc]');
+  if (rmDoc) {
+    const r = refOf(e);
+    st.form[r].docs.splice(Number(rmDoc.dataset.rmDoc), 1);
+    rmDoc.closest('[data-docs]').innerHTML = docs(r);
     return;
   }
   const btn = e.target.closest('[data-save]');

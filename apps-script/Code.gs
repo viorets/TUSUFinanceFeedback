@@ -49,7 +49,7 @@
  * Save conflicts (v2.8): a save carries the Updated At its page loaded (base); when the row changed since, the save is
  * refused (fresh_) instead of silently overwriting. Save users does the same with a Users version (usersVer_). Right
  * before writing, the case is checked again in the Sheet itself (stillOpen_).
- * Uploads (v2.9): 10 MB. The page asks uploadStart for a Drive resumable-upload session in the organization folder
+ * Uploads (v2.9): 12 MB since v2.12. The page asks uploadStart for a Drive resumable-upload session in the organization folder
  * and sends the file straight to Google (no base64, no Apps Script in between), then uploadDone checks where it
  * landed. When that fails the page falls back to upload_ (base64 through this script).
  *
@@ -64,11 +64,14 @@ const DEFAULTS = {
 const FEEDBACK_SHEET_ID = '1tDak_LDOEvLEuMMa3Wri9Ej3tWjwLcEDS4tvFb-0N0k';
 const DRIVE_FOLDER_ID = '191_2g6tBQwxIJrmUmWMuwECPiRd1Oy2o';
 // Apps Script request bodies top out around 50 MB and base64 adds a third.
-const MAX_BYTES = 10 * 1024 * 1024; // v2.9: 10 MB (was 25)
+const MAX_BYTES = 12 * 1024 * 1024; // v2.12: 12 MB (marked files; was 10)
 // v2.11: answers are keyed by the outside Sheets' last-updated times (stamp_), so these are only backstops.
 const CACHE_SECONDS = 300; // composed answers and the Submissions / Schedule rows
 const ROWS_SECONDS = 600; // our own tabs (writes through the site change their stamp at once; hand edits wait this long)
 const STAMP_SECONDS = 30; // how often an outside Sheet's last-updated time is asked from Drive
+// Part of every cached answer's key: a deployment never reads answers cached by another code version (both share the
+// script cache). Change it whenever an answer's shape changes.
+const CODE_VERSION = 'v2.12.1';
 const KINDS = {
   docx: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
   pdf: 'application/pdf',
@@ -90,7 +93,7 @@ const TABS = {
   Users: ['Email', 'Role', 'Org Refs', 'Updated At', 'Updated By', 'Name', 'Email 2'],
   PrePitch: ['Project Ref', 'Org Ref', 'Project Name', 'Approved Budget', 'Docx Approved', 'Docx Feedback File',
     'PDF Approved', 'PDF Feedback File', 'Feedback Note', 'Updated At', 'Updated By',
-    'Docx Feedback File JSON', 'PDF Feedback File JSON'],
+    'Docx Feedback File JSON', 'PDF Feedback File JSON', 'Documents', 'Documents JSON'],
   PrePitch_Log: ['Logged At', 'By', 'Project Ref', 'Org Ref', 'Field', 'Old', 'New'],
   Pitching: ['Project Ref', 'Org Ref', 'Project Name', 'Summary', 'Final Approved Budget', 'Noted Documents',
     'Updated At', 'Updated By', 'Correct Excel File', 'Noted Documents JSON', 'Correct Excel File JSON'],
@@ -111,10 +114,10 @@ const QUESTIONS = {
   'pitch.summary': false, 'pitch.finalBudget': true, 'pitch.noted': false, 'resub.decision': true,
 };
 // Cells that hold files: written as file names linked to Drive, read back from those links (filesIn_).
-const FILE_COLS = ['Docx Feedback File', 'PDF Feedback File', 'Noted Documents', 'Correct Excel File', 'Budget Form Feedback File'];
+const FILE_COLS = ['Docx Feedback File', 'PDF Feedback File', 'Noted Documents', 'Correct Excel File', 'Budget Form Feedback File', 'Documents'];
 const TWIN = ' JSON'; // hidden text twin of a file column (see Speed above)
 // Pre-pitch fields that are logged.
-const PRE_FIELDS = ['Approved Budget', 'Docx Approved', 'Docx Feedback File', 'PDF Approved', 'PDF Feedback File', 'Feedback Note'];
+const PRE_FIELDS = ['Approved Budget', 'Docx Approved', 'Docx Feedback File', 'PDF Approved', 'PDF Feedback File', 'Feedback Note', 'Documents'];
 // Pitching fields that are logged (v2.7).
 const PITCH_FIELDS = ['Summary', 'Final Approved Budget', 'Noted Documents']; // Correct Excel file: per organization (v2.9)
 // Budget-form feedback (Pre-pitch, one per organization): sheet column -> log field name.
@@ -165,6 +168,7 @@ const ACTIONS = {
   exportData: exportData_, printData: printData_, saveExternalLink: saveExternalLink_,
   saveOrgPrePitch: saveOrgPrePitch_, myProjects: myProjects_, setRestored: setRestored_,
   saveOrgPitching: saveOrgPitching_, uploadStart: uploadStart_, uploadDone: uploadDone_, mailData: mailData_,
+  savePhaseDates: savePhaseDates_, saveTextSize: saveTextSize_, markupOpen: markupOpen_, saveMarkupDraft: saveMarkupDraft_, markupCopy: markupCopy_, markupExport: markupExport_,
 };
 
 function doPost(e) {
@@ -174,6 +178,7 @@ function doPost(e) {
     const fn = ACTIONS[req.action];
     if (!fn) throw new Error('Unknown action');
     const user = verifyUser_(req.idToken);
+    user.login = user.email; // the Gmail actually signed in (Google copies are shared with it)
     user.email = mainEmail_(user.email);
     user.role = roleOf_(user.email);
     if (!user.role) throw new Error('NO_ACCESS');
@@ -241,14 +246,14 @@ function boot_(req, user) {
       if (orgs[ref] && r.date) orgs[ref].slots.push([r.date, r.start, r.end]);
     });
     users_().forEach(function (u) { u.orgs.forEach(function (ref) { org(ref).people.push(u.email); }); });
-    return { orgs: orgs, removed: hidden_(s.log), closed: closed_(), texts: texts_(), required: required_(), phases: phases_(), link: externalLink_() };
+    return { orgs: orgs, removed: hidden_(s.log), closed: closed_(), texts: texts_(), required: required_(), phases: phases_(), dates: phaseDates_(), link: externalLink_() };
   });
   // names: display name per email (set in the admin console); the site shows the email where none is set.
   const names = {};
   users_().forEach(function (u) { if (u.name) names[u.email] = u.name; });
   const out = { me: { email: user.email, role: user.role, owner: user.email === owner_(), control: canControl_(user), log: canLog_(user), case: canCase_(user) },
     orgs: core.orgs, removed: core.removed, closed: core.closed, texts: core.texts, required: core.required, phases: core.phases,
-    link: core.link, names: names };
+    dates: core.dates, link: core.link, names: names };
   // The person-in-charge picker (v2.10: Staff too).
   out.users = users_().filter(function (u) { return u.role; }).map(function (u) { return u.email; });
   return out;
@@ -303,7 +308,7 @@ function upload_(req, user) {
   const u = uploadCheck_(req, user);
   const bytes = Utilities.base64Decode(req.data || '');
   if (!bytes.length) throw new Error('Empty file');
-  if (bytes.length > MAX_BYTES) throw new Error('File larger than 10 MB');
+  if (bytes.length > MAX_BYTES) throw new Error('File larger than 12 MB');
   const f = u.folder.createFile(Utilities.newBlob(bytes, KINDS[u.kind], u.driveName));
   return { file: { id: f.getId(), name: u.name } };
 }
@@ -313,7 +318,7 @@ function upload_(req, user) {
 // organization, 'feedback' and 'noted' to a project.
 function uploadCheck_(req, user) {
   need_(user, 'Staff');
-  const purpose = { feedback: 'feedback', noted: 'noted', excel: 'excel', form: 'form' }[req.purpose];
+  const purpose = { feedback: 'feedback', noted: 'noted', excel: 'excel', form: 'form', docs: 'docs' }[req.purpose];
   if (!purpose) throw new Error('Bad purpose');
   const p = purpose === 'form' || purpose === 'excel' ? org__(req.org) : project_(req.ref);
   open_(p.org);
@@ -322,7 +327,7 @@ function uploadCheck_(req, user) {
   if (!KINDS[kind] || req.mime !== KINDS[kind]) throw new Error('Only .docx, .pdf, .xlsx or .xls files');
   if (purpose !== 'form' && (purpose === 'excel' ? EXCEL.indexOf(kind) < 0 : EXCEL.indexOf(kind) >= 0)) throw new Error(purpose === 'excel' ? 'Only an Excel file (.xlsx or .xls) can go here' : 'Only .docx or .pdf files');
   if (req.only && req.only !== 'excel' && req.only !== kind) throw new Error('Only a .' + req.only + ' file can go here');
-  phaseOn_(purpose === 'feedback' || purpose === 'form' ? 'prepitch' : 'pitching');
+  phaseOn_(purpose === 'feedback' || purpose === 'form' || purpose === 'docs' ? 'prepitch' : 'pitching');
   return { org: p.org, kind: kind, name: name, folder: child_(DriveApp.getFolderById(DRIVE_FOLDER_ID), p.org),
     driveName: (p.ref || p.org) + ' ' + purpose + ' — ' + name };
 }
@@ -334,7 +339,7 @@ function uploadStart_(req, user) {
   const u = uploadCheck_(req, user);
   const size = Number(req.size);
   if (!(size > 0)) throw new Error('Empty file');
-  if (size > MAX_BYTES) throw new Error('File larger than 10 MB');
+  if (size > MAX_BYTES) throw new Error('File larger than 12 MB');
   const origin = String(req.origin || '');
   if (!/^https:\/\/[\w.-]+$/.test(origin)) throw new Error('Bad origin');
   // Any failure here reads 'Drive upload could not start': the page then sends the file the old way (upload_).
@@ -360,7 +365,7 @@ function uploadDone_(req, user) {
   need_(user, 'Staff');
   const p = req.purpose === 'form' || req.purpose === 'excel' ? org__(req.org) : project_(req.ref);
   const f = file_({ id: req.id, name: req.name }, p.org);
-  if (DriveApp.getFileById(f.id).getSize() > MAX_BYTES) { DriveApp.getFileById(f.id).setTrashed(true); throw new Error('File larger than 10 MB'); }
+  if (DriveApp.getFileById(f.id).getSize() > MAX_BYTES) { DriveApp.getFileById(f.id).setTrashed(true); throw new Error('File larger than 12 MB'); }
   return { file: f };
 }
 
@@ -382,6 +387,7 @@ function savePrePitch_(req, user) {
     'Docx Approved': docxOk, 'Docx Feedback File': docxOk === 'No' ? one_(file_(d.docxFile, p.org, 'docx')) : [],
     'PDF Approved': pdfOk, 'PDF Feedback File': pdfOk === 'No' ? one_(file_(d.pdfFile, p.org, 'pdf')) : [],
     'Feedback Note': text_(d.note, 5000), 'Updated At': now, 'Updated By': user.email,
+    'Documents': (Array.isArray(d.docs) ? d.docs : []).slice(0, 30).map(function (f) { return file_(f, p.org); }).filter(Boolean),
   };
   const log = PRE_FIELDS.filter(function (k) { return logText_(old[k]) !== logText_(row[k]); })
     .map(function (k) { return [now, user.email, p.ref, p.org, k, cell_(logText_(old[k])), cell_(logText_(row[k]))]; });
@@ -546,6 +552,20 @@ function dashboard_(req, user) {
 function allocated_() {
   const r = settings_().filter(function (x) { return x['Key'] === 'Allocated Budget'; })[0];
   return r ? num_(r['Value']) : null;
+}
+
+// Default text box size of the PDF editor, in pt (v2.12, Settings "Markup Text Size"; 11 when not set).
+function textSize_() {
+  const r = settings_().filter(function (x) { return x['Key'] === 'Markup Text Size'; })[0];
+  const v = r ? Number(r['Value']) : NaN;
+  return v >= 6 && v <= 72 ? v : 11;
+}
+function saveTextSize_(req, user) {
+  need_(user, 'Chief');
+  const v = Math.round(Number(req.size));
+  if (!(v >= 6 && v <= 72)) throw new Error('Text size must be 6 to 72 pt');
+  setSetting_('Markup Text Size', v, user);
+  return { textSize: v };
 }
 
 // Allocated budget (กรอบงบประมาณ): Admins and Chiefs. Empty = not set.
@@ -713,6 +733,43 @@ function savePhases_(req, user) {
   return { phases: out };
 }
 
+// Timeline (v2.12): each step of the round with its dates (Settings, key "Phase Dates": JSON { key: { from, to } },
+// yyyy-mm-dd, Bangkok time). Defaults: the "TUSU:" events in the TUSU calendar (read 20 Oct 2026). The Organizations
+// tab draws them as a chart; the dates do not switch phases on or off (the switches above still do).
+const TIMELINE = [
+  ['systemTest', '2026-10-20', '2026-10-31'], ['submission', '2026-11-01', '2026-11-20'],
+  ['pitching', '2026-12-17', '2026-12-19'], ['mailing', '2026-12-20', '2026-12-20'], ['resubCampus', '2026-12-21', '2026-12-25'],
+  ['resubCentre', '2026-12-27', '2026-12-31'], ['council', '2027-01-04', '2027-01-21'],
+];
+const ISO_DAY = /^\d{4}-\d{2}-\d{2}$/;
+function phaseDates_() {
+  return memo_('phaseDates', function () {
+    const r = settings_().filter(function (x) { return x['Key'] === 'Phase Dates'; })[0];
+    const saved = r ? parse_(String(r['Value'])) || {} : {};
+    const out = {};
+    TIMELINE.forEach(function (t) {
+      const s = saved[t[0]] || {};
+      out[t[0]] = { from: ISO_DAY.test(s.from) ? s.from : t[1], to: ISO_DAY.test(s.to) ? s.to : t[2] };
+    });
+    return out;
+  });
+}
+
+// Timeline dates in the admin console: Admins and Chiefs.
+function savePhaseDates_(req, user) {
+  need_(user, 'Chief');
+  const v = req.dates || {};
+  const out = {};
+  TIMELINE.forEach(function (t) {
+    const d = v[t[0]] || phaseDates_()[t[0]];
+    if (!ISO_DAY.test(d.from) || !ISO_DAY.test(d.to)) throw new Error('Every step needs a start and an end date');
+    if (d.to < d.from) throw new Error('An end date is before its start date');
+    out[t[0]] = { from: d.from, to: d.to };
+  });
+  setSetting_('Phase Dates', JSON.stringify(out), user);
+  return { dates: out };
+}
+
 /* ---------- admin ---------- */
 
 // Admin console. The edit log goes to Admins only. Each part is cached until the next write.
@@ -727,7 +784,7 @@ function admin_(req, user) {
   if (user.role === DATA_TEAM) return logs({ logOnly: true });
   need_(user, 'Chief');
   // removed: every organization removed on the pitching site; restored: those put back on our list.
-  const out = cached_('admin', function () { return { removed: removed_(submissionLog_()), restored: restored_(), allocated: allocated_(), phases: phases_() }; });
+  const out = cached_('admin', function () { return { removed: removed_(submissionLog_()), restored: restored_(), allocated: allocated_(), phases: phases_(), dates: phaseDates_(), textSize: textSize_() }; });
   out.users = users_();
   out.usersVer = usersVer_();
   out.owner = owner_();
@@ -814,7 +871,7 @@ function exportData_(req, user) {
       const r = pre[p['Project Ref']] || {};
       return { 'Project Ref': p['Project Ref'], 'Estimated Approved Budget': num_(r['Approved Budget']), 'Docx Approved': r['Docx Approved'] || '',
         'Docx Feedback File': links(r['Docx Feedback File']), 'PDF Approved': r['PDF Approved'] || '', 'PDF Feedback File': links(r['PDF Feedback File']),
-        'Note': String(r['Feedback Note'] || ''), 'Updated At': iso_(r['Updated At']), 'Updated By': r['Updated By'] || '' };
+        'Note': String(r['Feedback Note'] || ''), 'Documents': links(r['Documents']), 'Updated At': iso_(r['Updated At']), 'Updated By': r['Updated By'] || '' };
     });
   }
   if (want.pitching) {
@@ -1287,7 +1344,7 @@ function owner_() { return memo_('owner', function () { return String(Session.ge
 function preOut_(r) {
   return {
     approvedBudget: num_(r['Approved Budget']), docxOk: r['Docx Approved'] || '', docxFile: files_(r['Docx Feedback File'])[0] || null,
-    pdfOk: r['PDF Approved'] || '', pdfFile: files_(r['PDF Feedback File'])[0] || null, note: String(r['Feedback Note'] || ''),
+    pdfOk: r['PDF Approved'] || '', pdfFile: files_(r['PDF Feedback File'])[0] || null, note: String(r['Feedback Note'] || ''), docs: files_(r['Documents']),
     at: iso_(r['Updated At']), by: r['Updated By'] || '', finished: finished_(r),
   };
 }
@@ -1311,7 +1368,7 @@ function memo_(k, fn) { return Object.prototype.hasOwnProperty.call(MEMO_, k) ? 
 const PIECE = 90000;
 function cached_(key, fn) {
   const c = CacheService.getScriptCache();
-  const k = key + '@' + memo_('ver', function () { return c.get('ver') || '0'; }) + '@' + stamp_('subs') + '@' + stamp_('schedule');
+  const k = key + '@' + CODE_VERSION + '@' + memo_('ver', function () { return c.get('ver') || '0'; }) + '@' + stamp_('subs') + '@' + stamp_('schedule');
   const hit = cacheGet_(c, k);
   if (hit !== undefined) return hit;
   const v = fn();
@@ -1532,6 +1589,130 @@ function prop_(k) {
   return v;
 }
 function json_(o) { return ContentService.createTextOutput(JSON.stringify(o)).setMimeType(ContentService.MimeType.JSON); }
+
+/* ---------- marking up files (v2.12) ---------- */
+// The page's editor (public/js/views/markup.js) works on one file of one organization: a file its submission links
+// (project PDF / .docx, Budget proposal form) or one in its folder (feedback, Noted documents, Correct Excel file).
+// PDF: the bytes come here as base64 and the marks are drawn in the browser; the marks are kept as a draft, a JSON
+// file "markup draft <file id>.json" in the organization's folder. .docx / .xlsx: a Google Docs / Sheets copy in the
+// organization's folder (one per original, found again by its appProperties markupSrc), shared only with the staff
+// member who opens it; markupExport turns it back into .docx / .xlsx. The result is uploaded as any feedback file.
+const GOOGLE_TYPES = { docx: 'application/vnd.google-apps.document', xlsx: 'application/vnd.google-apps.spreadsheet' };
+
+// The file, checked to belong to the organization: { file, kind } (kind pdf / docx / xlsx).
+function markupFile_(org, id) {
+  id = String(id || '');
+  if (!/^[\w-]{10,}$/.test(id)) throw new Error('Bad file id');
+  const s = subs_();
+  const links = [];
+  s.orgs.forEach(function (o) { if (o['Org Ref'] === org) links.push(o['Budget Proposal Form (.xlsx)']); });
+  s.projects.forEach(function (p) { if (p['Org Ref'] === org) links.push(p['Proposal .docx'], p['Proposal .pdf']); });
+  const linked = links.some(function (u) { return (String(u || '').match(/\/d\/([\w-]+)|[?&]id=([\w-]+)/) || []).slice(1).indexOf(id) >= 0; });
+  if (!linked) {
+    try { file_({ id: id }, org); } catch (e) { throw new Error('This file does not belong to this organization'); }
+  }
+  const f = DriveApp.getFileById(id);
+  const kind = ['pdf', 'docx', 'xlsx'].filter(function (k) { return KINDS[k] === f.getMimeType(); })[0];
+  if (!kind) throw new Error('Only PDF, .docx or .xlsx files can be edited here');
+  return { file: f, kind: kind };
+}
+
+// Drive API v3 with this script's token; the parsed answer (export: the raw response).
+function driveApi_(method, path, body, raw) {
+  const res = UrlFetchApp.fetch('https://www.googleapis.com/drive/v3/' + path, {
+    method: method, contentType: 'application/json; charset=UTF-8', muteHttpExceptions: true,
+    headers: { Authorization: 'Bearer ' + ScriptApp.getOAuthToken() }, payload: body ? JSON.stringify(body) : undefined,
+  });
+  if (res.getResponseCode() >= 300) throw new Error('Google Drive refused (' + res.getResponseCode() + '): ' + res.getContentText().slice(0, 200));
+  return raw ? res : JSON.parse(res.getContentText() || '{}');
+}
+
+const draftName_ = function (id) { return 'markup draft ' + id + '.json'; };
+function draftOf_(folder, id) {
+  const it = folder.getFilesByName(draftName_(id));
+  if (!it.hasNext()) return { file: null, draft: null };
+  const file = it.next();
+  try { const d = JSON.parse(file.getBlob().getDataAsString()); return { file: file, draft: { marks: d.marks || [], at: d.at || '', by: d.by || '' } }; } catch (e) { return { file: file, draft: null }; }
+}
+
+// The file's name, type and size; with bytes: true also its bytes (base64) and, for a PDF, the saved draft.
+function markupOpen_(req, user) {
+  need_(user, 'Staff');
+  const org = org__(req.org).org;
+  const m = markupFile_(org, req.id);
+  const size = m.file.getSize();
+  const out = { name: m.file.getName(), kind: m.kind, size: size };
+  if (req.bytes) {
+    if (size > MAX_BYTES) throw new Error('This file is over 12 MB, so it cannot be edited here. Open it in Drive instead.');
+    out.data = Utilities.base64Encode(m.file.getBlob().getBytes());
+    if (m.kind === 'pdf') { out.draft = draftOf_(child_(DriveApp.getFolderById(DRIVE_FOLDER_ID), org), req.id).draft; out.textSize = textSize_(); }
+  }
+  return out;
+}
+
+// A PDF's marks as a draft. base = the draft's saved time this page loaded ('' = none): someone else's newer draft is
+// not overwritten (CONFLICT, as other saves).
+function saveMarkupDraft_(req, user) {
+  need_(user, 'Staff');
+  const org = org__(req.org).org;
+  open_(org);
+  if (markupFile_(org, req.id).kind !== 'pdf') throw new Error('Drafts are for PDF files');
+  if (!Array.isArray(req.marks)) throw new Error('Bad marks');
+  const at = new Date().toISOString();
+  const text = JSON.stringify({ marks: req.marks, at: at, by: user.email });
+  if (text.length > 5e6) throw new Error('The draft is too large');
+  const folder = child_(DriveApp.getFolderById(DRIVE_FOLDER_ID), org);
+  const lock = LockService.getScriptLock();
+  lock.waitLock(20000);
+  try {
+    const cur = draftOf_(folder, req.id);
+    if (cur.draft && cur.draft.at !== String(req.base || '')) throw new Error('CONFLICT:' + JSON.stringify({ by: cur.draft.by, at: cur.draft.at }));
+    if (cur.file) cur.file.setContent(text); else folder.createFile(draftName_(req.id), text, 'application/json');
+  } finally { lock.releaseLock(); }
+  return { draft: { at: at, by: user.email } };
+}
+
+// The Google copy of a .docx / .xlsx (made the first time), shared as editor with the signed-in Gmail only.
+function markupCopy_(req, user) {
+  need_(user, 'Staff');
+  const org = org__(req.org).org;
+  open_(org);
+  const m = markupFile_(org, req.id);
+  if (!GOOGLE_TYPES[m.kind]) throw new Error('Only .docx or .xlsx files open in Google Docs / Sheets');
+  const folder = child_(DriveApp.getFolderById(DRIVE_FOLDER_ID), org);
+  const q = "'" + folder.getId() + "' in parents and trashed = false and appProperties has { key='markupSrc' and value='" + req.id + "' }";
+  let copy = (driveApi_('get', 'files?fields=files(id)&q=' + encodeURIComponent(q)).files || [])[0];
+  if (!copy) {
+    copy = driveApi_('post', 'files/' + encodeURIComponent(req.id) + '/copy?fields=id', {
+      name: m.file.getName().replace(/\.(docx|xlsx)$/i, '') + ' (Google copy)', parents: [folder.getId()],
+      mimeType: GOOGLE_TYPES[m.kind], appProperties: { markupSrc: req.id },
+    });
+  }
+  if (!req.check) driveApi_('post', 'files/' + copy.id + '/permissions?sendNotificationEmail=false&fields=id', { role: 'writer', type: 'user', emailAddress: user.login });
+  return { copy: copy.id, name: m.file.getName(), kind: m.kind, edited: lastEdit_(copy.id),
+    url: (m.kind === 'xlsx' ? 'https://docs.google.com/spreadsheets/d/' : 'https://docs.google.com/document/d/') + copy.id + '/edit' };
+}
+
+// A Google copy's last edit: { at, by (email) }.
+function lastEdit_(id) {
+  const f = driveApi_('get', 'files/' + id + '?fields=modifiedTime,lastModifyingUser(emailAddress,displayName)');
+  return { at: f.modifiedTime || '', by: (f.lastModifyingUser && (f.lastModifyingUser.emailAddress || f.lastModifyingUser.displayName)) || '' };
+}
+
+// The Google copy back as .docx / .xlsx (base64), with the original's id (the page puts the Excel locks back from it).
+function markupExport_(req, user) {
+  need_(user, 'Staff');
+  const org = org__(req.org).org;
+  const id = String(req.copy || '');
+  if (!/^[\w-]{10,}$/.test(id)) throw new Error('Bad file id');
+  const meta = driveApi_('get', 'files/' + id + '?fields=mimeType,parents,appProperties,trashed');
+  const src = (meta.appProperties || {}).markupSrc;
+  const kind = Object.keys(GOOGLE_TYPES).filter(function (k) { return GOOGLE_TYPES[k] === meta.mimeType; })[0];
+  if (!src || !kind || meta.trashed || (meta.parents || []).indexOf(child_(DriveApp.getFolderById(DRIVE_FOLDER_ID), org).getId()) < 0) throw new Error('This is not a Google copy of this organization');
+  const bytes = driveApi_('get', 'files/' + id + '/export?mimeType=' + encodeURIComponent(KINDS[kind]), null, true).getBlob().getBytes();
+  if (bytes.length > MAX_BYTES) throw new Error('The edited file is over 12 MB');
+  return { data: Utilities.base64Encode(bytes), src: src, kind: kind };
+}
 
 /* ---------- auth ---------- */
 

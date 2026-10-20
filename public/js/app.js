@@ -36,6 +36,7 @@ const VIEWS = {
   dashboard: () => import('./views/dashboard.js'),
   control: () => import('./views/control.js'),
   mine: () => import('./views/mine.js'),
+  markup: () => import('./views/markup.js'),
 };
 
 const ctx = {
@@ -57,7 +58,9 @@ let current = null; // the mounted view module (may export isDirty)
 let lastHash = location.hash;
 
 function parse(hash) {
-  const [, a = '', b = '', c = ''] = hash.replace(/^#/, '').split('/');
+  const [path, query = ''] = hash.split('?');
+  const [, a = '', b = '', c = ''] = path.replace(/^#/, '').split('/');
+  if (a === 'markup') return { view: 'markup', q: new URLSearchParams(query) };
   if (a === 'org' && b) return { view: 'org', ref: decodeURIComponent(b), tab: c || 'prepitch' };
   if (a === 'admin') return { view: 'admin' };
   if (a === 'dashboard') return { view: 'dashboard' };

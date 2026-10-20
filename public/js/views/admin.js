@@ -10,6 +10,7 @@ import { $, esc, icon, toast, dateTimeFmt, moneyBox, parseMoney, liveMoney, erro
 import { call, cached, forget, peek, remember } from '../api.js';
 import { ORGS } from '../masterdata.js';
 import { PENDING } from '../project.js';
+import { STEPS } from '../timeline.js';
 
 const ROLES = ['Admin', 'Chief', 'Staff', 'Data team staff'];
 const PHASE_LIST = [['prepitch', () => tr('Pre-pitch', 'ก่อนการนำเสนอ')], ['pitching', () => tr('Pitching', 'การนำเสนอ')], ['resubmit', () => tr('Re-submission', 'การส่งแก้ไข')]];
@@ -21,12 +22,14 @@ let st = null; // { users (working copy), saved (JSON), phases (draft), phasesSa
 
 const usersDirty = () => !!st?.users && JSON.stringify(st.users) !== st.saved;
 const phasesDirty = () => !!st?.phases && JSON.stringify(st.phases) !== st.phasesSaved;
-export const isDirty = () => usersDirty() || phasesDirty();
+const datesDirty = () => !!st?.dates && JSON.stringify(st.dates) !== st.datesSaved;
+export const isDirty = () => usersDirty() || phasesDirty() || datesDirty();
 // Unsaved-changes window: Save and leave saves users and phases.
 export const canSaveAll = () => isDirty();
 export async function saveAll() {
   if (usersDirty()) await st.save.users();
   if (phasesDirty()) await st.save.phases();
+  if (datesDirty()) await st.save.dates();
 }
 
 // This device's last copy shows at once; the fresh answer repaints unless someone is mid-edit.
@@ -52,6 +55,9 @@ function draw(page, ctx, d) {
   const phases = { prepitch: true, pitching: true, resubmit: true, ...(d.phases || {}) };
   st = { users: list, saved: JSON.stringify(list), savedAdmins: new Set(list.filter((u) => u.role === 'Admin').map((u) => u.email)),
     phases, phasesSaved: JSON.stringify(phases), save: {} };
+  // Timeline dates (v2.12): a draft until Save, as the phase switches.
+  st.dates = d.dates ? structuredClone(d.dates) : null;
+  st.datesSaved = JSON.stringify(st.dates);
   const name = (ref) => ORGS.find((o) => o.code === ref)?.en || '';
 
   const admin = ctx.me.role === 'Admin';
@@ -72,6 +78,13 @@ function draw(page, ctx, d) {
       <div class="table-actions"><span class="grow muted small" id="phasesNote"></span><button class="btn primary" id="savePhases" disabled>${tr('Save', 'บันทึก')}</button></div></div>
     <p class="foot">${tr('A phase that is off shows "Pending Phase" on every organization page, and nothing in it can be changed. Changes apply only when you press Save.', 'ช่วงที่ปิดอยู่จะแสดง "รอเปิดช่วง" ในทุกหน้าองค์กร และแก้ไขข้อมูลในช่วงนั้นไม่ได้ การเปลี่ยนแปลงจะมีผลเมื่อกดบันทึกเท่านั้น')}</p>`;
 
+  const datesPart = st.dates ? `${title('clock', tr('Timeline dates', 'วันที่ในไทม์ไลน์'))}
+    <div class="group" id="dates">${STEPS.filter(([k]) => st.dates[k]).map(([k, label]) => `<div class="row date-row"><span class="grow">${esc(label())}</span>
+      <input type="date" data-date="${k}" data-end="from" value="${esc(st.dates[k].from)}" aria-label="${esc(tr('{step}: start', '{step}: เริ่ม', { step: label() }))}">
+      <span class="muted">–</span><input type="date" data-date="${k}" data-end="to" value="${esc(st.dates[k].to)}" aria-label="${esc(tr('{step}: end', '{step}: สิ้นสุด', { step: label() }))}"></div>`).join('')}
+      <div class="table-actions"><span class="grow muted small" id="datesNote"></span><button class="btn primary" id="saveDates" disabled>${tr('Save', 'บันทึก')}</button></div></div>
+    <p class="foot">${tr('The timeline on the Organizations tab is drawn from these dates (first filled from the "TUSU:" calendar events). They do not switch phases on or off. Admins and Chiefs can change them.', 'ไทม์ไลน์ในหน้าองค์กรวาดจากวันที่เหล่านี้ (ตั้งต้นจากกิจกรรม "TUSU:" ในปฏิทิน) วันที่ไม่ได้เปิดหรือปิดช่วง ผู้ดูแลและหัวหน้าแก้ไขได้')}</p>` : '';
+
   const exportPart = `${title('download', tr('Export data', 'ส่งออกข้อมูล'))}
     <div class="group" id="export">
       <div class="row"><span class="grow">${tr('Organizations and projects', 'องค์กรและโครงการ')}</span><span class="muted small">${tr('Always included', 'รวมเสมอ')}</span></div>
@@ -82,6 +95,13 @@ function draw(page, ctx, d) {
       <div class="row"><span class="grow">${tr('Data for mailing', 'ข้อมูลสำหรับส่งอีเมล')}<small class="muted block">${tr('Excel: Organizations (emails, budgets, category and campus benchmarks, shares) and Projects (contacts, dates, budgets, Committee feedback, links)', 'Excel: ชีตองค์กร (อีเมล งบประมาณ ค่าเฉลี่ยหมวดหมู่และศูนย์ สัดส่วน) และชีตโครงการ (ผู้ติดต่อ วันที่ งบประมาณ ความเห็นคณะกรรมการ ลิงก์)')}</small></span>
         <button class="btn" id="saveMail">${icon('download', 16)}${tr('Export data for mailing', 'ส่งออกข้อมูลสำหรับส่งอีเมล')}</button></div></div>
     <p class="foot">${tr('Admins only. Excel: one sheet for organizations, one for projects, one per included phase and one for emails. CSV: one row per project with every included column, plus a second file of emails. Organizations hidden from the list are left out. The file holds phone numbers and emails: every export is logged.', 'เฉพาะผู้ดูแล Excel: ชีตองค์กร ชีตโครงการ หนึ่งชีตต่อช่วงที่เลือก และชีตอีเมล CSV: หนึ่งแถวต่อโครงการ พร้อมทุกคอลัมน์ที่เลือก และไฟล์อีเมลอีกหนึ่งไฟล์ ไม่รวมองค์กรที่ซ่อนจากรายชื่อ ไฟล์มีเบอร์โทรและอีเมล ทุกการส่งออกจะถูกบันทึก')}</p>`;
+
+  // PDF editor (v2.12): the default size of new text boxes; each person can still change it in the editor.
+  const sizePart = `${title('pen', tr('PDF editor', 'เครื่องมือแก้ไข PDF'))}
+    <div class="group alloc"><span class="grow">${tr('Default text box size', 'ขนาดกล่องข้อความเริ่มต้น')}</span>
+      <input type="number" id="textSize" min="6" max="72" step="1" value="${esc(d.textSize ?? 11)}" aria-label="${esc(tr('Default text box size (pt)', 'ขนาดกล่องข้อความเริ่มต้น (pt)'))}"><span class="muted">pt</span>
+      <button class="btn primary" id="saveTextSize">${tr('Save', 'บันทึก')}</button></div>
+    <p class="foot">${tr('New text boxes in the PDF editor start at this size (6–72 pt). Staff can still change the size of any text box. Admins and Chiefs can change it.', 'กล่องข้อความใหม่ในเครื่องมือแก้ไข PDF จะเริ่มที่ขนาดนี้ (6–72 pt) เจ้าหน้าที่ยังปรับขนาดแต่ละกล่องได้ ผู้ดูแลและหัวหน้าแก้ไขได้')}</p>`;
 
   const allocPart = `${title('chart', tr('Allocated budget', 'กรอบงบประมาณ'))}
     <div class="group alloc"><span class="muted">฿</span><input type="text" inputmode="decimal" id="alloc" value="${esc(moneyBox(d.allocated))}" placeholder="0.00" aria-label="${esc(tr('Allocated budget', 'กรอบงบประมาณ'))}">
@@ -98,7 +118,7 @@ function draw(page, ctx, d) {
 
   page.innerHTML = `<h1 class="grad">${tr('Admin console', 'คอนโซลผู้ดูแล')}</h1>
     <div class="admin-top">${d.sheetUrl ? `<a class="btn" href="${esc(d.sheetUrl)}" target="_blank" rel="noopener">${icon('ext', 16)}${tr('Open Google Sheet', 'เปิด Google Sheet')}</a>` : ''}</div>
-    ${admin ? exportPart : ''}${usersPart}${phasesPart}${allocPart}${removedPart}
+    ${admin ? exportPart : ''}${usersPart}${phasesPart}${datesPart}${sizePart}${allocPart}${removedPart}
     ${d.log ? logSection() : ''}`;
 
   // Projects in charge: the project counts of the user's organizations (boot data), e.g. "9 (3 orgs)".
@@ -160,6 +180,53 @@ function draw(page, ctx, d) {
     }
     phaseState();
   };
+
+  $('#saveTextSize', page).onclick = async (e) => {
+    e.target.disabled = true;
+    try {
+      const out = await saving(() => call('saveTextSize', { size: $('#textSize', page).value }));
+      $('#textSize', page).value = out.textSize;
+      d.textSize = out.textSize;
+      remember('admin', {}, d); forget('admin');
+      toast(tr('Text size saved', 'บันทึกขนาดตัวอักษรแล้ว'));
+    } catch (err) {
+      await errorBox(err.message);
+    }
+    e.target.disabled = false;
+  };
+
+  // Timeline dates: Save stays off until something changes.
+  if (st.dates) {
+    const datesState = () => {
+      $('#saveDates', page).disabled = !datesDirty();
+      $('#datesNote', page).textContent = datesDirty() ? tr('Not saved yet', 'ยังไม่ได้บันทึก') : '';
+    };
+    $('#dates', page).onchange = (e) => {
+      const k = e.target.dataset.date;
+      if (!k) return;
+      st.dates[k][e.target.dataset.end] = e.target.value;
+      datesState();
+    };
+    st.save.dates = async () => {
+      const out = await saving(() => call('savePhaseDates', { dates: st.dates }));
+      st.dates = structuredClone(out.dates);
+      st.datesSaved = JSON.stringify(st.dates);
+      if (ctx.boot) { ctx.boot.dates = out.dates; remember('boot', {}, ctx.boot); }
+      d.dates = out.dates;
+      remember('admin', {}, d); forget('admin');
+      forget('boot');
+    };
+    $('#saveDates', page).onclick = async (e) => {
+      e.target.disabled = true;
+      try {
+        await st.save.dates();
+        toast(tr('Dates saved', 'บันทึกวันที่แล้ว'));
+      } catch (err) {
+        await errorBox(err.message);
+      }
+      datesState();
+    };
+  }
 
   // Export (Admins only): download on Save only, after a reminder that the file holds personal data.
   if (admin) $('#saveExport', page).onclick = async (e) => {

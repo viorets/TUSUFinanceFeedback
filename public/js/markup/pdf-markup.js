@@ -31,12 +31,14 @@ function loadLibs() {
 
 // Opens the editor in `root`. bytes: the PDF (ArrayBuffer); name: file name; draft: saved marks or null.
 // t(en, th) translates labels. Resolves an editor handle { marks(), isDirty(), exportPdf() }.
-export async function openPdfEditor(root, { bytes, name, draft = null, t = (en) => en, onDraft = () => {} }) {
+// textSize: the default size of new text boxes, in pt (admin console; TEXT.size when not given).
+export async function openPdfEditor(root, { bytes, name, draft = null, t = (en) => en, onDraft = () => {}, textSize = TEXT.size }) {
   if (bytes.byteLength > MAX_BYTES) throw new Error(t('This file is over 12 MB, so it cannot be marked. Open it in Drive instead.', 'ไฟล์ใหญ่เกิน 12 MB จึงทำเครื่องหมายไม่ได้ กรุณาเปิดใน Drive'));
   root.innerHTML = `<div class="mk"><div class="mk-bar" role="toolbar">
       <div class="mk-tools">${TOOLS.map(([k, en, th]) => `<button type="button" data-tool="${k}" aria-pressed="false">${t(en, th)}</button>`).join('')}</div>
       <label class="mk-ctl">${t('Width', 'ความหนา')} <input type="range" id="mk-w" min="1" max="12" step="0.5" value="2"><output id="mk-wv">2</output></label>
       <label class="mk-ctl">${t('Colour', 'สี')} <input type="color" id="mk-c" value="${TEXT.color}"></label>
+      <label class="mk-ctl">${t('Text size', 'ขนาดตัวอักษร')} <input type="number" id="mk-s" min="6" max="72" step="1" value="${textSize}"> pt</label>
       <span class="mk-grow"></span>
       <button type="button" id="mk-undo" title="Ctrl+Z">${t('Undo', 'เลิกทำ')}</button><button type="button" id="mk-redo" title="Ctrl+Y">${t('Redo', 'ทำซ้ำ')}</button>
       <button type="button" id="mk-del" disabled>${t('Delete', 'ลบ')}</button>
@@ -46,7 +48,7 @@ export async function openPdfEditor(root, { bytes, name, draft = null, t = (en) 
   const pagesEl = root.querySelector('#mk-pages');
   pagesEl.innerHTML = '';
 
-  const st = { tool: 'select', width: 2, color: TEXT.color, marks: draft ? structuredClone(draft) : [], undo: [], redo: [], sel: null, dirty: false };
+  const st = { tool: 'select', width: 2, color: TEXT.color, size: textSize, marks: draft ? structuredClone(draft) : [], undo: [], redo: [], sel: null, dirty: false };
   const pages = []; // { el, svg, boxes, vp, scale, w, h }
   const avail = Math.max(320, pagesEl.clientWidth - 32);
 
@@ -111,6 +113,8 @@ export async function openPdfEditor(root, { bytes, name, draft = null, t = (en) 
       });
     });
     root.querySelector('#mk-del').disabled = !st.sel;
+    const selText = st.marks.find((x) => x.id === st.sel && x.type === 'text');
+    if (selText) root.querySelector('#mk-s').value = selText.size; // the size box shows the picked text box's size
     root.querySelector('#mk-undo').disabled = !st.undo.length;
     root.querySelector('#mk-redo').disabled = !st.redo.length;
   }
@@ -125,6 +129,13 @@ export async function openPdfEditor(root, { bytes, name, draft = null, t = (en) 
   root.querySelector('.mk-tools').onclick = (e) => { const b = e.target.closest('[data-tool]'); if (b) setTool(b.dataset.tool); };
   const wIn = root.querySelector('#mk-w');
   wIn.oninput = () => { st.width = +wIn.value; root.querySelector('#mk-wv').textContent = wIn.value; const m = st.marks.find((x) => x.id === st.sel); if (m && m.width) { m.width = st.width; changed(); } };
+  // Text size (pt): the picked text box, and every new one after it.
+  root.querySelector('#mk-s').onchange = (e) => {
+    const v = Math.min(72, Math.max(6, Math.round(+e.target.value) || textSize));
+    e.target.value = v; st.size = v;
+    const m = st.marks.find((x) => x.id === st.sel && x.type === 'text');
+    if (m && m.size !== v) { snapshot(); m.size = v; changed(); }
+  };
   root.querySelector('#mk-c').oninput = (e) => { st.color = e.target.value; const m = st.marks.find((x) => x.id === st.sel); if (m && m.type !== 'highlight') { m.color = st.color; changed(); } };
   const undo = () => { if (!st.undo.length) return; st.redo.push(JSON.stringify(st.marks)); st.marks = JSON.parse(st.undo.pop()); st.sel = null; changed(); };
   const redo = () => { if (!st.redo.length) return; st.undo.push(JSON.stringify(st.marks)); st.marks = JSON.parse(st.redo.pop()); st.sel = null; changed(); };
@@ -159,7 +170,7 @@ export async function openPdfEditor(root, { bytes, name, draft = null, t = (en) 
       const hit = e.target.closest('.mk-box');
       if (hit) { editBox(p, hit.dataset.id); e.preventDefault(); return; }
       snapshot();
-      const m = { id: uid(), page: p.el.dataset.page * 1, type: 'text', x: pt[0], y: pt[1] - TEXT.size * 0.7, text: '', color: st.color, size: TEXT.size };
+      const m = { id: uid(), page: p.el.dataset.page * 1, type: 'text', x: pt[0], y: pt[1] - st.size * 0.7, text: '', color: st.color, size: st.size };
       st.marks.push(m); st.sel = m.id; paint(); editBox(p, m.id, true); e.preventDefault();
       return;
     }

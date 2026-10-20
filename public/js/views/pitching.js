@@ -4,9 +4,13 @@
 // required question unanswered (project.js). Every save and upload runs in a progress window (busy); a save that
 // can't reach the server is kept on this device and shows "Pending" until it is sent (api.save).
 import { tr } from '../i18n.js';
-import { $, esc, icon, toast, moneyBox, parseMoney, liveMoney, dateTimeFmt, busy, errorBox } from '../ui.js';
+import { $, esc, icon, toast, moneyBox, parseMoney, liveMoney, dateTimeFmt, busy, errorBox, moneyOr } from '../ui.js';
 import { save as send, upload, forget } from '../api.js';
-import { cardTop, fileChip, progress, slotLine, star, capNote } from '../project.js';
+import { cardTop, dlBtn, fileChip, progress, slotLine, star, capNote, editBtn, onMarked } from '../project.js';
+
+// "Show Pre-pitch data" (v2.12): each card also shows its Pre-pitch notes, read only. Kept on this device.
+let showPre = false;
+try { showPre = localStorage.getItem('showPrePitch') === '1'; } catch { /* private mode */ }
 
 let st = null; // { el, d, can, form: { ref: working copy }, xl: Correct Excel working copy (file or null) }
 
@@ -22,11 +26,30 @@ export async function saveAll() { for (const p of unsaved()) await (p.ref === 'e
 
 export function render(el, d, ctx) {
   st = { el, d, ctx, can: ctx.canEdit, form: Object.fromEntries(d.projects.map((p) => [p.ref, pick(d.pitch[p.ref])])), xl: d.orgPitch?.file || null };
-  el.innerHTML = `<div data-progress></div>${xlBox()}${d.projects.map(card).join('')}`;
+  el.innerHTML = `<div data-progress></div><label class="check show-pre"><input type="checkbox" data-show-pre ${showPre ? 'checked' : ''}>${tr('Show Pre-pitch data', 'แสดงข้อมูลก่อนการนำเสนอ')}</label>
+    ${xlBox()}${d.projects.map(card).join('')}`;
   progress(el, d, 'pitching');
   el.oninput = onInput;
   el.onchange = onChange;
   el.onclick = onClick;
+  onMarked(marked);
+}
+
+// A file saved by the editor tab (v2.12): the Correct Excel file is replaced, a Noted document is added; Save keeps it.
+function marked({ org, slot, file }) {
+  if (!st?.el.isConnected || !st.can || org !== orgRef()) return false;
+  if (slot === 'xl') {
+    st.xl = file;
+    $('[data-xl-slot]', st.el).innerHTML = xlSlot();
+  } else {
+    const ref = String(slot).match(/^noted:(.+)$/)?.[1];
+    const sec = ref && st.form[ref] && st.el.querySelector(`.pcard[data-ref="${CSS.escape(ref)}"]`);
+    if (!sec) return false;
+    st.form[ref].noted.push(file);
+    $('[data-noted]', sec).innerHTML = noted(ref);
+  }
+  toast(tr('Edited file attached — press Save to keep it', 'แนบไฟล์ที่แก้ไขแล้ว — กดบันทึกเพื่อเก็บ'));
+  return true;
 }
 
 const orgRef = () => (st.d.projects[0]?.ref || '').replace(/-P\d+$/, '');
@@ -35,12 +58,15 @@ const orgRef = () => (st.d.projects[0]?.ref || '').replace(/-P\d+$/, '');
 function xlBox() {
   return `<section class="group xl-box"><div class="fb"><h4>${tr('Correct Excel file', 'ไฟล์ Excel ฉบับแก้ไข')}</h4>
     <p class="muted small">${tr('One per organization, for all its projects.', 'หนึ่งไฟล์ต่อองค์กร ใช้กับทุกโครงการ')}</p>
+    <div class="dl-row src-row"><span class="muted small">${tr('Submitted form', 'แบบฟอร์มที่ส่งมา')}</span>${dlBtn(st.d.org?.budgetForm || '', tr('Budget proposal form', 'แบบฟอร์มงบประมาณ'))}
+      ${st.can ? editBtn(st.d.org?.budgetForm || '', { org: orgRef(), slot: 'xl', kind: 'xlsx' }) : ''}</div>
+    <div data-pre-form>${preForm()}</div>
     <div data-xl-slot>${xlSlot()}</div>
     <div class="actions"><span class="muted small" data-xl-saved>${savedLine(st.d.orgPitch)}</span>${st.can ? `<button class="btn primary" data-save-xl>${tr('Save', 'บันทึก')}</button>` : ''}</div></div></section>`;
 }
 function xlSlot() {
   const f = st.xl;
-  return `<div class="upl">${fileChip(f)}${!f && !st.can ? '<span class="muted">—</span>' : ''}
+  return `<div class="upl">${fileChip(f)}${st.can ? editBtn(f, { org: orgRef(), slot: 'xl', plain: true }) : ''}${!f && !st.can ? '<span class="muted">—</span>' : ''}
     ${st.can ? `<label class="btn">${icon('upload', 16)}${f ? tr('Replace', 'เปลี่ยนไฟล์') : tr('Upload Excel', 'อัปโหลด Excel')}<input type="file" hidden accept=".xlsx,.xls" data-xl></label>` : ''}
     ${f && st.can ? `<button type="button" class="btn plain" data-xl-clear>${tr('Remove', 'นำออก')}</button>` : ''}</div>${st.can ? capNote('.xlsx / .xls') : ''}`;
 }
@@ -48,8 +74,10 @@ function xlSlot() {
 function card(p) {
   const f = st.form[p.ref];
   const dis = st.can ? '' : 'disabled';
+  const files = `${dlBtn(p.pdf, tr('Project PDF', 'โครงการ PDF'))}${st.can ? editBtn(p.pdf, { org: orgRef(), slot: `noted:${p.ref}`, kind: 'pdf' }) : ''}${dlBtn(p.docx, tr('Project .docx', 'โครงการ .docx'))}${st.can ? editBtn(p.docx, { org: orgRef(), slot: `noted:${p.ref}`, kind: 'docx' }) : ''}`;
   return `<section class="group pcard" data-ref="${esc(p.ref)}">
-    ${cardTop(p, [[tr('Total project budget', 'งบประมาณโครงการ'), p.budget]], '', slotLine(st.d.slots?.[p.ref]))}
+    ${cardTop(p, [[tr('Total project budget', 'งบประมาณโครงการ'), p.budget]], files, slotLine(st.d.slots?.[p.ref]))}
+    <div data-pre>${prePeek(p.ref)}</div>
     <div class="fb">
       <div class="field"><label>${tr('Summary', 'สรุป')}${star(st.d, 'pitch.summary')}</label><textarea data-k="summary" maxlength="20000" ${dis}>${esc(f.summary)}</textarea></div>
       <div class="field"><label>${tr('Final approved budget', 'งบประมาณอนุมัติขั้นสุดท้าย')}${star(st.d, 'pitch.finalBudget')}</label><input type="text" inputmode="decimal" data-k="finalBudget" value="${esc(moneyBox(f.finalBudget))}" placeholder="0.00" ${dis}></div>
@@ -58,12 +86,31 @@ function card(p) {
     </div></section>`;
 }
 
+// Pre-pitch notes, read only (shown with "Show Pre-pitch data").
+const yesNo = (v) => (v === 'Yes' ? tr('Yes', 'ใช่') : v === 'No' ? tr('No', 'ไม่') : '—');
+function prePeek(ref) {
+  if (!showPre) return '';
+  const x = st.d.pre?.[ref] || {};
+  const row = (k, v) => `<dt>${esc(k)}</dt><dd>${v}</dd>`;
+  return `<div class="fb pre-peek"><h4>${tr('Pre-pitch data', 'ข้อมูลก่อนการนำเสนอ')}</h4><dl class="kv">
+    ${row(tr('Estimated Approved budget', 'งบประมาณที่คาดว่าจะได้รับอนุมัติ'), esc(moneyOr(x.approvedBudget)))}
+    ${row(tr('Approved project .docx?', 'อนุมัติไฟล์โครงการ .docx?'), `${esc(yesNo(x.docxOk))} ${fileChip(x.docxFile)}`)}
+    ${row(tr('Approved project PDF?', 'อนุมัติไฟล์โครงการ PDF?'), `${esc(yesNo(x.pdfOk))} ${fileChip(x.pdfFile)}`)}
+    ${row(tr('Note', 'บันทึก'), x.note ? esc(x.note).replace(/\n/g, '<br>') : '—')}
+    ${row(tr('Documents', 'เอกสาร'), (x.docs || []).map(fileChip).join(' ') || '—')}</dl></div>`;
+}
+function preForm() {
+  if (!showPre) return '';
+  const x = st.d.orgPre || {};
+  return `<dl class="kv pre-peek"><dt>${tr('Feedback on the budget form', 'ข้อเสนอแนะต่อแบบฟอร์มงบประมาณ')}</dt><dd>${x.note ? esc(x.note).replace(/\n/g, '<br>') : '—'} ${fileChip(x.file)}</dd></dl>`;
+}
+
 const savedLine = (s) => (s?.pending ? `<span class="pill orange">${tr('Pending', 'รอส่ง')}</span> ${tr('Kept on this device; it is sent when the server can be reached', 'เก็บไว้ในเครื่องนี้ จะส่งเมื่อติดต่อเซิร์ฟเวอร์ได้')}`
   : s?.at ? tr('Saved {when} by {who}', 'บันทึก {when} โดย {who}', { when: dateTimeFmt(s.at), who: esc(st.ctx.nameOf(s.by)) }) : tr('Not saved yet', 'ยังไม่ได้บันทึก'));
 
 function noted(ref) {
   const list = st.form[ref].noted;
-  return `<div class="upl">${list.map((f, i) => `${fileChip(f)}${st.can ? `<button class="icon-btn" data-rm="${i}" title="${esc(tr('Remove from list', 'นำออกจากรายการ'))}">${icon('x', 16)}</button>` : ''}`).join('')}
+  return `<div class="upl">${list.map((f, i) => `${fileChip(f)}${st.can ? editBtn(f, { org: orgRef(), slot: `noted:${ref}`, plain: true }) : ''}${st.can ? `<button class="icon-btn" data-rm="${i}" title="${esc(tr('Remove from list', 'นำออกจากรายการ'))}">${icon('x', 16)}</button>` : ''}`).join('')}
     ${!list.length && !st.can ? '<span class="muted">—</span>' : ''}
     ${st.can ? `<label class="btn">${icon('upload', 16)}${tr('Upload .docx or PDF', 'อัปโหลด .docx หรือ PDF')}<input type="file" hidden multiple accept=".docx,.pdf" data-up></label>` : ''}</div>${st.can ? capNote('.docx / PDF') : ''}`;
 }
@@ -80,6 +127,13 @@ function onInput(e) {
 }
 
 async function onChange(e) {
+  if (e.target.hasAttribute('data-show-pre')) {
+    showPre = e.target.checked;
+    try { localStorage.setItem('showPrePitch', showPre ? '1' : '0'); } catch { /* this visit only */ }
+    $('[data-pre-form]', st.el).innerHTML = preForm();
+    st.el.querySelectorAll('.pcard').forEach((sec) => { $('[data-pre]', sec).innerHTML = prePeek(sec.dataset.ref); });
+    return;
+  }
   if (e.target.hasAttribute('data-xl') && e.target.files?.[0]) {
     const file = e.target.files[0];
     try {

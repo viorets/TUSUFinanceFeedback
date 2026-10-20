@@ -17,6 +17,7 @@ import { $, esc, icon, toast, num2, dateTimeFmt, dialog } from '../ui.js';
 import { cached, call, peek, remember, forget } from '../api.js';
 import { CAMPUSES, CATEGORIES, ORGS } from '../masterdata.js';
 import { slotText, timeLeft } from '../project.js';
+import { timeline, bindTimeline } from '../timeline.js';
 
 let query = '';
 let tab = 'all'; // all | pre | pitch | resub
@@ -41,7 +42,7 @@ const TYPE_LABEL = {
 
 export async function render(page, ctx) {
   const optList = (list, picked, name) => list.map((x) => `<label class="msel-opt"><input type="checkbox" data-f="${name}" value="${esc(x.code)}" ${picked.includes(x.code) ? 'checked' : ''}>${esc(getLang() === 'th' ? x.th : x.en)}</label>`).join('');
-  page.innerHTML = `<h1 class="grad">${tr('Organizations', 'องค์กร')}</h1><p class="muted" id="sum">&nbsp;</p>
+  page.innerHTML = `<h1 class="grad">${tr('Organizations', 'องค์กร')}</h1><p class="muted" id="sum">&nbsp;</p><div id="timeline"></div>
     <div class="phase-bar"><div class="seg filter" role="radiogroup" aria-label="${esc(tr('Phase', 'ช่วง'))}" id="show"></div>
       <div class="track" id="track" aria-live="polite"></div></div>
     <div id="mini" class="kpis mini"></div>
@@ -237,10 +238,20 @@ export async function render(page, ctx) {
 
   // This device's last copy first (instant), then the fresh one if it differs.
   const kept = peek('boot');
-  if (kept) { boot = ctx.boot = kept; paint(); }
+  // Timeline (v2.12): every organization on the list, whatever the filters; a hover shows Pitching / Re-submission progress.
+  const paintTimeline = () => {
+    const removed = new Set(boot.removed);
+    const rows = ORGS.filter((o) => !removed.has(o.code));
+    const all = rows.reduce((t, o) => t + (stat(o.code).count || 0), 0);
+    const done = (left) => ({ done: all - rows.reduce((t, o) => t + left(o.code), 0), all });
+    const prog = all ? { pitching: done(leftP), resubCampus: done(leftR), resubCentre: done(leftR) } : {};
+    $('#timeline', page).innerHTML = timeline(boot.dates, prog);
+    bindTimeline(page);
+  };
+  if (kept) { boot = ctx.boot = kept; paint(); paintTimeline(); }
   try {
     const fresh = await cached('boot');
-    if (!kept || JSON.stringify(fresh) !== JSON.stringify(kept)) { boot = ctx.boot = fresh; paint(); }
+    if (!kept || JSON.stringify(fresh) !== JSON.stringify(kept)) { boot = ctx.boot = fresh; paint(); paintTimeline(); }
   } catch (e) {
     if (!kept) throw e;
     toast(e.message, 'bad');

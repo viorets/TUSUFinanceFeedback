@@ -208,10 +208,10 @@ input[inputmode=decimal] { max-width: 240px; text-align: right; font-variant-num
 .orghead { padding: 28px 28px 22px; }
 .oh-line { display: flex; gap: 12px; align-items: baseline; flex-wrap: wrap; }
 .orghead h1 { font-size: 40px; margin: 6px 0 4px; }
-.orghead .ref { order: 2; }
+.orghead .ref { order: 2; align-self: center; }
 .orghead details { margin-top: 14px; }
 .orghead summary { cursor: pointer; color: var(--mid); font-size: 15px; font-weight: 500; }
-.kv { display: grid; grid-template-columns: 180px 1fr; gap: 8px 18px; margin: 14px 0 0; }
+.kv { display: grid; grid-template-columns: 180px 1fr; gap: 8px 18px; margin: 14px 0 0; align-items: baseline; }
 .kv dt { color: var(--text2); font-size: 15px; }
 .kv dd { margin: 0; word-break: break-word; }
 @media (max-width: 640px) { .kv { grid-template-columns: 1fr; } .kv dd { margin-bottom: 8px; } .orghead h1 { font-size: 30px; } }
@@ -637,3 +637,56 @@ svg.chart [data-tip]:hover { opacity: .85; }
 .orghead .pill.ver { order: 3; align-self: center; }
 .fb-note { display: block; margin-bottom: 4px; color: var(--text); }
 @media (max-width: 640px) { .dual { max-width: none; flex-basis: 100%; } }
+/* Pitching (v2.12): the submitted files on each card, and "Show Pre-pitch data" (read only). */
+.show-pre { margin: 0 4px 14px; }
+.src-row { align-items: center; margin: 4px 0 14px; }
+.pre-peek .kv { margin-top: 8px; }
+.pre-peek .kv dd .fchip { margin-left: 8px; }
+.xl-box .pre-peek { margin: 0 0 14px; }
+/* Timeline (v2.12, timeline.js): a Gantt chart. Left: phase | start | end | days; right: month / week scale and bars. */
+.timeline { padding: 14px 20px 18px; margin: 0 0 18px; }
+.timeline summary { cursor: pointer; font-weight: 600; font-size: 17px; color: var(--text); }
+.timeline summary small { font-weight: 400; font-size: 13px; margin-left: 8px; }
+.gantt { --cols: 230px 62px 62px 40px; --left: calc(230px + 62px + 62px + 40px + 4 * 10px); margin-top: 12px; font-size: 13px; overflow-x: auto; }
+.g-row { display: grid; grid-template-columns: var(--cols) minmax(420px, 1fr); gap: 10px; align-items: center; min-width: 860px; }
+.g-row > span:not(.g-track) { white-space: nowrap; color: var(--text2); font-variant-numeric: tabular-nums; }
+.g-row > .g-name { color: var(--text); overflow: hidden; text-overflow: ellipsis; }
+.g-row .num { text-align: right; }
+.g-headrow { border-bottom: 1px solid var(--sep); padding-bottom: 4px; }
+.g-headrow > span { font-size: 12px; font-weight: 600; text-transform: uppercase; letter-spacing: .03em; align-self: end; }
+.g-scale { position: relative; height: 42px; }
+.g-month { position: absolute; top: 0; height: 21px; line-height: 21px; padding-left: 6px; font-weight: 600; font-size: 12px; color: var(--text); border-left: 1px solid var(--sep); overflow: hidden; white-space: nowrap; text-transform: none; letter-spacing: 0; }
+.g-week { position: absolute; top: 21px; height: 21px; line-height: 21px; padding-left: 4px; font-size: 11px; font-weight: 400; color: var(--text2); border-left: 1px solid var(--sep); overflow: hidden; }
+.g-body { position: relative; min-width: 860px; }
+.g-grid { position: absolute; top: 0; bottom: 0; left: var(--left); right: 0; pointer-events: none; }
+.g-grid i { position: absolute; top: 0; bottom: 0; border-left: 1px dashed var(--sep); }
+.g-today { position: absolute; top: -6px; bottom: 0; width: 2px; margin-left: -1px; background: #e11d48; z-index: 2; }
+.g-today::before { content: ""; position: absolute; top: 0; left: -4px; width: 10px; height: 10px; border-radius: 50%; background: #e11d48; }
+.g-row.g-group { min-height: 30px; margin-top: 6px; }
+.g-group > .g-name { font-weight: 700; }
+.g-step { min-height: 32px; }
+.g-step > .g-name { padding-left: 16px; }
+.g-track { position: relative; height: 22px; }
+.g-sum { position: absolute; top: 9px; height: 5px; background: var(--text2); opacity: .45; border-radius: 1px; }
+.g-sum::before, .g-sum::after { content: ""; position: absolute; top: 0; width: 0; height: 0; border-top: 7px solid var(--text2); }
+.g-sum::before { left: 0; border-right: 6px solid transparent; }
+.g-sum::after { right: 0; border-left: 6px solid transparent; }
+.g-bar { position: absolute; top: 0; height: 22px; min-width: 8px; border-radius: 6px; background: color-mix(in srgb, var(--c) 70%, white); overflow: hidden;
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--c) 85%, black); display: flex; align-items: center; }
+.g-bar i { position: absolute; inset: 0 auto 0 0; background: var(--c); }
+.g-bar em, .g-out { font-style: normal; font-size: 12px; font-weight: 600; white-space: nowrap; }
+.g-bar em { position: relative; padding: 0 8px; color: #fff; text-shadow: 0 1px 2px rgba(0, 0, 0, .35); overflow: hidden; text-overflow: ellipsis; }
+.g-out { position: absolute; top: 0; line-height: 22px; color: var(--text); }
+.g-step.now .g-bar { box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--c) 85%, black), 0 0 0 3px color-mix(in srgb, var(--c) 30%, transparent); }
+.g-step.now > .g-name { font-weight: 700; }
+.g-step.past .g-bar { opacity: .5; }
+.g-step.past > span:not(.g-track) { opacity: .7; }
+.g-bar:focus-visible { outline: 2px solid var(--text); outline-offset: 2px; }
+@media (max-width: 640px) {
+  .gantt { --cols: 130px; --left: calc(130px + 10px); }
+  .g-row > span:nth-child(2), .g-row > span:nth-child(3), .g-row > span:nth-child(4) { display: none; }
+  .g-row, .g-body { min-width: 620px; }
+}
+#textSize { width: 5em; }
+.date-row { gap: 10px; flex-wrap: wrap; }
+.date-row input[type=date] { font: inherit; font-size: 14px; padding: 4px 8px; border: 1px solid var(--sep); border-radius: 8px; background: var(--bg); color: var(--text); }
