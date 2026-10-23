@@ -112,3 +112,7 @@ overrides the earlier styles. Glass turns solid for reduced transparency; motion
 ## Local preview
 
 Any static server, e.g. `npx serve public`. Google sign-in works on `localhost` (an authorized domain by default).
+
+## Licence
+
+This project is released under the [GNU General Public License v3.0](LICENSE) (GPL-3.0), as required by [HyperFormula](https://hyperformula.handsontable.com/), which calculates the Excel formulas in the in-page Excel editor and is used under GPL-3.0. The other libraries and fonts keep their own licences, all of which can be used in a GPL-3.0 project: pdf.js and the Firebase SDK (Apache-2.0), pdf-lib, ExcelJS and JSZip (MIT), and LINE Seed Sans TH and Noto Sans Thai (SIL Open Font License).
