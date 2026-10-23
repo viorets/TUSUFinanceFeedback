@@ -140,6 +140,8 @@ a.row:hover { background: var(--fill); text-decoration: none; }
 input[type=text], input[type=email], input[type=search], select, textarea {
   width: 100%; padding: 10px 14px; border-radius: 12px; border: 1px solid var(--pale); background: var(--field); outline: none; min-height: 44px; font-size: 16px;
 }
+/* A select beside its label in a row (admin console: round codes, PDF editor font) sizes to its options (v2.13). */
+.row > select { width: auto; flex: none; max-width: 60%; }
 input:focus, select:focus, textarea:focus { border-color: var(--cyan); box-shadow: 0 0 0 4px rgba(43, 171, 194, .2); }
 input:disabled, textarea:disabled, select:disabled, input[readonly] { color: var(--text2); background: var(--mist); }
 textarea { resize: vertical; min-height: 96px; line-height: 1.47; }
@@ -341,6 +343,7 @@ input[inputmode=decimal] { max-width: 240px; text-align: right; font-variant-num
 
 /* ---------- night-mode details ---------- */
 .topnav #theme { padding: 6px 10px; }
+#refresh.busy .ic { animation: spin .8s linear infinite; }
 
 /* ---------- list filter (All / Pending approval / Done) ---------- */
 .toolbar { flex-wrap: wrap; align-items: center; }
@@ -618,6 +621,9 @@ svg.chart [data-tip]:hover { opacity: .85; }
 .msel-opt { display: flex; gap: 10px; align-items: center; padding: 7px 10px; border-radius: 8px; font-size: 15px; font-weight: 400; cursor: pointer; white-space: nowrap; }
 .msel-opt:hover { background: var(--mist); }
 .msel-opt input { accent-color: var(--teal); width: 16px; height: 16px; }
+.msel-acts { display: flex; gap: 4px; padding-bottom: 6px; margin-bottom: 4px; border-bottom: 1px solid var(--sep); }
+.msel-acts .btn { padding: 5px 12px; font-size: 14px; }
+.msel[hidden] { display: none; }
 .pic-pick > summary { cursor: pointer; list-style: none; }
 .pic-pick > summary::after { content: ' ▾'; color: var(--text2); }
 .pic-pick .msel-body { min-width: 200px; }
@@ -671,13 +677,13 @@ svg.chart [data-tip]:hover { opacity: .85; }
 .g-sum::before, .g-sum::after { content: ""; position: absolute; top: 0; width: 0; height: 0; border-top: 7px solid var(--text2); }
 .g-sum::before { left: 0; border-right: 6px solid transparent; }
 .g-sum::after { right: 0; border-left: 6px solid transparent; }
-.g-bar { position: absolute; top: 0; height: 22px; min-width: 8px; border-radius: 6px; background: color-mix(in srgb, var(--c) 70%, white); overflow: hidden;
-  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--c) 85%, black); display: flex; align-items: center; }
+.g-bar { position: absolute; top: 0; height: 22px; min-width: 8px; border-radius: 6px; background: var(--c); background: color-mix(in srgb, var(--c) 70%, white); overflow: hidden;
+  box-shadow: inset 0 0 0 1px rgba(0, 0, 0, .25); box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--c) 85%, black); display: flex; align-items: center; }
 .g-bar i { position: absolute; inset: 0 auto 0 0; background: var(--c); }
 .g-bar em, .g-out { font-style: normal; font-size: 12px; font-weight: 600; white-space: nowrap; }
 .g-bar em { position: relative; padding: 0 8px; color: #fff; text-shadow: 0 1px 2px rgba(0, 0, 0, .35); overflow: hidden; text-overflow: ellipsis; }
 .g-out { position: absolute; top: 0; line-height: 22px; color: var(--text); }
-.g-step.now .g-bar { box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--c) 85%, black), 0 0 0 3px color-mix(in srgb, var(--c) 30%, transparent); }
+.g-step.now .g-bar { box-shadow: inset 0 0 0 1px rgba(0, 0, 0, .25), 0 0 0 3px rgba(0, 0, 0, .12); box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--c) 85%, black), 0 0 0 3px color-mix(in srgb, var(--c) 30%, transparent); }
 .g-step.now > .g-name { font-weight: 700; }
 .g-step.past .g-bar { opacity: .5; }
 .g-step.past > span:not(.g-track) { opacity: .7; }
@@ -690,3 +696,9 @@ svg.chart [data-tip]:hover { opacity: .85; }
 #textSize { width: 5em; }
 .date-row { gap: 10px; flex-wrap: wrap; }
 .date-row input[type=date] { font: inherit; font-size: 14px; padding: 4px 8px; border: 1px solid var(--sep); border-radius: 8px; background: var(--bg); color: var(--text); }
+
+/* Touch screens (iPad, v2.13): pickers inside tables and lists get finger-sized tap areas; mouse layouts stay as they are. */
+@media (pointer: coarse) {
+  .pic-pick > summary, details.vers > summary { min-height: 36px; display: flex; align-items: center; gap: 6px; }
+  .msel-opt { min-height: 40px; }
+}

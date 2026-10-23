@@ -3,6 +3,7 @@ import { tr, getLang, setLang, setTexts } from './i18n.js';
 import { $, esc, icon, toast, dialog, errorBox, skeleton, ROLE_LABEL } from './ui.js';
 
 const root = $('#app');
+if (window.tooOld) throw new Error('browser too old'); // index.html shows "Please update your browser"
 
 // Night mode: follows the device until the moon / sun button picks one; the choice is kept on this device.
 // index.html applies the kept choice before the first paint.
@@ -75,6 +76,7 @@ function shell(route) {
   return `<div class="chrome"><header class="topbar">
     <a class="brand" href="#/"><img class="brand-logo" src="icon.svg" alt=""><span class="grow"><b>${TITLE}</b><span>TUSU Budget Pitching</span></span></a>
     <nav class="topnav">
+      <button id="refresh" title="${tr('Refresh: load this page again from the server (use when it hangs)', 'รีเฟรช: โหลดหน้านี้จากเซิร์ฟเวอร์อีกครั้ง (ใช้เมื่อหน้าค้าง)')}" aria-label="${tr('Refresh', 'รีเฟรช')}">${icon('refresh', 18)}<span class="lbl">${tr('Refresh', 'รีเฟรช')}</span></button>
       <button id="theme" title="${tr('Night mode', 'โหมดกลางคืน')}" aria-label="${tr('Night mode', 'โหมดกลางคืน')}">${icon(dark() ? 'sun' : 'moon', 18)}</button>
       <button id="lang" title="${tr('Language', 'ภาษา')}">${icon('globe', 18)}<span class="lbl">${getLang() === 'th' ? 'EN' : 'ไทย'}</span></button>
       <div class="acct"><button id="acct" aria-haspopup="menu" aria-expanded="false" title="${esc(ctx.me.email)}">${icon('user', 18)}<span class="lbl acct-mail">${esc(ctx.nameOf(ctx.me.email))}</span>${icon('down', 14)}</button></div>
@@ -134,6 +136,7 @@ async function render() {
   $('#lang').onclick = async () => { if (!(await confirmLeave())) return; setLang(getLang() === 'th' ? 'en' : 'th'); current = null; render(); };
   $('#acct').onclick = (e) => accountMenu(e.currentTarget);
   $('#theme').onclick = toggleTheme;
+  $('#refresh').onclick = refresh;
   // Start loading the admin console when the pointer reaches its tab.
   document.querySelector('a[href="#/admin"]')?.addEventListener('pointerenter', () => api.cached('admin').catch(() => {}), { once: true });
   const page = $('#page');
@@ -142,8 +145,23 @@ async function render() {
     await current.render(page, ctx, route);
   } catch (e) {
     console.error(e);
-    page.innerHTML = `<div class="empty">${icon('alert', 28)}<p>${esc(e.message || e)}</p><a class="btn" href="#/">${tr('Back to organizations', 'กลับไปที่รายชื่อองค์กร')}</a></div>`;
+    page.innerHTML = `<div class="empty">${icon('alert', 28)}<p>${esc(e.message || e)}</p><div class="table-actions"><button class="btn primary" data-refresh>${icon('refresh', 16)}${tr('Refresh', 'รีเฟรช')}</button><a class="btn" href="#/">${tr('Back to organizations', 'กลับไปที่รายชื่อองค์กร')}</a></div></div>`;
+    $('[data-refresh]', page).onclick = refresh;
   }
+}
+
+// Refresh (v2.13, as in th-acc-standards): when the server hangs, drop every read this page holds, send any saves
+// kept on this device, and load the page again. Unsaved edits are asked about first.
+async function refresh() {
+  if (!(await confirmLeave())) return;
+  const b = $('#refresh');
+  b?.classList.add('busy');
+  api.forgetAll();
+  api.flushOutbox();
+  try { ctx.boot = await api.cached('boot'); ctx.me = ctx.boot.me; setTexts(ctx.boot.texts); } catch { /* the page shows the error */ }
+  current = null;
+  await render();
+  toast(tr('Refreshed', 'รีเฟรชแล้ว'));
 }
 
 // Leaving a page (or tab, language, account) with unsaved edits: a window naming each unsaved project, with

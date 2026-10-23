@@ -16,7 +16,11 @@
 .mk-grow { flex: 1; }
 .mk-pages { flex: 1; overflow: auto; padding: 16px; display: flex; flex-direction: column; align-items: center; gap: 16px; background: #e8eef0; }
 .mk-wait { color: #6e6e73; }
-.mk-page { position: relative; flex: none; background: #fff; box-shadow: 0 2px 10px rgba(0, 0, 0, .12); touch-action: none; }
+/* Touch (iPad, v2.13): a finger scrolls and zooms the pages, except while drawing or when it starts on a text box or mark. */
+.mk-page { position: relative; flex: none; background: #fff; box-shadow: 0 2px 10px rgba(0, 0, 0, .12); touch-action: pan-x pan-y pinch-zoom; }
+.mk:is([data-tool=pen], [data-tool=line], [data-tool=arrow], [data-tool=rect]) .mk-page, .mk[data-tool=select] :is(.mk-box, .mk-mark) { touch-action: none; }
+/* "Highlight selection" (touch and Pencil select first): only with the Highlight tool. */
+.mk:not([data-tool=highlight]) .mk-hl-btn { display: none; }
 .mk-page canvas { position: absolute; inset: 0; width: 100%; height: 100%; }
 .mk-svg, .mk-boxes { position: absolute; inset: 0; width: 100%; height: 100%; }
 .mk-svg { overflow: visible; }
@@ -54,4 +58,5 @@
 .mk-steps { padding: 18px 22px; }
 .mk-steps .ic { vertical-align: -2px; }
 .mk-lock { display: flex; gap: 6px; align-items: center; }
-.mk-ctl input[type=number] { width: 4em; font: inherit; padding: 2px 6px; border: 1px solid rgba(0, 0, 0, .15); border-radius: 6px; }
+.mk-ctl input[type=number], .mk-ctl select { font: inherit; padding: 2px 6px; border: 1px solid rgba(0, 0, 0, .15); border-radius: 6px; }
+.mk-ctl input[type=number] { width: 4em; }

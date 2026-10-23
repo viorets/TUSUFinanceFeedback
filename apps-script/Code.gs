@@ -71,7 +71,7 @@ const ROWS_SECONDS = 600; // our own tabs (writes through the site change their 
 const STAMP_SECONDS = 30; // how often an outside Sheet's last-updated time is asked from Drive
 // Part of every cached answer's key: a deployment never reads answers cached by another code version (both share the
 // script cache). Change it whenever an answer's shape changes.
-const CODE_VERSION = 'v2.12.1';
+const CODE_VERSION = 'v2.13.1';
 const KINDS = {
   docx: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
   pdf: 'application/pdf',
@@ -168,7 +168,7 @@ const ACTIONS = {
   exportData: exportData_, printData: printData_, saveExternalLink: saveExternalLink_,
   saveOrgPrePitch: saveOrgPrePitch_, myProjects: myProjects_, setRestored: setRestored_,
   saveOrgPitching: saveOrgPitching_, uploadStart: uploadStart_, uploadDone: uploadDone_, mailData: mailData_,
-  savePhaseDates: savePhaseDates_, saveTextSize: saveTextSize_, markupOpen: markupOpen_, saveMarkupDraft: saveMarkupDraft_, markupCopy: markupCopy_, markupExport: markupExport_,
+  savePhaseDates: savePhaseDates_, saveMarkupDefaults: saveMarkupDefaults_, saveRoundKinds: saveRoundKinds_, markupOpen: markupOpen_, saveMarkupDraft: saveMarkupDraft_, markupCopy: markupCopy_, markupExport: markupExport_,
 };
 
 function doPost(e) {
@@ -205,12 +205,13 @@ function boot_(req, user) {
     // the Pitching tab's final approved budgets, null while none is set).
     // v2.10 adds: est = Estimated Approved budget (Pre-pitch approved budget, the proposed budget where empty),
     // pp / rp = projects unfinished on Pitching / Re-submission, ok = projects Approved at Re-submission, fin = their
-    // pitched budgets (the final budget), ver / vers = submission versions, rs = re-submissions sent,
+    // pitched budgets (the final budget), ver / vers = submission versions (with their round code),
     // slots = the pitching slots of its projects.
+    // v2.13: rounds = the Re-Submission round codes it submitted in, rs = how many.
     const pre = byKey_(feedbackRows_('PrePitch'), 'Project Ref');
     const org = function (ref) {
       return orgs[ref] || (orgs[ref] = { count: 0, pending: 0, at: '', people: [], proposed: 0, approved: null, est: 0, pp: 0, rp: 0, ok: 0, fin: null,
-        ver: null, vers: [], rs: 0, slots: [] });
+        ver: null, vers: [], rs: 0, rounds: [], slots: [] });
     };
     s.orgs.forEach(function (o) {
       const x = org(o['Org Ref']);
@@ -222,9 +223,12 @@ function boot_(req, user) {
       const a = r['Action']; const ref = r['Org Ref'];
       if ((a !== 'submit' && a !== 'resubmit') || !ORG_REF.test(String(ref))) return;
       const x = org(ref);
-      if (a === 'resubmit') x.rs++;
-      x.vers.push({ v: Number(r['Version']) || null, at: iso_(r['Submitted At'] || r['Logged At'] || r['Timestamp'] || r['At']), kind: a,
+      x.vers.push({ round: roundOf_(r), v: Number(r['Version']) || null, at: iso_(r['Submitted At'] || r['Logged At'] || r['Timestamp'] || r['At']), kind: a,
         total: num_(r['Total Proposed Budget'] != null ? r['Total Proposed Budget'] : r['Total Budget']), n: Number(r['Project Count']) || null });
+    });
+    s.resubOrgs.forEach(function (o) {
+      const x = org(o['Org Ref']); const c = roundOf_(o);
+      if (x.rounds.indexOf(c) < 0) { x.rounds.push(c); x.rs = x.rounds.length; }
     });
     s.projects.forEach(function (p) {
       const x = org(p['Org Ref']); const ref = p['Project Ref'];
@@ -246,14 +250,14 @@ function boot_(req, user) {
       if (orgs[ref] && r.date) orgs[ref].slots.push([r.date, r.start, r.end]);
     });
     users_().forEach(function (u) { u.orgs.forEach(function (ref) { org(ref).people.push(u.email); }); });
-    return { orgs: orgs, removed: hidden_(s.log), closed: closed_(), texts: texts_(), required: required_(), phases: phases_(), dates: phaseDates_(), link: externalLink_() };
+    return { orgs: orgs, removed: hidden_(s.log), closed: closed_(), texts: texts_(), required: required_(), phases: phases_(), dates: phaseDates_(), link: externalLink_(), rounds: rounds_() };
   });
   // names: display name per email (set in the admin console); the site shows the email where none is set.
   const names = {};
   users_().forEach(function (u) { if (u.name) names[u.email] = u.name; });
   const out = { me: { email: user.email, role: user.role, owner: user.email === owner_(), control: canControl_(user), log: canLog_(user), case: canCase_(user) },
     orgs: core.orgs, removed: core.removed, closed: core.closed, texts: core.texts, required: core.required, phases: core.phases,
-    dates: core.dates, link: core.link, names: names };
+    dates: core.dates, link: core.link, rounds: core.rounds, names: names };
   // The person-in-charge picker (v2.10: Staff too).
   out.users = users_().filter(function (u) { return u.role; }).map(function (u) { return u.email; });
   return out;
@@ -284,6 +288,19 @@ function org_(req, user) {
     resubRows_().forEach(function (r) { if (refs.indexOf(r['Project Ref']) >= 0) resub[r['Project Ref']] = resubOut_(r); });
     const slots = {};
     schedule_().forEach(function (r) { if (refs.indexOf(r.ref) >= 0) slots[r.ref] = r; });
+    // Re-submitted data (v2.13): the organization's latest Re-Submission round and its projects, by Project Ref.
+    const ro = s.resubOrgs.filter(function (x) { return x['Org Ref'] === ref; })
+      .sort(function (a, b) { return orgKey_(a) < orgKey_(b) ? 1 : -1; })[0];
+    const resubmitted = ro ? {
+      round: roundOf_(ro), version: ro['Version'], at: iso_(ro['Submitted At']), total: num_(ro['Total Proposed Budget']), projects: {},
+    } : null;
+    if (ro) s.resubProjects.forEach(function (p) {
+      if (orgKey_(p) !== orgKey_(ro)) return;
+      resubmitted.projects[p['Project Ref']] = {
+        name: p['Project Name'], budget: num_(p['Budget']), docx: p['Proposal .docx'] || '', pdf: p['Proposal .pdf'] || '',
+        dates: String(p['Project Dates'] || '').split(/[,\s]+/).filter(function (d) { return /^\d{4}-\d{2}-\d{2}$/.test(d); }),
+      };
+    });
     return {
       org: o ? {
         at: iso_(o['Submitted At']), version: o['Version'], total: num_(o['Total Proposed Budget']),
@@ -292,7 +309,7 @@ function org_(req, user) {
         budgetForm: String(o['Budget Proposal Form (.xlsx)'] || ''), // Drive link, one per organization
         emails: emails_(o),
       } : null,
-      projects: projects, pre: pre, pitch: pitch, resub: resub, slots: slots, orgPre: orgPreOut_(orgPreRow_(ref)),
+      projects: projects, pre: pre, pitch: pitch, resub: resub, resubmitted: resubmitted, slots: slots, orgPre: orgPreOut_(orgPreRow_(ref)),
       orgPitch: orgPitchOut_(orgPitchRow_(ref)),
       closed: closed_()[ref] || null, required: required_(), phases: phases_(),
       people: users_().filter(function (u) { return u.orgs.indexOf(ref) >= 0; }).map(function (u) { return u.email; }),
@@ -554,18 +571,32 @@ function allocated_() {
   return r ? num_(r['Value']) : null;
 }
 
-// Default text box size of the PDF editor, in pt (v2.12, Settings "Markup Text Size"; 11 when not set).
-function textSize_() {
-  const r = settings_().filter(function (x) { return x['Key'] === 'Markup Text Size'; })[0];
-  const v = r ? Number(r['Value']) : NaN;
-  return v >= 6 && v <= 72 ? v : 11;
+// PDF editor defaults (v2.13, Settings "Markup Defaults": JSON { size, textColor, shapeColor, font }): new text
+// boxes start at this size, colour and font; new shapes (draw, line, arrow, rectangle) at shapeColor. size falls
+// back to the v2.12 key "Markup Text Size". Keep MARKUP_FONTS in step with FONTS in pdf-markup.js.
+const MARKUP_FONTS = ['LINE Seed Sans TH', 'Noto Sans Thai', 'Sarabun'];
+const HEX_COLOR = /^#[0-9a-f]{6}$/i;
+function markupDefaults_() {
+  const get = function (k) { const r = settings_().filter(function (x) { return x['Key'] === k; })[0]; return r ? r['Value'] : ''; };
+  const v = parse_(String(get('Markup Defaults'))) || {};
+  const size = Number(v.size != null ? v.size : get('Markup Text Size'));
+  return {
+    size: size >= 6 && size <= 72 ? size : 11,
+    textColor: HEX_COLOR.test(v.textColor) ? v.textColor : '#990000',
+    shapeColor: HEX_COLOR.test(v.shapeColor) ? v.shapeColor : '#990000',
+    font: MARKUP_FONTS.indexOf(v.font) >= 0 ? v.font : MARKUP_FONTS[0],
+  };
 }
-function saveTextSize_(req, user) {
+function saveMarkupDefaults_(req, user) {
   need_(user, 'Chief');
-  const v = Math.round(Number(req.size));
-  if (!(v >= 6 && v <= 72)) throw new Error('Text size must be 6 to 72 pt');
-  setSetting_('Markup Text Size', v, user);
-  return { textSize: v };
+  const v = req.defaults || {};
+  const size = Math.round(Number(v.size));
+  if (!(size >= 6 && size <= 72)) throw new Error('Text size must be 6 to 72 pt');
+  if (!HEX_COLOR.test(v.textColor) || !HEX_COLOR.test(v.shapeColor)) throw new Error('Bad colour');
+  if (MARKUP_FONTS.indexOf(v.font) < 0) throw new Error('Unknown font');
+  const out = { size: size, textColor: v.textColor.toLowerCase(), shapeColor: v.shapeColor.toLowerCase(), font: v.font };
+  setSetting_('Markup Defaults', JSON.stringify(out), user);
+  return { markup: out };
 }
 
 // Allocated budget (กรอบงบประมาณ): Admins and Chiefs. Empty = not set.
@@ -770,6 +801,38 @@ function savePhaseDates_(req, user) {
   return { dates: out };
 }
 
+/* ---------- round codes ---------- */
+
+// Round codes (v2.13): every Round of the pitching site (Organization tab) is First-Submission ('first': Pre-pitch
+// and Pitching) or Re-Submission ('resub': the Re-submission tab). Settings key "Round Kinds": JSON { code: kind }.
+// A round not set there: the earliest code is First-Submission, every later one Re-Submission (2569A, then 2569B…).
+const ROUND_KINDS = ['first', 'resub'];
+function rounds_() {
+  return memo_('rounds', function () {
+    const r = settings_().filter(function (x) { return x['Key'] === 'Round Kinds'; })[0];
+    return roundList_(r ? parse_(String(r['Value'])) || {} : {});
+  });
+}
+function roundList_(saved) {
+  const codes = [];
+  subsRaw_().orgs.forEach(function (o) { const c = roundOf_(o); if (c && codes.indexOf(c) < 0) codes.push(c); });
+  return codes.sort().map(function (c, i) { return { code: c, kind: ROUND_KINDS.indexOf(saved[c]) >= 0 ? saved[c] : i ? 'resub' : 'first' }; });
+}
+
+// Round kinds in the admin console: Admins and Chiefs. req.kinds: { code: 'first' | 'resub' }.
+function saveRoundKinds_(req, user) {
+  need_(user, 'Chief');
+  const v = req.kinds || {};
+  const out = {};
+  rounds_().forEach(function (r) {
+    const k = r.code in v ? v[r.code] : r.kind;
+    if (ROUND_KINDS.indexOf(k) < 0) throw new Error('Bad round kind for ' + r.code);
+    out[r.code] = k;
+  });
+  setSetting_('Round Kinds', JSON.stringify(out), user);
+  return { rounds: roundList_(out) };
+}
+
 /* ---------- admin ---------- */
 
 // Admin console. The edit log goes to Admins only. Each part is cached until the next write.
@@ -784,7 +847,7 @@ function admin_(req, user) {
   if (user.role === DATA_TEAM) return logs({ logOnly: true });
   need_(user, 'Chief');
   // removed: every organization removed on the pitching site; restored: those put back on our list.
-  const out = cached_('admin', function () { return { removed: removed_(submissionLog_()), restored: restored_(), allocated: allocated_(), phases: phases_(), dates: phaseDates_(), textSize: textSize_() }; });
+  const out = cached_('admin', function () { return { removed: removed_(submissionLog_()), restored: restored_(), allocated: allocated_(), phases: phases_(), dates: phaseDates_(), markup: markupDefaults_(), rounds: rounds_() }; });
   out.users = users_();
   out.usersVer = usersVer_();
   out.owner = owner_();
@@ -1198,9 +1261,34 @@ function need_(user, role) { if (RANK[user.role] < RANK[role]) throw new Error('
 
 /* ---------- data helpers ---------- */
 
-// The pitching site's Sheet, read once per request (+ the pilot demo while it has no RS-ACA-01 row).
+// The pitching site's Sheet, read once per request (+ the pilot demo while it has no RS-ACA-01 row), split by round
+// (v2.13): orgs / projects = the latest First-Submission row of each organization (Pre-pitch and Pitching);
+// resubOrgs / resubProjects = every Re-Submission round row (the Re-submission tab). log = Submission_Log, all rounds.
 function subs_() {
   return memo_('subs', function () {
+    const raw = subsRaw_();
+    const kind = {};
+    rounds_().forEach(function (r) { kind[r.code] = r.kind; });
+    const resub = function (r) { return kind[roundOf_(r)] === 'resub'; };
+    // One First-Submission row per organization: the latest round, then the latest submission.
+    const first = {};
+    raw.orgs.forEach(function (o) {
+      if (resub(o)) return;
+      const k = o['Org Ref']; const b = first[k];
+      if (!b || roundOf_(o) > roundOf_(b) || (roundOf_(o) === roundOf_(b) && iso_(o['Submitted At']) > iso_(b['Submitted At']))) first[k] = o;
+    });
+    const keys = Object.keys(first).map(function (k) { return orgKey_(first[k]); });
+    return {
+      orgs: Object.keys(first).map(function (k) { return first[k]; }),
+      projects: raw.projects.filter(function (p) { return !resub(p) && keys.indexOf(orgKey_(p)) >= 0; }),
+      resubOrgs: raw.orgs.filter(resub),
+      resubProjects: raw.projects.filter(resub),
+      log: raw.log,
+    };
+  });
+}
+function subsRaw_() {
+  return memo_('subsRaw', function () {
     const c = CacheService.getScriptCache();
     const key = 'subs@' + stamp_('subs');
     let s = cacheGet_(c, key);
@@ -1217,9 +1305,32 @@ function subs_() {
       s.orgs.push(DEMO.org);
       s.projects = s.projects.concat(DEMO.projects);
     }
-    return s;
+    return dummy_(s);
   });
 }
+
+// Dummy data (23 Oct 2026): "Dummy Data Pitch1.xlsx" as round 2569A, so the site can be tried with a full round.
+// The rows are in DummyData.gs (DUMMY_DATA = { orgs, projects, log } in the Submissions columns), pushed to the
+// server only, never to git (names, emails and phones). Real rows always win: an organization that has a real 2569A
+// row gets no dummy rows. From DUMMY_UNTIL the rows are no longer read, so they disappear by themselves (the subs
+// stamp changes then, so no cached answer keeps them); after that, delete DummyData.gs.
+const DUMMY_UNTIL = Date.parse('2026-10-31T18:00:00+07:00');
+function dummyOn_() { return typeof DUMMY_DATA !== 'undefined' && Date.now() < DUMMY_UNTIL; }
+function dummy_(s) {
+  if (!dummyOn_()) return s;
+  const real = {};
+  s.orgs.forEach(function (o) { if (roundOf_(o) === '2569A') real[o['Org Ref']] = true; });
+  const add = function (r) { return !real[r['Org Ref']]; };
+  return { orgs: s.orgs.concat(DUMMY_DATA.orgs.filter(add)), projects: s.projects.concat(DUMMY_DATA.projects.filter(add)), log: s.log.concat(DUMMY_DATA.log.filter(add)) };
+}
+// Round code of a Submissions row: its Round column, else the part of Org Key before the organization
+// (Org Key = <round>_<Org Ref>; Submission_Log has no Round column). '' = none (the pilot demo).
+function roundOf_(r) {
+  if (r['Round'] !== '' && r['Round'] != null) return String(r['Round']);
+  const k = String(r['Org Key'] || '');
+  return k.indexOf('_') > 0 ? k.slice(0, k.lastIndexOf('_')) : '';
+}
+function orgKey_(r) { return roundOf_(r) + '_' + r['Org Ref']; }
 
 // Our PrePitch / Pitching rows, plus pilot samples for demo projects that have no saved row yet.
 function feedbackRows_(name) { return memo_('fb:' + name, function () { return feedbackRows0_(name); }); }
@@ -1379,6 +1490,9 @@ function cached_(key, fn) {
 // Submissions Sheet, 'schedule' = the scheduling site's Sheet ('-' when not set). A change there changes every key
 // built on it, so new submissions show within about STAMP_SECONDS without re-reading unchanged Sheets.
 function stamp_(name) {
+  return stamp0_(name) + (name === 'subs' && dummyOn_() ? '+dummy' : ''); // dummy data on / off = new cache keys
+}
+function stamp0_(name) {
   return memo_('stamp:' + name, function () {
     const c = CacheService.getScriptCache();
     const hit = c.get('stamp:' + name);
@@ -1645,7 +1759,7 @@ function markupOpen_(req, user) {
   if (req.bytes) {
     if (size > MAX_BYTES) throw new Error('This file is over 12 MB, so it cannot be edited here. Open it in Drive instead.');
     out.data = Utilities.base64Encode(m.file.getBlob().getBytes());
-    if (m.kind === 'pdf') { out.draft = draftOf_(child_(DriveApp.getFolderById(DRIVE_FOLDER_ID), org), req.id).draft; out.textSize = textSize_(); }
+    if (m.kind === 'pdf') { out.draft = draftOf_(child_(DriveApp.getFolderById(DRIVE_FOLDER_ID), org), req.id).draft; out.defaults = markupDefaults_(); }
   }
   return out;
 }
