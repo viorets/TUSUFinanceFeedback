@@ -6,7 +6,7 @@
 import { tr } from '../i18n.js';
 import { $, esc, icon, toast, moneyBox, parseMoney, liveMoney, dateTimeFmt, num2, dialog, errorBox, busy } from '../ui.js';
 import { save as send, upload, forget } from '../api.js';
-import { cardTop, dlBtn, fileChip, capNote } from '../project.js';
+import { cardTop, dlBtn, fileChip, capNote, newFiles, markCard, kept, earlierNotice } from '../project.js';
 import { ORGS } from '../masterdata.js';
 
 let st = null; // { el, d, can, form: { ref: working copy }, box: budget-form feedback working copy }
@@ -17,18 +17,81 @@ const dirty = (ref) => JSON.stringify(st.form[ref]) !== JSON.stringify(pick(st.d
 const pickBox = (x) => ({ note: x?.note || '', file: x?.file || null });
 const boxDirty = () => !!st && JSON.stringify(st.box) !== JSON.stringify(pickBox(st.d.orgPre));
 export const isDirty = () => !!st && (boxDirty() || st.d.projects.some((p) => dirty(p.ref)));
-// Unsaved edits, for the leave window: [{ ref, name }] (the budget-form box first, ref 'form').
-export const unsaved = () => (st ? [...(boxDirty() ? [{ ref: 'form', name: tr('Feedback on the budget form', 'ข้อเสนอแนะต่อแบบฟอร์มงบประมาณ') }] : []),
-  ...st.d.projects.filter((p) => dirty(p.ref)).map((p) => ({ ref: p.ref, name: p.name }))] : []);
+// Unsaved edits, for the leave window: [{ ref, code, name, files }] (the budget-form box first, ref 'form', shown
+// under the organization's code); files = the names of files not kept with Save yet.
+const BOX = () => tr('Feedback on the budget form', 'ข้อเสนอแนะต่อแบบฟอร์มงบประมาณ');
+const filesOf = (x) => [x?.docxFile, x?.pdfFile, ...(x?.docs || [])].filter(Boolean);
+const projNew = (ref, work = st.form[ref]) => newFiles(filesOf(work), filesOf(st.d.pre[ref])).map((f) => f.name);
+const boxNew = (work = st.box) => newFiles(work?.file, st.d.orgPre?.file).map((f) => f.name);
+export const unsaved = () => (st ? [...(boxDirty() ? [{ ref: 'form', code: orgRef(), name: BOX(), files: boxNew() }] : []),
+  ...st.d.projects.filter((p) => dirty(p.ref)).map((p) => ({ ref: p.ref, name: p.name, files: projNew(p.ref) }))] : []);
+// Leave without saving: what was kept on this device for this tab goes too.
+export const discard = () => { if (st) kept.write(keptKey(), null); };
 // "Save and leave": saves each unsaved part; throws at the first that fails (the rest stay unsaved).
 export async function saveAll() { for (const p of unsaved()) await (p.ref === 'form' ? saveBox() : save(p.ref)); }
 
-export function render(el, d, ctx) {
-  st = { el, d, ctx, can: ctx.canEdit, form: Object.fromEntries(d.projects.map((p) => [p.ref, pick(d.pre[p.ref] || blank)])), box: pickBox(d.orgPre) };
+// restored: unsaved work kept on this device and put back ({ parts: { ref: working copy }, box? }).
+export function render(el, d, ctx, restored = null) {
+  st = { el, d, ctx, can: ctx.canEdit, form: Object.fromEntries(d.projects.map((p) => [p.ref, restored?.parts?.[p.ref] || pick(d.pre[p.ref] || blank)])),
+    box: restored?.box || pickBox(d.orgPre) };
   el.innerHTML = `<div class="notice blue">${icon('alert', 18)}<span>${tr('This section is for your own notes. You don’t have to fill it in.', 'ส่วนนี้มีไว้สำหรับจดบันทึกของคุณเอง ไม่จำเป็นต้องกรอก')}</span></div>${budgetForm(d)}${d.projects.map(card).join('')}`;
-  el.oninput = onInput;
-  el.onchange = onChange;
-  el.onclick = onClick;
+  el.oninput = (e) => { onInput(e); marks(); };
+  el.onchange = async (e) => { await onChange(e); marks(); };
+  el.onclick = async (e) => { await onClick(e); marks(); };
+  marks();
+  if (!restored) offerKept();
+}
+
+// ---------- unsaved work (v2.13) ----------
+// "Not saved" on each card / box with unsaved changes, and the unsaved parts kept on this device.
+function marks() {
+  if (!st?.el.isConnected) return;
+  st.el.querySelectorAll('.pcard').forEach((sec) => markCard(sec, dirty(sec.dataset.ref)));
+  markCard(st.el.querySelector('.bform'), boxDirty());
+  keepSoon();
+}
+const keptKey = () => `unsaved:${st.ctx.me?.email || ''}:${orgRef()}:prepitch`;
+let keepT = 0;
+const keepSoon = () => { clearTimeout(keepT); keepT = setTimeout(keepNow, 400); };
+function keepNow() {
+  if (!st?.can || !st.el.isConnected) return;
+  const parts = {};
+  st.d.projects.forEach((p) => { if (dirty(p.ref)) parts[p.ref] = { work: st.form[p.ref], base: st.d.pre[p.ref]?.at || '' }; });
+  let box = boxDirty() ? { work: st.box, base: st.d.orgPre?.at || '' } : null;
+  if (st.offered) {
+    const old = kept.read(keptKey()) || {};
+    Object.entries(old.parts || {}).forEach(([r, v]) => { if (!parts[r]) parts[r] = v; });
+    box = box || old.box || null;
+  }
+  kept.write(keptKey(), Object.keys(parts).length || box ? { at: new Date().toISOString(), parts, box } : null);
+}
+document.addEventListener('visibilitychange', () => { if (document.hidden) keepNow(); });
+addEventListener('pagehide', () => keepNow());
+
+function offerKept() {
+  const k = kept.read(keptKey());
+  if (!st.can || !k || (!Object.keys(k.parts || {}).length && !k.box)) return;
+  st.offered = true;
+  const nameOf = (r) => st.d.projects.find((p) => p.ref === r)?.name || '';
+  const line = (code, name, files) => `${code} · ${name}${files.length ? ` — ${files.join(', ')}` : ''}`;
+  const names = [...(k.box ? [line(orgRef(), BOX(), boxNew(k.box.work))] : []),
+    ...Object.entries(k.parts || {}).map(([r, v]) => line(r, nameOf(r), projNew(r, v.work)))];
+  earlierNotice(st.el, { at: k.at, names }, () => restoreKept(k), () => { st.offered = false; kept.write(keptKey(), null); keepNow(); });
+}
+function restoreKept(k) {
+  const parts = {}; const skipped = [];
+  Object.entries(k.parts || {}).forEach(([r, v]) => {
+    if (!st.d.projects.some((p) => p.ref === r)) return;
+    if ((st.d.pre[r]?.at || '') === v.base) parts[r] = v.work; else skipped.push(r);
+  });
+  const restored = { parts };
+  if (k.box) { if ((st.d.orgPre?.at || '') === k.box.base) restored.box = k.box.work; else skipped.push(BOX()); }
+  st.offered = false;
+  render(st.el, st.d, st.ctx, restored);
+  if (skipped.length) {
+    errorBox(tr('Someone saved these on the site after your changes were kept, so they were not restored: {list}', 'มีผู้บันทึกรายการเหล่านี้บนเว็บไซต์หลังจากเก็บการแก้ไขของคุณไว้ จึงไม่ได้กู้คืน: {list}', { list: skipped.join(', ') }),
+      tr('Some changes were not restored', 'การแก้ไขบางส่วนไม่ได้กู้คืน'));
+  } else toast(tr('Restored — press Save to keep them', 'กู้คืนแล้ว — กดบันทึกเพื่อเก็บ'));
 }
 
 // One per organization: the Budget proposal form (.xlsx) uploaded with the submission (a Drive link).
@@ -47,7 +110,7 @@ function budgetForm(d) {
 // The budget-form feedback file: .xlsx, .xls, .docx or PDF.
 function boxSlot() {
   const f = st.box.file;
-  return `<div class="upl">${fileChip(f)}${st.can ? `<label class="btn">${icon('upload', 16)}${f ? tr('Replace', 'เปลี่ยนไฟล์') : tr('Upload feedback file', 'อัปโหลดไฟล์ข้อเสนอแนะ')}
+  return `<div class="upl">${fileChip(f, { unsaved: !!f && f.id !== st.d.orgPre?.file?.id })}${st.can ? `<label class="btn">${icon('upload', 16)}${f ? tr('Replace', 'เปลี่ยนไฟล์') : tr('Upload feedback file', 'อัปโหลดไฟล์ข้อเสนอแนะ')}
     <input type="file" hidden accept=".xlsx,.xls,.docx,.pdf" data-up="box"></label>` : ''}${f && st.can ? `<button type="button" class="btn plain" data-box-clear>${tr('Remove', 'นำออก')}</button>` : ''}</div>${st.can ? capNote('.xlsx / .xls / .docx / PDF') : ''}`;
 }
 
@@ -65,6 +128,8 @@ async function saveBox() {
   st.box = pickBox(out.orgPre);
   const line = $('[data-box-saved]', st.el);
   if (line) line.innerHTML = savedLine(out.orgPre);
+  const bs = $('[data-slot="box"]', st.el); if (bs) bs.innerHTML = boxSlot();
+  marks();
   st.ctx.persist?.();
   return out;
 }
@@ -96,8 +161,9 @@ function slot(ref, k) {
   const f = st.form[ref];
   if (f[`${k}Ok`] !== 'No') return '';
   const file = f[`${k}File`];
+  const isNew = !!file && file.id !== st.d.pre[ref]?.[`${k}File`]?.id;
   const label = k === 'docx' ? tr('Upload feedback .docx', 'อัปโหลดไฟล์ข้อเสนอแนะ .docx') : tr('Upload feedback PDF', 'อัปโหลดไฟล์ข้อเสนอแนะ PDF');
-  return `<div class="upl">${fileChip(file)}${st.can ? `<label class="btn">${icon('upload', 16)}${file ? tr('Replace', 'เปลี่ยนไฟล์') : esc(label)}
+  return `<div class="upl">${fileChip(file, { unsaved: isNew })}${st.can ? `<label class="btn">${icon('upload', 16)}${file ? tr('Replace', 'เปลี่ยนไฟล์') : esc(label)}
     <input type="file" hidden accept="${k === 'docx' ? '.docx' : '.pdf'}" data-up="${k}"></label>` : ''}
     </div>${st.can ? capNote(k === 'docx' ? '.docx' : 'PDF') : ''}`;
 }
@@ -105,7 +171,8 @@ function slot(ref, k) {
 // Documents (v2.12): any number of .docx / PDF per project, uploaded when picked; Save keeps the list.
 function docs(ref) {
   const list = st.form[ref].docs;
-  return `<div class="upl">${list.map((f, i) => `${fileChip(f)}${st.can ? `<button type="button" class="icon-btn" data-rm-doc="${i}" title="${esc(tr('Remove from list', 'นำออกจากรายการ'))}">${icon('x', 16)}</button>` : ''}`).join('')}
+  const fresh = new Set(newFiles(list, st.d.pre[ref]?.docs).map((f) => f.id));
+  return `<div class="upl">${list.map((f, i) => `${fileChip(f, { unsaved: fresh.has(f.id) })}${st.can ? `<button type="button" class="icon-btn" data-rm-doc="${i}" title="${esc(tr('Remove from list', 'นำออกจากรายการ'))}">${icon('x', 16)}</button>` : ''}`).join('')}
     ${!list.length && !st.can ? '<span class="muted">—</span>' : ''}
     ${st.can ? `<label class="btn">${icon('upload', 16)}${tr('Upload .docx or PDF', 'อัปโหลด .docx หรือ PDF')}<input type="file" hidden multiple accept=".docx,.pdf" data-up-docs></label>` : ''}</div>${st.can ? capNote('.docx / PDF') : ''}`;
 }
@@ -187,7 +254,12 @@ async function save(ref) {
   const sec = st.el.querySelector(`.pcard[data-ref="${CSS.escape(ref)}"]`);
   st.d.pre[ref] = out.pre;
   st.form[ref] = pick(out.pre);
-  if (sec) $('[data-saved]', sec).innerHTML = savedLine(out.pre);
+  if (sec) {
+    $('[data-saved]', sec).innerHTML = savedLine(out.pre);
+    ['docx', 'pdf'].forEach((k) => { const x = $(`[data-slot="${k}"]`, sec); if (x) x.innerHTML = slot(ref, k); });
+    const dx = $('[data-docs]', sec); if (dx) dx.innerHTML = docs(ref);
+  }
+  marks();
   forget('boot'); // list counts
   forget('dashboard');
   st.ctx.persist?.();

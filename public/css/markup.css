@@ -58,3 +58,15 @@
 /* Word / Excel edited in the page (v2.13 prototype; editor styles in office-edit.css). */
 .markup-page .mk-office { background: #fff; padding: 6px 10px 10px; box-shadow: 0 0 0 1px rgba(0, 99, 113, .12); }
 .markup-page .mk-office .oe-bar { font-size: 14px; }
+/* Who is editing (v2.13): the waiting screen while the editor is asked to share, and the read-only screen. */
+.mk-wait-box { padding: 32px 24px; text-align: center; max-width: 560px; margin: 24px auto; }
+.mk-wait-msg { font-size: 18px; margin: 12px 0 6px; overflow-wrap: anywhere; }
+.mk-spin { width: 36px; height: 36px; margin: 0 auto; border-radius: 50%; border: 3px solid var(--fill2, rgba(43, 171, 194, .18)); border-top-color: var(--teal, #006371); animation: mk-spin 0.9s linear infinite; }
+@keyframes mk-spin { to { transform: rotate(360deg); } }
+.mk-count { height: 4px; border-radius: 4px; background: var(--fill, rgba(43, 171, 194, .10)); overflow: hidden; margin: 14px auto 10px; max-width: 320px; }
+.mk-count span { display: block; height: 100%; width: 100%; background: var(--cyan, #2babc2); transform-origin: left; animation: mk-count 60s linear forwards; }
+.mk-count.done span { animation: none; transform: scaleX(1); background: var(--green, #1f9d55); }
+@keyframes mk-count { to { transform: scaleX(0); } }
+.mk-steps .mk-note { display: flex; gap: 8px; align-items: center; margin: 0 0 14px; }
+/* Under the editor (v2.13): the last save of this file on the site. */
+.markup-page .mk-foot { margin: 10px 4px 0; }

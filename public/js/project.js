@@ -72,8 +72,43 @@ document.addEventListener('click', (e) => {
 });
 
 // A saved file: name (opens the preview) and a download link.
-export const fileChip = (f) => (f?.id ? `<span class="fchip">${icon('file', 16)}<a href="${esc(viewUrl(f))}" data-preview="${esc(previewUrl(f))}" data-view="${esc(viewUrl(f))}" data-dl="${esc(downloadUrl(f))}" data-title="${esc(f.name || f.id)}" title="${esc(tr('Preview', 'ดูตัวอย่าง'))}">${esc(f.name || f.id)}</a>
-  <a class="icon-btn" href="${esc(downloadUrl(f))}" download title="${esc(tr('Download', 'ดาวน์โหลด'))}">${icon('download', 16)}</a></span>` : '');
+// opt.unsaved (v2.13): the file was uploaded or sent from the Edit page but not kept with Save yet.
+export const fileChip = (f, opt) => (f?.id ? `<span class="fchip">${icon('file', 16)}<a href="${esc(viewUrl(f))}" data-preview="${esc(previewUrl(f))}" data-view="${esc(viewUrl(f))}" data-dl="${esc(downloadUrl(f))}" data-title="${esc(f.name || f.id)}" title="${esc(tr('Preview', 'ดูตัวอย่าง'))}">${esc(f.name || f.id)}</a>
+  <a class="icon-btn" href="${esc(downloadUrl(f))}" download title="${esc(tr('Download', 'ดาวน์โหลด'))}">${icon('download', 16)}</a></span>${opt?.unsaved ? notSaved() : ''}` : '');
+
+/* ---------- unsaved work (v2.13) ---------- */
+// The "Not saved" tag on a file, card or box until Save is pressed.
+export const notSaved = () => `<span class="pill orange not-saved">${esc(tr('Not saved', 'ยังไม่บันทึก'))}</span>`;
+// The files in a working copy that the saved data doesn't have (by id).
+export const newFiles = (work, saved) => {
+  const have = new Set([].concat(saved || []).filter(Boolean).map((f) => f.id));
+  return [].concat(work || []).filter((f) => f?.id && !have.has(f.id));
+};
+// The tag in a card's (or box's) heading: on while it has unsaved changes.
+export function markCard(sec, on) {
+  const head = sec?.querySelector('.pcard-head, h4'); if (!head) return;
+  const tag = head.querySelector(':scope > .not-saved');
+  if (on && !tag) head.insertAdjacentHTML('beforeend', notSaved());
+  if (!on && tag) tag.remove();
+}
+// Unsaved work kept on this device, per person, organization and tab. Safari on iPad doesn't ask before a tab is
+// closed, so each tab keeps its unsaved parts here (on every change and when hidden) and offers them back.
+export const kept = {
+  read: (k) => { try { return JSON.parse(localStorage.getItem(k) || 'null'); } catch { return null; } },
+  write: (k, v) => { try { if (v) localStorage.setItem(k, JSON.stringify(v)); else localStorage.removeItem(k); } catch { /* private mode */ } },
+};
+// "You have unsaved changes from earlier": a notice at the top of a tab. names = what is kept (codes and file names).
+export function earlierNotice(el, { at, names }, onRestore, onDiscard) {
+  el.querySelector(':scope > .earlier')?.remove();
+  const box = document.createElement('div');
+  box.className = 'notice orange earlier';
+  box.innerHTML = `${icon('alert', 18)}<span class="grow">${esc(tr('You have unsaved changes from earlier (kept on this device {when}):', 'คุณมีการแก้ไขที่ยังไม่บันทึกจากก่อนหน้านี้ (เก็บไว้ในเครื่องนี้เมื่อ {when}):', { when: at ? new Date(at).toLocaleString(locale()) : '—' }))}
+    <small class="earlier-list">${names.map((n) => esc(n)).join('<br>')}</small></span>
+    <button class="btn" data-discard>${esc(tr('Discard', 'ทิ้ง'))}</button><button class="btn primary" data-restore>${esc(tr('Restore', 'กู้คืน'))}</button>`;
+  el.prepend(box);
+  box.querySelector('[data-restore]').onclick = () => { box.remove(); onRestore(); };
+  box.querySelector('[data-discard]').onclick = () => { box.remove(); onDiscard(); };
+}
 
 // Edit a file in the site (v2.12): opens the editor (views/markup.js) in a new tab. src = a Drive link or { id, name };
 // kind = 'pdf' | 'docx' | 'xlsx' (other types get no button); slot = where the result goes, read by that tab's

@@ -169,6 +169,7 @@ const ACTIONS = {
   saveOrgPrePitch: saveOrgPrePitch_, myProjects: myProjects_, setRestored: setRestored_,
   saveOrgPitching: saveOrgPitching_, uploadStart: uploadStart_, uploadDone: uploadDone_, mailData: mailData_,
   savePhaseDates: savePhaseDates_, saveTextSize: saveTextSize_, markupOpen: markupOpen_, saveMarkupDraft: saveMarkupDraft_, markupCopy: markupCopy_, markupExport: markupExport_,
+  presence: presence_,
 };
 
 function doPost(e) {
@@ -206,7 +207,7 @@ function boot_(req, user) {
     // v2.10 adds: est = Estimated Approved budget (Pre-pitch approved budget, the proposed budget where empty),
     // pp / rp = projects unfinished on Pitching / Re-submission, ok = projects Approved at Re-submission, fin = their
     // pitched budgets (the final budget), ver / vers = submission versions, rs = re-submissions sent,
-    // slots = the pitching slots of its projects.
+    // slots = the pitching slots of its projects; round = the submission round code (v2.13).
     const pre = byKey_(feedbackRows_('PrePitch'), 'Project Ref');
     const org = function (ref) {
       return orgs[ref] || (orgs[ref] = { count: 0, pending: 0, at: '', people: [], proposed: 0, approved: null, est: 0, pp: 0, rp: 0, ok: 0, fin: null,
@@ -217,6 +218,7 @@ function boot_(req, user) {
       x.count = Number(o['Project Count']) || 0;
       x.at = iso_(o['Submitted At']);
       x.ver = Number(o['Version']) || null;
+      x.round = String(o['Round'] || ''); // the submission round code (2569A, 2569B, ...): the Re-submission filter
     });
     s.log.forEach(function (r) {
       const a = r['Action']; const ref = r['Org Ref'];
@@ -1712,6 +1714,154 @@ function markupExport_(req, user) {
   const bytes = driveApi_('get', 'files/' + id + '/export?mimeType=' + encodeURIComponent(KINDS[kind]), null, true).getBlob().getBytes();
   if (bytes.length > MAX_BYTES) throw new Error('The edited file is over 12 MB');
   return { data: Utilities.base64Encode(bytes), src: src, kind: kind };
+}
+
+/* ---------- who is editing (v2.13) ---------- */
+// One person at a time edits a .docx / .xlsx in the page. The page claims the file and beats every 20 s; a hold with
+// no beat for EDIT_HOLD_MS is free again. Anyone else who opens the file asks the holder to share: Yes = the holder
+// saves to the site and everyone moves to one Google copy made from that saved file; No, or no answer within
+// EDIT_ASK_MS = the asker stays read-only. State lives in the script cache only (edit:<file id>), never in a Sheet,
+// so these calls stay fast. The rules are presenceStep_ (no Google services: tested in Node).
+const EDIT_HOLD_MS = 60e3; // a hold with no beat for this long is free
+const EDIT_ASK_MS = 60e3; // a request with no answer for this long has timed out
+const EDIT_SEEN_MS = 15e3; // the holder is shown only requests whose asker checked in this recently
+const EDIT_SAVE_MS = 5 * 60e3; // a Yes that never finished saving counts as No after this
+const EDIT_TTL_S = 6 * 3600; // the cache entry (and Google mode) lasts at most this long
+
+// op: claim | beat | ask | answer | handoff | pass | release | cancel | slot. claim and slot also return the slot's
+// file. handoff (Word / Excel): everyone moves to one Google copy. pass (PDF): the holder saved their marks as the
+// draft and the PDF goes to the first person waiting, who goes on from those marks.
+function presence_(req, user) {
+  need_(user, 'Staff');
+  const op = String(req.op || '');
+  if (op === 'slot') return { site: slotFile_(org__(req.org).org, req.slot) };
+  const id = String(req.id || '');
+  if (!/^[\w-]{10,}$/.test(id)) throw new Error('Bad file id');
+  let site = null;
+  if (op === 'claim') { const org = org__(req.org).org; markupFile_(org, id); site = slotFile_(org, req.slot); }
+  const c = CacheService.getScriptCache(); const key = 'edit:' + id;
+  const lock = LockService.getScriptLock();
+  if (!lock.tryLock(5000)) throw new Error('BUSY: try again');
+  try {
+    let entry = null;
+    try { entry = JSON.parse(c.get(key) || 'null'); } catch (e) { entry = null; }
+    const r = presenceStep_(entry, op, { email: user.email, login: user.login }, Date.now(), req);
+    if (r.entry) c.put(key, JSON.stringify(r.entry), EDIT_TTL_S); else c.remove(key);
+    if (site) r.out.site = site;
+    return r.out;
+  } finally { lock.releaseLock(); }
+}
+
+// The rules. e = the file's entry or null: { by (holder email, '' = nobody), login, since, beat, kind,
+// reqs: [{ by, holder, at, seen, state: wait | saving | yes | pass | no | timeout, done }], google: { src, copy, by, at } | null }.
+// Returns { entry (null = delete), out (the page's answer) }.
+function presenceStep_(e, op, who, now, a) {
+  a = a || {};
+  const me = who.email;
+  if (e) {
+    e.reqs = (e.reqs || []).map(function (q) {
+      if (q.state === 'wait' && now - q.at > EDIT_ASK_MS) return Object.assign({}, q, { state: 'timeout', done: now });
+      if (q.state === 'saving' && now - q.done > EDIT_SAVE_MS) return Object.assign({}, q, { state: 'no', done: now });
+      return q;
+    }).filter(function (q) { return now - (q.done || q.at) <= 10 * 60e3; }); // answered ones are kept 10 min
+  }
+  const held = !!(e && e.by && now - e.beat <= EDIT_HOLD_MS);
+  const mine = held && e.by === me;
+  const take = function () {
+    const keep = mine ? e : null;
+    return { by: me, login: who.login || me, since: keep ? keep.since : now, beat: now, kind: String(a.kind || (e && e.kind) || ''),
+      reqs: keep ? keep.reqs : [], google: e && e.google ? e.google : null };
+  };
+  const tidy = function (x) { return x && (x.by || x.reqs.length || x.google) ? x : null; };
+  const mineLast = function () { const l = e ? e.reqs.filter(function (q) { return q.by === me; }) : []; return l[l.length - 1] || null; };
+
+  if (op === 'claim') {
+    if (e && e.google && !held && !a.page) return { entry: e, out: { state: 'google', src: e.google.src, by: e.google.by } };
+    if (!held || mine) return { entry: take(), out: { state: 'mine' } };
+    let q = e.reqs.filter(function (x) { return x.by === me && (x.state === 'wait' || x.state === 'saving'); })[0];
+    if (q) q.seen = now;
+    else { q = { by: me, holder: e.by, at: now, seen: now, state: 'wait' }; e.reqs.push(q); }
+    return { entry: e, out: { state: 'busy', by: e.by, at: q.at } };
+  }
+  if (op === 'beat') {
+    if (held && !mine) return { entry: e, out: { lost: e.by } };
+    if (!held) return { entry: take(), out: { reqs: [] } }; // lapsed while away, and nobody else took it
+    e.beat = now;
+    return { entry: e, out: { reqs: e.reqs.filter(function (q) { return q.state === 'wait' && now - q.seen <= EDIT_SEEN_MS; })
+      .map(function (q) { return { by: q.by, at: q.at }; }) } };
+  }
+  if (op === 'ask') {
+    const q = mineLast();
+    if (!q) return { entry: tidy(e), out: { state: held ? 'gone' : 'free' } };
+    if ((q.state === 'wait' || q.state === 'timeout') && !held) { // the holder left: the file is free to claim
+      e.reqs = e.reqs.filter(function (x) { return x !== q; });
+      return { entry: tidy(e), out: { state: 'free' } };
+    }
+    if (q.state === 'wait') {
+      q.seen = now;
+      return { entry: e, out: { state: 'wait', by: e.by, at: q.at } };
+    }
+    if (q.state === 'yes') return { entry: e, out: { state: 'yes', src: e.google ? e.google.src : '', by: q.holder } };
+    return { entry: e, out: { state: q.state, by: q.holder } }; // saving | no | timeout
+  }
+  if (op === 'answer') {
+    if (!mine) throw new Error('You are no longer editing this file');
+    e.beat = now;
+    e.reqs.forEach(function (q) {
+      if (q.state === 'wait' && !a.fail) { q.state = a.yes ? 'saving' : 'no'; q.done = now; }
+      if (q.state === 'saving' && a.fail) { q.state = 'no'; q.done = now; } // the save failed: the holder stays
+    });
+    return { entry: e, out: { ok: true } };
+  }
+  if (op === 'handoff') {
+    if (!mine) throw new Error('You are no longer editing this file');
+    if (!/^[\w-]{10,}$/.test(String(a.src || ''))) throw new Error('Bad file id');
+    e.google = { src: String(a.src), copy: String(a.copy || ''), by: me, at: now };
+    e.reqs.forEach(function (q) { if (q.state === 'saving' || q.state === 'wait') { q.state = 'yes'; q.done = now; } });
+    e.by = ''; e.beat = 0;
+    return { entry: e, out: { ok: true } };
+  }
+  if (op === 'pass') {
+    if (!mine) throw new Error('You are no longer editing this file');
+    const waiting = e.reqs.filter(function (q) { return q.state === 'saving' || q.state === 'wait'; });
+    const next = waiting[0];
+    if (!next) { e.by = ''; e.beat = 0; return { entry: tidy(e), out: { ok: true } }; }
+    next.state = 'pass'; next.done = now; next.holder = me;
+    waiting.slice(1).forEach(function (q) { q.state = 'wait'; q.holder = next.by; q.at = now; q.seen = now; }); // they ask the new holder
+    e.by = next.by; e.login = next.by; e.beat = now; e.since = now;
+    return { entry: e, out: { ok: true, to: next.by } };
+  }
+  if (op === 'release') {
+    if (mine) { e.by = ''; e.beat = 0; }
+    return { entry: tidy(e), out: { ok: true } };
+  }
+  if (op === 'cancel') {
+    if (e) e.reqs = e.reqs.filter(function (q) { return !(q.by === me && q.state === 'wait'); });
+    return { entry: tidy(e), out: { ok: true } };
+  }
+  throw new Error('Bad presence op');
+}
+
+// The file a Save to site from the Edit page would replace: { id, at, by }. Noted documents add files instead of
+// replacing one: { id (the last), count, adds: true }.
+function slotFile_(org, slot) {
+  slot = String(slot || '');
+  const one = function (f, o) { return { id: f ? f.id : '', at: o ? o.at : '', by: o ? o.by : '' }; };
+  if (slot === 'xl') { const o = orgPitchOut_(orgPitchRow_(org)); return one(o && o.file, o); }
+  if (slot === 'form') { const o = orgPreOut_(orgPreRow_(org)); return one(o.file, o.file ? o : null); }
+  let m = slot.match(/^pre:(.+):(pdf|docx)$/);
+  if (m) {
+    const r = feedbackRows_('PrePitch').filter(function (x) { return x['Project Ref'] === m[1]; })[0];
+    const o = r ? preOut_(r) : null;
+    return one(o && (m[2] === 'pdf' ? o.pdfFile : o.docxFile), o);
+  }
+  m = slot.match(/^noted:(.+)$/);
+  if (m) {
+    const r = feedbackRows_('Pitching').filter(function (x) { return x['Project Ref'] === m[1]; })[0];
+    const o = r ? pitchOut_(r) : null; const list = o ? o.noted : [];
+    return { id: list.length ? list[list.length - 1].id : '', count: list.length, at: o ? o.at : '', by: o ? o.by : '', adds: true };
+  }
+  throw new Error('Bad slot');
 }
 
 /* ---------- auth ---------- */

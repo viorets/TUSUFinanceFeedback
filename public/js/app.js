@@ -146,17 +146,21 @@ async function render() {
   }
 }
 
-// Leaving a page (or tab, language, account) with unsaved edits: a window naming each unsaved project, with
-// Save and leave / Leave without saving / Stay. Every page with a Save (organization tabs, admin console, Control)
-// offers Save and leave. Closing the tab, refreshing or typing a new URL is not guarded
-// (option 2 in the plan): those edits are lost without a warning.
+// Leaving a page (or tab, language, account) with unsaved edits: a window naming each unsaved project and its
+// unsaved files, with Save and leave / Leave without saving / Stay. Every page with a Save (organization tabs, admin
+// console, Control) offers Save and leave. Closing the tab, refreshing or typing a new URL (v2.13): the browser's
+// own "Leave site?" prompt (its wording is fixed by the browser). Safari on iPad doesn't show it, so the pages also
+// keep unsaved work on the device and offer to restore it.
+addEventListener('beforeunload', (e) => { if (current?.isDirty?.()) { e.preventDefault(); e.returnValue = ''; } });
 async function confirmLeave() {
   if (!current?.isDirty?.()) return true;
   const list = current.unsaved?.() || [];
   const canSave = !!current.canSaveAll?.();
+  // Each line: code · name, then the files not saved yet ("RS-ART-12-P01 · Project — Budget form (Feedback).xlsx").
   const html = list.length
-    ? `<p>${tr('These projects have unsaved changes:', 'โครงการเหล่านี้มีการแก้ไขที่ยังไม่ได้บันทึก:')}</p>
-      <ul class="unsaved">${list.map((p) => `<li><span class="code">${esc(p.ref)}</span><span>${esc(p.name || '—')}</span></li>`).join('')}</ul>`
+    ? `<p>${tr('These have unsaved changes:', 'รายการเหล่านี้มีการแก้ไขที่ยังไม่ได้บันทึก:')}</p>
+      <ul class="unsaved">${list.map((p) => `<li><span class="code">${esc(p.code || p.ref)}</span><span>${esc(p.name || '—')}${p.files?.length
+        ? `<small class="unsaved-files">${p.files.map((f) => esc(f)).join('<br>')}</small>` : ''}</span></li>`).join('')}</ul>`
     : `<p>${tr('Your unsaved changes will be lost.', 'การแก้ไขที่ยังไม่บันทึกจะหายไป')}</p>`;
   const buttons = [
     { v: 'leave', label: tr('Leave without saving', 'ออกโดยไม่บันทึก'), cls: 'danger' },
@@ -164,7 +168,7 @@ async function confirmLeave() {
   ];
   if (canSave) buttons.push({ v: 'save', label: tr('Save and leave', 'บันทึกแล้วออก'), cls: 'primary' });
   const v = await dialog(tr('Unsaved changes', 'มีการแก้ไขที่ยังไม่บันทึก'), html, buttons, { none: 'stay' });
-  if (v === 'leave') return true;
+  if (v === 'leave') { current.discard?.(); return true; }
   if (v !== 'save') return false;
   try { await current.saveAll(); return true; } catch (e) { await errorBox(e.message); return false; }
 }

@@ -6,11 +6,12 @@
 import { tr } from '../i18n.js';
 import { $, esc, icon, toast, moneyBox, parseMoney, liveMoney, dateTimeFmt, busy, errorBox, moneyOr } from '../ui.js';
 import { save as send, upload, forget } from '../api.js';
-import { cardTop, dlBtn, fileChip, progress, slotLine, star, capNote, editBtn, onMarked } from '../project.js';
+import { cardTop, dlBtn, fileChip, progress, slotLine, star, capNote, editBtn, onMarked, newFiles, markCard, kept, earlierNotice } from '../project.js';
 
 // "Show Pre-pitch data" (v2.12): each card also shows its Pre-pitch notes, read only. Kept on this device.
-let showPre = false;
-try { showPre = localStorage.getItem('showPrePitch') === '1'; } catch { /* private mode */ }
+// "Show Pre-pitch data" (v2.13): one toggle per project card (and one for the Correct Excel box, key 'xl'); open ones
+// stay open while this page is open.
+const openPre = new Set();
 
 let st = null; // { el, d, can, form: { ref: working copy }, xl: Correct Excel working copy (file or null) }
 
@@ -18,21 +19,83 @@ const pick = (x = {}) => ({ summary: x.summary || '', finalBudget: x.finalBudget
 const dirty = (ref) => JSON.stringify(st.form[ref]) !== JSON.stringify(pick(st.d.pitch[ref]));
 const xlDirty = () => !!st && (st.xl?.id || '') !== (st.d.orgPitch?.file?.id || '');
 export const isDirty = () => !!st && (xlDirty() || st.d.projects.some((p) => dirty(p.ref)));
-// Unsaved edits, for the leave window: [{ ref, name }] (the Correct Excel box first, ref 'excel').
-export const unsaved = () => (st ? [...(xlDirty() ? [{ ref: 'excel', name: tr('Correct Excel file', 'ไฟล์ Excel ฉบับแก้ไข') }] : []),
-  ...st.d.projects.filter((p) => dirty(p.ref)).map((p) => ({ ref: p.ref, name: p.name }))] : []);
+// Unsaved edits, for the leave window: [{ ref, code, name, files }] (the Correct Excel box first, ref 'excel', shown
+// under the organization's code); files = the names of files not kept with Save yet.
+const XL = () => tr('Correct Excel file', 'ไฟล์ Excel ฉบับแก้ไข');
+const notedNew = (ref, work = st.form[ref]) => newFiles(work.noted, st.d.pitch[ref]?.noted).map((f) => f.name);
+export const unsaved = () => (st ? [...(xlDirty() ? [{ ref: 'excel', code: orgRef(), name: XL(), files: st.xl ? [st.xl.name] : [] }] : []),
+  ...st.d.projects.filter((p) => dirty(p.ref)).map((p) => ({ ref: p.ref, name: p.name, files: notedNew(p.ref) }))] : []);
+// Leave without saving: what was kept on this device for this tab goes too.
+export const discard = () => { if (st) kept.write(keptKey(), null); };
 // "Save and leave": saves each unsaved part; throws at the first that fails.
 export async function saveAll() { for (const p of unsaved()) await (p.ref === 'excel' ? saveXl() : save(p.ref)); }
 
-export function render(el, d, ctx) {
-  st = { el, d, ctx, can: ctx.canEdit, form: Object.fromEntries(d.projects.map((p) => [p.ref, pick(d.pitch[p.ref])])), xl: d.orgPitch?.file || null };
-  el.innerHTML = `<div data-progress></div><label class="check show-pre"><input type="checkbox" data-show-pre ${showPre ? 'checked' : ''}>${tr('Show Pre-pitch data', 'แสดงข้อมูลก่อนการนำเสนอ')}</label>
-    ${xlBox()}${d.projects.map(card).join('')}`;
+// restored: unsaved work kept on this device and put back ({ parts: { ref: working copy }, xl? }).
+export function render(el, d, ctx, restored = null) {
+  st = { el, d, ctx, can: ctx.canEdit, form: Object.fromEntries(d.projects.map((p) => [p.ref, restored?.parts?.[p.ref] || pick(d.pitch[p.ref])])),
+    xl: restored && 'xl' in restored ? restored.xl : d.orgPitch?.file || null };
+  el.innerHTML = `<div data-progress></div>${xlBox()}${d.projects.map(card).join('')}`;
   progress(el, d, 'pitching');
-  el.oninput = onInput;
-  el.onchange = onChange;
-  el.onclick = onClick;
+  el.oninput = (e) => { onInput(e); marks(); };
+  el.onchange = async (e) => { await onChange(e); marks(); };
+  el.onclick = async (e) => { await onClick(e); marks(); };
   onMarked(marked);
+  marks();
+  if (!restored) offerKept();
+}
+
+// ---------- unsaved work (v2.13) ----------
+// "Not saved" on each card / box with unsaved changes, and the unsaved parts kept on this device.
+function marks() {
+  if (!st?.el.isConnected) return;
+  st.el.querySelectorAll('.pcard').forEach((sec) => markCard(sec, dirty(sec.dataset.ref)));
+  markCard(st.el.querySelector('.xl-box'), xlDirty());
+  keepSoon();
+}
+const keptKey = () => `unsaved:${st.ctx.me?.email || ''}:${orgRef()}:pitching`;
+let keepT = 0;
+const keepSoon = () => { clearTimeout(keepT); keepT = setTimeout(keepNow, 400); };
+// The dirty parts with the saved time they started from (base). While the earlier copy hasn't been answered, its
+// parts are kept too.
+function keepNow() {
+  if (!st?.can || !st.el.isConnected) return;
+  const parts = {};
+  st.d.projects.forEach((p) => { if (dirty(p.ref)) parts[p.ref] = { work: st.form[p.ref], base: st.d.pitch[p.ref]?.at || '' }; });
+  let xl = xlDirty() ? { work: st.xl, base: st.d.orgPitch?.at || '' } : null;
+  if (st.offered) {
+    const old = kept.read(keptKey()) || {};
+    Object.entries(old.parts || {}).forEach(([r, v]) => { if (!parts[r]) parts[r] = v; });
+    xl = xl || old.xl || null;
+  }
+  kept.write(keptKey(), Object.keys(parts).length || xl ? { at: new Date().toISOString(), parts, xl } : null);
+}
+document.addEventListener('visibilitychange', () => { if (document.hidden) keepNow(); });
+addEventListener('pagehide', () => keepNow());
+
+// Work kept from an earlier visit: Restore (only parts nobody saved since) or Discard.
+function offerKept() {
+  const k = kept.read(keptKey());
+  if (!st.can || !k || (!Object.keys(k.parts || {}).length && !k.xl)) return;
+  st.offered = true;
+  const nameOf = (r) => st.d.projects.find((p) => p.ref === r)?.name || '';
+  const names = [...(k.xl ? [`${orgRef()} · ${XL()}${k.xl.work ? ` — ${k.xl.work.name}` : ''}`] : []),
+    ...Object.entries(k.parts || {}).map(([r, v]) => { const f = notedNew(r, v.work); return `${r} · ${nameOf(r)}${f.length ? ` — ${f.join(', ')}` : ''}`; })];
+  earlierNotice(st.el, { at: k.at, names }, () => restoreKept(k), () => { st.offered = false; kept.write(keptKey(), null); keepNow(); });
+}
+function restoreKept(k) {
+  const parts = {}; const skipped = [];
+  Object.entries(k.parts || {}).forEach(([r, v]) => {
+    if (!st.d.projects.some((p) => p.ref === r)) return;
+    if ((st.d.pitch[r]?.at || '') === v.base) parts[r] = v.work; else skipped.push(r);
+  });
+  const restored = { parts };
+  if (k.xl) { if ((st.d.orgPitch?.at || '') === k.xl.base) restored.xl = k.xl.work; else skipped.push(XL()); }
+  st.offered = false;
+  render(st.el, st.d, st.ctx, restored);
+  if (skipped.length) {
+    errorBox(tr('Someone saved these on the site after your changes were kept, so they were not restored: {list}', 'มีผู้บันทึกรายการเหล่านี้บนเว็บไซต์หลังจากเก็บการแก้ไขของคุณไว้ จึงไม่ได้กู้คืน: {list}', { list: skipped.join(', ') }),
+      tr('Some changes were not restored', 'การแก้ไขบางส่วนไม่ได้กู้คืน'));
+  } else toast(tr('Restored — press Save to keep them', 'กู้คืนแล้ว — กดบันทึกเพื่อเก็บ'));
 }
 
 // A file saved by the editor tab (v2.12): the Correct Excel file is replaced, a Noted document is added; Save keeps it.
@@ -49,6 +112,7 @@ function marked({ org, slot, file }) {
     $('[data-noted]', sec).innerHTML = noted(ref);
   }
   toast(tr('Edited file attached — press Save to keep it', 'แนบไฟล์ที่แก้ไขแล้ว — กดบันทึกเพื่อเก็บ'));
+  marks();
   return true;
 }
 
@@ -66,7 +130,7 @@ function xlBox() {
 }
 function xlSlot() {
   const f = st.xl;
-  return `<div class="upl">${fileChip(f)}${st.can ? editBtn(f, { org: orgRef(), slot: 'xl', plain: true }) : ''}${!f && !st.can ? '<span class="muted">—</span>' : ''}
+  return `<div class="upl">${fileChip(f, { unsaved: xlDirty() })}${st.can ? editBtn(f, { org: orgRef(), slot: 'xl', plain: true }) : ''}${!f && !st.can ? '<span class="muted">—</span>' : ''}
     ${st.can ? `<label class="btn">${icon('upload', 16)}${f ? tr('Replace', 'เปลี่ยนไฟล์') : tr('Upload Excel', 'อัปโหลด Excel')}<input type="file" hidden accept=".xlsx,.xls" data-xl></label>` : ''}
     ${f && st.can ? `<button type="button" class="btn plain" data-xl-clear>${tr('Remove', 'นำออก')}</button>` : ''}</div>${st.can ? capNote('.xlsx / .xls') : ''}`;
 }
@@ -88,11 +152,13 @@ function card(p) {
 
 // Pre-pitch notes, read only (shown with "Show Pre-pitch data").
 const yesNo = (v) => (v === 'Yes' ? tr('Yes', 'ใช่') : v === 'No' ? tr('No', 'ไม่') : '—');
+const preToggle = (key) => `<button type="button" class="btn plain pre-toggle" data-pre-toggle="${esc(key)}" aria-expanded="${openPre.has(key)}">${icon('down', 14)}${openPre.has(key)
+  ? tr('Hide Pre-pitch data', 'ซ่อนข้อมูลก่อนการนำเสนอ') : tr('Show Pre-pitch data', 'แสดงข้อมูลก่อนการนำเสนอ')}</button>`;
 function prePeek(ref) {
-  if (!showPre) return '';
+  if (!openPre.has(ref)) return preToggle(ref);
   const x = st.d.pre?.[ref] || {};
   const row = (k, v) => `<dt>${esc(k)}</dt><dd>${v}</dd>`;
-  return `<div class="fb pre-peek"><h4>${tr('Pre-pitch data', 'ข้อมูลก่อนการนำเสนอ')}</h4><dl class="kv">
+  return `${preToggle(ref)}<div class="fb pre-peek"><h4>${tr('Pre-pitch data', 'ข้อมูลก่อนการนำเสนอ')}</h4><dl class="kv">
     ${row(tr('Estimated Approved budget', 'งบประมาณที่คาดว่าจะได้รับอนุมัติ'), esc(moneyOr(x.approvedBudget)))}
     ${row(tr('Approved project .docx?', 'อนุมัติไฟล์โครงการ .docx?'), `${esc(yesNo(x.docxOk))} ${fileChip(x.docxFile)}`)}
     ${row(tr('Approved project PDF?', 'อนุมัติไฟล์โครงการ PDF?'), `${esc(yesNo(x.pdfOk))} ${fileChip(x.pdfFile)}`)}
@@ -100,9 +166,9 @@ function prePeek(ref) {
     ${row(tr('Documents', 'เอกสาร'), (x.docs || []).map(fileChip).join(' ') || '—')}</dl></div>`;
 }
 function preForm() {
-  if (!showPre) return '';
+  if (!openPre.has('xl')) return preToggle('xl');
   const x = st.d.orgPre || {};
-  return `<dl class="kv pre-peek"><dt>${tr('Feedback on the budget form', 'ข้อเสนอแนะต่อแบบฟอร์มงบประมาณ')}</dt><dd>${x.note ? esc(x.note).replace(/\n/g, '<br>') : '—'} ${fileChip(x.file)}</dd></dl>`;
+  return `${preToggle('xl')}<dl class="kv pre-peek"><dt>${tr('Feedback on the budget form', 'ข้อเสนอแนะต่อแบบฟอร์มงบประมาณ')}</dt><dd>${x.note ? esc(x.note).replace(/\n/g, '<br>') : '—'} ${fileChip(x.file)}</dd></dl>`;
 }
 
 const savedLine = (s) => (s?.pending ? `<span class="pill orange">${tr('Pending', 'รอส่ง')}</span> ${tr('Kept on this device; it is sent when the server can be reached', 'เก็บไว้ในเครื่องนี้ จะส่งเมื่อติดต่อเซิร์ฟเวอร์ได้')}`
@@ -110,7 +176,8 @@ const savedLine = (s) => (s?.pending ? `<span class="pill orange">${tr('Pending'
 
 function noted(ref) {
   const list = st.form[ref].noted;
-  return `<div class="upl">${list.map((f, i) => `${fileChip(f)}${st.can ? editBtn(f, { org: orgRef(), slot: `noted:${ref}`, plain: true }) : ''}${st.can ? `<button class="icon-btn" data-rm="${i}" title="${esc(tr('Remove from list', 'นำออกจากรายการ'))}">${icon('x', 16)}</button>` : ''}`).join('')}
+  const fresh = new Set(newFiles(list, st.d.pitch[ref]?.noted).map((f) => f.id));
+  return `<div class="upl">${list.map((f, i) => `${fileChip(f, { unsaved: fresh.has(f.id) })}${st.can ? editBtn(f, { org: orgRef(), slot: `noted:${ref}`, plain: true }) : ''}${st.can ? `<button class="icon-btn" data-rm="${i}" title="${esc(tr('Remove from list', 'นำออกจากรายการ'))}">${icon('x', 16)}</button>` : ''}`).join('')}
     ${!list.length && !st.can ? '<span class="muted">—</span>' : ''}
     ${st.can ? `<label class="btn">${icon('upload', 16)}${tr('Upload .docx or PDF', 'อัปโหลด .docx หรือ PDF')}<input type="file" hidden multiple accept=".docx,.pdf" data-up></label>` : ''}</div>${st.can ? capNote('.docx / PDF') : ''}`;
 }
@@ -127,13 +194,6 @@ function onInput(e) {
 }
 
 async function onChange(e) {
-  if (e.target.hasAttribute('data-show-pre')) {
-    showPre = e.target.checked;
-    try { localStorage.setItem('showPrePitch', showPre ? '1' : '0'); } catch { /* this visit only */ }
-    $('[data-pre-form]', st.el).innerHTML = preForm();
-    st.el.querySelectorAll('.pcard').forEach((sec) => { $('[data-pre]', sec).innerHTML = prePeek(sec.dataset.ref); });
-    return;
-  }
   if (e.target.hasAttribute('data-xl') && e.target.files?.[0]) {
     const file = e.target.files[0];
     try {
@@ -162,6 +222,14 @@ async function onChange(e) {
 }
 
 async function onClick(e) {
+  const pt = e.target.closest('[data-pre-toggle]');
+  if (pt) {
+    const key = pt.dataset.preToggle;
+    if (openPre.has(key)) openPre.delete(key); else openPre.add(key);
+    if (key === 'xl') $('[data-pre-form]', st.el).innerHTML = preForm();
+    else $('[data-pre]', pt.closest('.pcard')).innerHTML = prePeek(key);
+    return;
+  }
   if (e.target.closest('[data-xl-clear]')) { st.xl = null; $('[data-xl-slot]', st.el).innerHTML = xlSlot(); return; }
   if (e.target.closest('[data-save-xl]')) { await run(e.target.closest('button'), saveXl); return; }
   const ref = refOf(e);
@@ -208,7 +276,8 @@ async function save(ref) {
   forget('dashboard');
   st.form[ref] = pick(out.pitch);
   const sec = st.el.querySelector(`.pcard[data-ref="${CSS.escape(ref)}"]`);
-  if (sec) $('[data-saved]', sec).innerHTML = savedLine(out.pitch);
+  if (sec) { $('[data-saved]', sec).innerHTML = savedLine(out.pitch); $('[data-noted]', sec).innerHTML = noted(ref); }
+  marks();
   return out;
 }
 
@@ -228,5 +297,6 @@ async function saveXl() {
   st.ctx.persist?.();
   $('[data-xl-saved]', st.el).innerHTML = savedLine(out.orgPitch);
   $('[data-xl-slot]', st.el).innerHTML = xlSlot();
+  marks();
   return out;
 }

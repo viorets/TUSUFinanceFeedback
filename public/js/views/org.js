@@ -22,6 +22,7 @@ export const isDirty = () => !!state?.mod?.isDirty?.();
 export const unsaved = () => state?.mod?.unsaved?.() || [];
 export const saveAll = () => state?.mod?.saveAll?.();
 export const canSaveAll = () => !!state?.mod?.saveAll;
+export const discard = () => state?.mod?.discard?.(); // Leave without saving: drop the copy kept on this device
 
 export async function render(page, ctx, route) {
   const body = { ref: route.ref };

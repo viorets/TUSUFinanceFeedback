@@ -690,3 +690,19 @@ svg.chart [data-tip]:hover { opacity: .85; }
 #textSize { width: 5em; }
 .date-row { gap: 10px; flex-wrap: wrap; }
 .date-row input[type=date] { font: inherit; font-size: 14px; padding: 4px 8px; border: 1px solid var(--sep); border-radius: 8px; background: var(--bg); color: var(--text); }
+
+/* v2.13: uploaded files (Correct Excel file, Noted documents, feedback files, Documents) filled light blue, the
+   same tint as the project-day band on the calendar, so they stand out from the links around them. */
+.upl .fchip { background: rgba(43, 171, 194, .2); border-color: rgba(43, 171, 194, .35); color: var(--ink); font-weight: 500; }
+.upl .fchip a { color: var(--ink); }
+/* Unsaved work: the "Not saved" tag beside a file and in a card / box heading; the list in the leave window; the
+   "changes from earlier" notice. */
+.not-saved { margin-left: 4px; }
+.pcard-head .not-saved, .fb h4 .not-saved { margin-left: 10px; vertical-align: middle; }
+.unsaved-files { display: block; color: var(--text2); margin-top: 2px; overflow-wrap: anywhere; }
+.notice.earlier { align-items: center; flex-wrap: wrap; background: rgba(255, 159, 10, .12); border: 1px solid rgba(255, 159, 10, .4); }
+.notice.earlier .grow { flex: 1; min-width: 220px; }
+.earlier-list { display: block; margin-top: 4px; color: var(--text2); overflow-wrap: anywhere; }
+/* Pre-pitch data: one toggle per project card (v2.13). */
+.pre-toggle { margin: 4px 0 8px; font-size: 14px; }
+.pre-toggle[aria-expanded="true"] .ic { transform: rotate(180deg); }
