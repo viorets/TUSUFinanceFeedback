@@ -190,7 +190,13 @@ export async function openPdfEditor(root, { bytes, name, draft = null, t = (en) 
   const markAt = (e) => e.target.closest('[data-id]')?.dataset.id || null;
 
   let drag = null;
+  // Apple Pencil (v2.13): once a pen has been used, finger touches on a page no longer mark it (a resting palm
+  // would draw); switch to Select to scroll by finger. One pointer at a time: a second touch never takes over a stroke.
+  let penSeen = false;
+  const penOnly = () => penSeen && ['pen', 'line', 'arrow', 'rect'].includes(st.tool);
   pagesEl.addEventListener('pointerdown', (e) => {
+    if (e.pointerType === 'pen') penSeen = true;
+    if (drag || (e.pointerType === 'touch' && penOnly())) return;
     const pel = e.target.closest('.mk-page'); if (!pel || e.button !== 0) return;
     const p = pages[+pel.dataset.page]; const pt = at(p, e);
     if (st.tool === 'highlight') return; // the text layer selects; pointerup turns the selection into a highlight
@@ -207,18 +213,18 @@ export async function openPdfEditor(root, { bytes, name, draft = null, t = (en) 
       if (!id) return;
       const m = st.marks.find((x) => x.id === id);
       if (m.type === 'text' && e.detail === 2) { editBox(p, id); return; }
-      snapshot(); drag = { kind: 'move', p, last: pt, m, moved: false };
+      snapshot(); drag = { kind: 'move', p, last: pt, m, moved: false, id: e.pointerId };
       pel.setPointerCapture(e.pointerId); e.preventDefault();
       return;
     }
     snapshot();
     const base = { id: uid(), page: +pel.dataset.page, color: st.shapeColor, width: st.width };
     const m = st.tool === 'pen' ? { ...base, type: 'pen', pts: [pt] } : st.tool === 'rect' ? { ...base, type: 'rect', x: pt[0], y: pt[1], w: 0, h: 0 } : { ...base, type: st.tool, a: pt, b: pt };
-    st.marks.push(m); drag = { kind: 'draw', p, start: pt, m };
+    st.marks.push(m); drag = { kind: 'draw', p, start: pt, m, id: e.pointerId };
     pel.setPointerCapture(e.pointerId); e.preventDefault(); paint();
   });
   pagesEl.addEventListener('pointermove', (e) => {
-    if (!drag) return;
+    if (!drag || e.pointerId !== drag.id) return;
     const pt = at(drag.p, e); const m = drag.m;
     if (drag.kind === 'move') {
       const dx = pt[0] - drag.last[0], dy = pt[1] - drag.last[1]; drag.last = pt; drag.moved = true;
@@ -236,8 +242,8 @@ export async function openPdfEditor(root, { bytes, name, draft = null, t = (en) 
     } else m.b = snap(drag.start, pt, e.shiftKey);
     paint();
   });
-  const endDrag = () => {
-    if (!drag) return;
+  const endDrag = (e) => {
+    if (!drag || e.pointerId !== drag.id) return;
     const { m, kind, moved } = drag; drag = null;
     if (kind === 'move' && !moved) { st.undo.pop(); return; } // a click that only selected
     const tiny = (m.type === 'rect' && m.w < 2 && m.h < 2) || ((m.type === 'line' || m.type === 'arrow') && Math.hypot(m.b[0] - m.a[0], m.b[1] - m.a[1]) < 2) || (m.type === 'pen' && m.pts.length < 2);
