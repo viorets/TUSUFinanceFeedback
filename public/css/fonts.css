@@ -1,0 +1,44 @@
+/* Fonts for the Word / Excel editors (v2.13, 23 Oct 2026): every font in the editor's font list shows on any device.
+   Free fonts are hosted here (fonts/): TH SarabunPSK and TH Sarabun New (SIPA, free to share), Sarabun and Noto Sans Thai
+   (SIL OFL), Carlito, Arimo, Tinos (SIL OFL / Apache, metric-compatible with Calibri, Arial, Times New Roman).
+   Microsoft fonts can't be shared, so each name uses the font installed on the device (local()) and, where it
+   isn't (an iPad), a free look-alike. "TH Sarabun PSK" (with a space, as Word files often write it) and
+   "TH SarabunPSK" (the installed name) are the same font. */
+@font-face { font-family: "TH SarabunPSK"; src: local("TH SarabunPSK"), url("../fonts/THSarabunPSK-Regular.ttf") format("truetype"); font-weight: 400; font-style: normal; font-display: swap; }
+@font-face { font-family: "TH Sarabun PSK"; src: local("TH SarabunPSK"), url("../fonts/THSarabunPSK-Regular.ttf") format("truetype"); font-weight: 400; font-style: normal; font-display: swap; }
+@font-face { font-family: "TH SarabunPSK"; src: local("TH SarabunPSK Bold"), url("../fonts/THSarabunPSK-Bold.ttf") format("truetype"); font-weight: 700; font-style: normal; font-display: swap; }
+@font-face { font-family: "TH Sarabun PSK"; src: local("TH SarabunPSK Bold"), url("../fonts/THSarabunPSK-Bold.ttf") format("truetype"); font-weight: 700; font-style: normal; font-display: swap; }
+@font-face { font-family: "TH SarabunPSK"; src: local("TH SarabunPSK Italic"), url("../fonts/THSarabunPSK-Italic.ttf") format("truetype"); font-weight: 400; font-style: italic; font-display: swap; }
+@font-face { font-family: "TH Sarabun PSK"; src: local("TH SarabunPSK Italic"), url("../fonts/THSarabunPSK-Italic.ttf") format("truetype"); font-weight: 400; font-style: italic; font-display: swap; }
+@font-face { font-family: "TH SarabunPSK"; src: local("TH SarabunPSK Bold Italic"), url("../fonts/THSarabunPSK-BoldItalic.ttf") format("truetype"); font-weight: 700; font-style: italic; font-display: swap; }
+@font-face { font-family: "TH Sarabun PSK"; src: local("TH SarabunPSK Bold Italic"), url("../fonts/THSarabunPSK-BoldItalic.ttf") format("truetype"); font-weight: 700; font-style: italic; font-display: swap; }
+@font-face { font-family: "TH Sarabun New"; src: local("TH Sarabun New"), url("../fonts/THSarabunNew-Regular.ttf") format("truetype"); font-weight: 400; font-style: normal; font-display: swap; }
+@font-face { font-family: "TH Sarabun New"; src: local("TH Sarabun New Bold"), url("../fonts/THSarabunNew-Bold.ttf") format("truetype"); font-weight: 700; font-style: normal; font-display: swap; }
+@font-face { font-family: "TH Sarabun New"; src: local("TH Sarabun New Italic"), url("../fonts/THSarabunNew-Italic.ttf") format("truetype"); font-weight: 400; font-style: italic; font-display: swap; }
+@font-face { font-family: "TH Sarabun New"; src: local("TH Sarabun New Bold Italic"), url("../fonts/THSarabunNew-BoldItalic.ttf") format("truetype"); font-weight: 700; font-style: italic; font-display: swap; }
+@font-face { font-family: "Sarabun"; src: local("Sarabun"), url("../fonts/Sarabun-Regular.ttf") format("truetype"); font-weight: 400; font-style: normal; font-display: swap; }
+@font-face { font-family: "Sarabun"; src: local("Sarabun Bold"), url("../fonts/Sarabun-Bold.ttf") format("truetype"); font-weight: 700; font-style: normal; font-display: swap; }
+@font-face { font-family: "Sarabun"; src: local("Sarabun Italic"), url("../fonts/Sarabun-Italic.ttf") format("truetype"); font-weight: 400; font-style: italic; font-display: swap; }
+@font-face { font-family: "Sarabun"; src: local("Sarabun Bold Italic"), url("../fonts/Sarabun-BoldItalic.ttf") format("truetype"); font-weight: 700; font-style: italic; font-display: swap; }
+@font-face { font-family: "Noto Sans Thai"; src: local("Noto Sans Thai"), url("../fonts/NotoSansThai-VF.ttf") format("truetype"); font-weight: 100 900; font-style: normal; font-display: swap; }
+@font-face { font-family: "Calibri"; src: local("Calibri"), url("../fonts/Carlito-Regular.ttf") format("truetype"); font-weight: 400; font-style: normal; font-display: swap; }
+@font-face { font-family: "Calibri"; src: local("Calibri Bold"), url("../fonts/Carlito-Bold.ttf") format("truetype"); font-weight: 700; font-style: normal; font-display: swap; }
+@font-face { font-family: "Calibri"; src: local("Calibri Italic"), url("../fonts/Carlito-Italic.ttf") format("truetype"); font-weight: 400; font-style: italic; font-display: swap; }
+@font-face { font-family: "Calibri"; src: local("Calibri Bold Italic"), url("../fonts/Carlito-BoldItalic.ttf") format("truetype"); font-weight: 700; font-style: italic; font-display: swap; }
+@font-face { font-family: "Arial"; src: local("Arial"), url("../fonts/Arimo-VF.ttf") format("truetype"); font-weight: 400 700; font-style: normal; font-display: swap; }
+@font-face { font-family: "Arial"; src: local("Arial Italic"), url("../fonts/Arimo-Italic-VF.ttf") format("truetype"); font-weight: 400 700; font-style: italic; font-display: swap; }
+@font-face { font-family: "Times New Roman"; src: local("Times New Roman"), url("../fonts/Tinos-Regular.ttf") format("truetype"); font-weight: 400; font-style: normal; font-display: swap; }
+@font-face { font-family: "Times New Roman"; src: local("Times New Roman Bold"), url("../fonts/Tinos-Bold.ttf") format("truetype"); font-weight: 700; font-style: normal; font-display: swap; }
+@font-face { font-family: "Times New Roman"; src: local("Times New Roman Italic"), url("../fonts/Tinos-Italic.ttf") format("truetype"); font-weight: 400; font-style: italic; font-display: swap; }
+@font-face { font-family: "Times New Roman"; src: local("Times New Roman Bold Italic"), url("../fonts/Tinos-BoldItalic.ttf") format("truetype"); font-weight: 700; font-style: italic; font-display: swap; }
+@font-face { font-family: "Tahoma"; src: local("Tahoma"), url("../fonts/Arimo-VF.ttf") format("truetype"); font-weight: 400 700; font-style: normal; font-display: swap; }
+@font-face { font-family: "Tahoma"; src: local("Tahoma Italic"), url("../fonts/Arimo-Italic-VF.ttf") format("truetype"); font-weight: 400 700; font-style: italic; font-display: swap; }
+@font-face { font-family: "Leelawadee UI"; src: local("Leelawadee UI"), url("../fonts/NotoSansThai-VF.ttf") format("truetype"); font-weight: 100 900; font-style: normal; font-display: swap; }
+@font-face { font-family: "Angsana New"; src: local("Angsana New"), url("../fonts/THSarabunPSK-Regular.ttf") format("truetype"); font-weight: 400; font-style: normal; font-display: swap; }
+@font-face { font-family: "Angsana New"; src: local("Angsana New Bold"), url("../fonts/THSarabunPSK-Bold.ttf") format("truetype"); font-weight: 700; font-style: normal; font-display: swap; }
+@font-face { font-family: "Angsana New"; src: local("Angsana New Italic"), url("../fonts/THSarabunPSK-Italic.ttf") format("truetype"); font-weight: 400; font-style: italic; font-display: swap; }
+@font-face { font-family: "Angsana New"; src: local("Angsana New Bold Italic"), url("../fonts/THSarabunPSK-BoldItalic.ttf") format("truetype"); font-weight: 700; font-style: italic; font-display: swap; }
+@font-face { font-family: "Cordia New"; src: local("Cordia New"), url("../fonts/THSarabunPSK-Regular.ttf") format("truetype"); font-weight: 400; font-style: normal; font-display: swap; }
+@font-face { font-family: "Cordia New"; src: local("Cordia New Bold"), url("../fonts/THSarabunPSK-Bold.ttf") format("truetype"); font-weight: 700; font-style: normal; font-display: swap; }
+@font-face { font-family: "Cordia New"; src: local("Cordia New Italic"), url("../fonts/THSarabunPSK-Italic.ttf") format("truetype"); font-weight: 400; font-style: italic; font-display: swap; }
+@font-face { font-family: "Cordia New"; src: local("Cordia New Bold Italic"), url("../fonts/THSarabunPSK-BoldItalic.ttf") format("truetype"); font-weight: 700; font-style: italic; font-display: swap; }
