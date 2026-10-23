@@ -55,3 +55,6 @@
 .mk-steps .ic { vertical-align: -2px; }
 .mk-lock { display: flex; gap: 6px; align-items: center; }
 .mk-ctl input[type=number] { width: 4em; font: inherit; padding: 2px 6px; border: 1px solid rgba(0, 0, 0, .15); border-radius: 6px; }
+/* Word / Excel edited in the page (v2.13 prototype; editor styles in office-edit.css). */
+.markup-page .mk-office { background: #fff; padding: 6px 10px 10px; box-shadow: 0 0 0 1px rgba(0, 99, 113, .12); }
+.markup-page .mk-office .oe-bar { font-size: 14px; }
