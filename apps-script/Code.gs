@@ -1354,7 +1354,7 @@ function dummySetup_() {
   let folder = null;
   try { folder = got._folder ? DriveApp.getFolderById(got._folder) : null; } catch (e) { folder = null; }
   if (!folder) { folder = DriveApp.getFolderById(DRIVE_FOLDER_ID).createFolder('Dummy 2569A budget forms (deleted 31 Oct 2026 18:00)'); got._folder = folder.getId(); }
-  const tpl = Utilities.newBlob(Utilities.base64Decode(DUMMY_FORM_B64), KINDS.xlsx, 'form.xlsx');
+  const tpl = Utilities.newBlob(Utilities.base64Decode(DUMMY_FORM_B64), 'application/zip', 'form.xlsx'); // unzip takes zip-typed blobs only
   const start = Date.now(); let made = 0; const errors = [];
   const editable = /^(xl\/workbook\.xml|xl\/_rels\/workbook\.xml\.rels|xl\/worksheets\/sheet\d+\.xml)$/;
   for (let i = 0; i < DUMMY_DATA.orgs.length; i++) {
@@ -1381,7 +1381,7 @@ function docItems_(link, ref, errors) {
   const id = (String(link || '').match(/[?&]id=([\w-]+)|\/d\/([\w-]+)/) || []).slice(1).filter(Boolean)[0];
   if (!id) return [];
   try {
-    const doc = Utilities.unzip(DriveApp.getFileById(id).getBlob()).filter(function (b) { return b.getName() === 'word/document.xml'; })[0];
+    const doc = Utilities.unzip(DriveApp.getFileById(id).getBlob().setContentType('application/zip')).filter(function (b) { return b.getName() === 'word/document.xml'; })[0];
     return doc ? dfBudget_(doc.getDataAsString('UTF-8')) : [];
   } catch (e) { errors.push(ref + ': ' + (e && e.message || e)); return []; }
 }
