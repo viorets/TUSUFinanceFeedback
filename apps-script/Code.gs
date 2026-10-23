@@ -188,7 +188,14 @@ function doPost(e) {
   }
 }
 
-function doGet() { return json_({ ok: true, service: 'TUSU Budget Pitching — Feedback' }); }
+function doGet(e) {
+  // Dummy budget forms (v2.13.1): ?dummy=<DUMMY_KEY> (DummyData.gs) builds the next batch until it answers done.
+  const key = e && e.parameter && e.parameter.dummy;
+  if (key && typeof DUMMY_KEY !== 'undefined' && key === DUMMY_KEY && dummyOn_()) {
+    try { return json_(Object.assign({ ok: true }, dummySetup_())); } catch (err) { return json_({ ok: false, error: String(err && err.message || err) }); }
+  }
+  return json_({ ok: true, service: 'TUSU Budget Pitching — Feedback' });
+}
 
 /* ---------- reads ---------- */
 
@@ -1316,13 +1323,169 @@ function subsRaw_() {
 // stamp changes then, so no cached answer keeps them); after that, delete DummyData.gs.
 const DUMMY_UNTIL = Date.parse('2026-10-31T18:00:00+07:00');
 function dummyOn_() { return typeof DUMMY_DATA !== 'undefined' && Date.now() < DUMMY_UNTIL; }
+// The dummy budget forms made by dummySetup_: { <Org Ref>: file id, _folder: folder id } (script property).
+function dummyForms_() { return memo_('dummyForms', function () { try { return JSON.parse(PropertiesService.getScriptProperties().getProperty('DUMMY_FORMS') || '{}'); } catch (e) { return {}; } }); }
 function dummy_(s) {
-  if (!dummyOn_()) return s;
+  if (!dummyOn_()) { dummyGone_(); return s; }
   const real = {};
   s.orgs.forEach(function (o) { if (roundOf_(o) === '2569A') real[o['Org Ref']] = true; });
   const add = function (r) { return !real[r['Org Ref']]; };
-  return { orgs: s.orgs.concat(DUMMY_DATA.orgs.filter(add)), projects: s.projects.concat(DUMMY_DATA.projects.filter(add)), log: s.log.concat(DUMMY_DATA.log.filter(add)) };
+  const forms = dummyForms_();
+  const linked = function (o) { // the organization's budget form = its filled dummy form
+    const id = forms[o['Org Ref']];
+    return id ? Object.assign({}, o, { 'Budget Proposal Form (.xlsx)': 'https://drive.google.com/file/d/' + id + '/view' }) : o;
+  };
+  return { orgs: s.orgs.concat(DUMMY_DATA.orgs.filter(add).map(linked)), projects: s.projects.concat(DUMMY_DATA.projects.filter(add)), log: s.log.concat(DUMMY_DATA.log.filter(add)) };
 }
+// After DUMMY_UNTIL (or once DummyData.gs is deleted): the dummy forms' folder goes to the bin, at the first request.
+function dummyGone_() {
+  const forms = dummyForms_(); if (!forms._folder) return;
+  try { DriveApp.getFolderById(forms._folder).setTrashed(true); } catch (e) { /* already gone */ }
+  PropertiesService.getScriptProperties().deleteProperty('DUMMY_FORMS');
+  MEMO_.dummyForms = {};
+}
+
+// Builds the dummy budget forms, a batch per run (a run stops at 6 minutes), into a folder in the Drive folder.
+// Each: the template (DUMMY_FORM_B64) filled by dfForm_ with the organization and its projects, each project's
+// budget lines read from its proposal .docx (dfBudget_). Answers { made, left, done, errors }.
+function dummySetup_() {
+  const props = PropertiesService.getScriptProperties();
+  const got = JSON.parse(props.getProperty('DUMMY_FORMS') || '{}');
+  let folder = null;
+  try { folder = got._folder ? DriveApp.getFolderById(got._folder) : null; } catch (e) { folder = null; }
+  if (!folder) { folder = DriveApp.getFolderById(DRIVE_FOLDER_ID).createFolder('Dummy 2569A budget forms (deleted 31 Oct 2026 18:00)'); got._folder = folder.getId(); }
+  const tpl = Utilities.newBlob(Utilities.base64Decode(DUMMY_FORM_B64), KINDS.xlsx, 'form.xlsx');
+  const start = Date.now(); let made = 0; const errors = [];
+  const editable = /^(xl\/workbook\.xml|xl\/_rels\/workbook\.xml\.rels|xl\/worksheets\/sheet\d+\.xml)$/;
+  for (let i = 0; i < DUMMY_DATA.orgs.length; i++) {
+    const o = DUMMY_DATA.orgs[i]; const ref = o['Org Ref'];
+    if (got[ref]) continue;
+    if (Date.now() - start > 4.5 * 60e3) break;
+    const projects = DUMMY_DATA.projects.filter(function (p) { return p['Org Ref'] === ref; })
+      .sort(function (a, b) { return Number(a['Project No']) - Number(b['Project No']); })
+      .map(function (p) { return { name: String(p['Project Name'] || p['Project Ref']), items: docItems_(p['Proposal .docx'], p['Project Ref'], errors) }; });
+    const parts = Utilities.unzip(tpl);
+    const files = {};
+    parts.forEach(function (b) { if (editable.test(b.getName())) files[b.getName()] = b.getDataAsString('UTF-8'); });
+    const out = dfForm_(files, String(o['Organization'] || ref), projects);
+    const blobs = parts.map(function (b) { return out[b.getName()] != null ? Utilities.newBlob(out[b.getName()], 'application/xml', b.getName()) : b; });
+    const file = folder.createFile(Utilities.zip(blobs, ref + ' budget proposal form (dummy 2569A).xlsx').setContentType(KINDS.xlsx));
+    got[ref] = file.getId(); made++;
+    props.setProperty('DUMMY_FORMS', JSON.stringify(got));
+  }
+  const left = DUMMY_DATA.orgs.filter(function (o) { return !got[o['Org Ref']]; }).length;
+  return { made: made, left: left, done: !left, folder: got._folder, errors: errors.slice(0, 30) };
+}
+// A proposal's budget lines (its .docx on Drive); [] when it can't be read.
+function docItems_(link, ref, errors) {
+  const id = (String(link || '').match(/[?&]id=([\w-]+)|\/d\/([\w-]+)/) || []).slice(1).filter(Boolean)[0];
+  if (!id) return [];
+  try {
+    const doc = Utilities.unzip(DriveApp.getFileById(id).getBlob()).filter(function (b) { return b.getName() === 'word/document.xml'; })[0];
+    return doc ? dfBudget_(doc.getDataAsString('UTF-8')) : [];
+  } catch (e) { errors.push(ref + ': ' + (e && e.message || e)); return []; }
+}
+// Dummy budget forms (23 Oct 2026, v2.13.1): each dummy organization's "Budget Proposal Form (.xlsx)" is the real
+// form template filled with its own projects. Each project's budget lines are read from the budget table of its
+// proposal .docx: item text, unit price x quantity x times when the item says so, and the six funding columns
+// (student fund: credit card / loan / no loan, sponsor: credit card / loan / no loan). The template's locks stay;
+// Excel recalculates on open. Pure string functions here; dummySetup_ does the Drive and zip work.
+
+// The budget table of a proposal (word/document.xml): [{ text, price, qty, times, amounts: [6 numbers] }].
+function dfBudget_(xml) {
+  const tables = xml.match(/<w:tbl>[\s\S]*?<\/w:tbl>/g) || [];
+  const text = function (s) { return (s.match(/<w:t(?: [^>]*)?>[^<]*<\/w:t>/g) || []).map(function (t) { return t.replace(/<[^>]+>/g, ''); }).join('').replace(/&amp;/g, '&').replace(/&lt;/g, '<').replace(/&gt;/g, '>').replace(/&quot;/g, '"').replace(/&#39;/g, "'"); };
+  const table = tables.filter(function (t) { return text(t).indexOf('รายการงบประมาณ') >= 0; })[0];
+  if (!table) return [];
+  const items = [];
+  (table.match(/<w:tr[ >][\s\S]*?<\/w:tr>/g) || []).forEach(function (row) {
+    const cells = (row.match(/<w:tc>[\s\S]*?<\/w:tc>/g) || []).map(function (c) { return text(c).replace(/\s+/g, ' ').trim(); });
+    if (cells.length < 3 || !/^\d+\.?$/.test(cells[0])) return;
+    const amounts = cells.slice(2, 8).map(dfNum_);
+    while (amounts.length < 6) amounts.push(0);
+    const total = amounts.reduce(function (a, b) { return a + b; }, 0);
+    const it = { text: cells[1], price: total, qty: 1, times: 1, amounts: amounts };
+    // "(100 คน x 60 บาท x 7 มื้อ = 42,000 บาท)": the number with บาท is the unit price, the others multiply.
+    const m = cells[1].match(/\(([^()]*[x×*][^()]*)\)\s*$/i) || cells[1].match(/\(([^()]*[x×*][^()]*)\)/i);
+    if (m) {
+      const parts = m[1].split('=')[0].split(/\s[x×*]\s|[x×*]/i);
+      let price = null; const mult = [];
+      parts.forEach(function (p) {
+        const n = dfNum_(p); if (!n) return;
+        if (price == null && /บาท/.test(p)) price = n; else mult.push(n);
+      });
+      if (price != null && mult.length) { it.price = price; it.qty = mult[0]; it.times = mult.slice(1).reduce(function (a, b) { return a * b; }, 1); }
+    }
+    if (it.text) items.push(it);
+  });
+  return items.slice(0, 98);
+}
+function dfNum_(s) { const m = String(s || '').replace(/,/g, '').match(/\d+(?:\.\d+)?/); return m ? Number(m[0]) : 0; }
+
+// Writes cells into a worksheet's XML. cells: { 'B5': 'text' | number | null (empty) }. Every cell keeps its style.
+function dfCells_(xml, cells) {
+  const esc = function (s) { return String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;'); };
+  Object.keys(cells).forEach(function (ref) {
+    const v = cells[ref];
+    const re = new RegExp('<c r="' + ref + '"((?:\\s+[\\w:]+="[^"]*")*)\\s*(?:/>|>[\\s\\S]*?</c>)');
+    const m = xml.match(re);
+    const s = m ? (m[1].match(/\ss="\d+"/) || [''])[0] : '';
+    const cell = v == null || v === '' ? '<c r="' + ref + '"' + s + '/>'
+      : typeof v === 'number' ? '<c r="' + ref + '"' + s + '><v>' + v + '</v></c>'
+        : '<c r="' + ref + '"' + s + ' t="inlineStr"><is><t xml:space="preserve">' + esc(v) + '</t></is></c>';
+    if (m) { xml = xml.replace(re, cell); return; }
+    // No such cell yet: add it to its row, in column order.
+    const row = ref.match(/\d+$/)[0];
+    const rre = new RegExp('(<row r="' + row + '"[^>]*>)([\\s\\S]*?)(</row>)');
+    if (rre.test(xml)) {
+      xml = xml.replace(rre, function (all, a, body, z) {
+        const col = function (r) { const l = r.replace(/\d+/g, ''); return l.split('').reduce(function (n, ch) { return n * 26 + ch.charCodeAt(0) - 64; }, 0); };
+        const parts = body.match(/<c r="[A-Z]+\d+"[\s\S]*?(?:\/>|<\/c>)/g) || [];
+        let i = 0; while (i < parts.length && col(parts[i].match(/r="([A-Z]+)/)[1]) < col(ref)) i++;
+        parts.splice(i, 0, cell);
+        return a + parts.join('') + z;
+      });
+    }
+  });
+  return xml;
+}
+
+// The filled form's changed parts. files: { path: text } of the template's workbook.xml, workbook rels and sheets.
+// org: name; projects: [{ name, items }] in project order (max 10). Returns { path: new text }.
+function dfForm_(files, org, projects) {
+  const wb = files['xl/workbook.xml']; const rels = files['xl/_rels/workbook.xml.rels'];
+  const target = {};
+  (rels.match(/<Relationship [^>]*>/g) || []).forEach(function (r) {
+    const id = (r.match(/Id="([^"]+)"/) || [])[1]; const t = (r.match(/Target="([^"]+)"/) || [])[1];
+    if (id && t) target[id] = 'xl/' + t.replace(/^\/?xl\//, '');
+  });
+  const sheet = {};
+  (wb.match(/<sheet [^>]*>/g) || []).forEach(function (s) {
+    const name = (s.match(/name="([^"]+)"/) || [])[1]; const id = (s.match(/r:id="([^"]+)"/) || [])[1];
+    if (name && id) sheet[name] = target[id];
+  });
+  const out = {};
+  out[sheet.Summary] = dfCells_(files[sheet.Summary], { A2: org });
+  projects.slice(0, 10).forEach(function (p, i) {
+    const path = sheet['Project' + (i + 1)]; if (!path) return;
+    const cells = { A1: p.name };
+    // One row per budget line from row 5; rows 5 and 6 (the template's two example lines) are always rewritten.
+    const last = 4 + Math.max(p.items.length, 2);
+    for (let r = 5; r <= last; r++) {
+      const it = p.items[r - 5];
+      cells['B' + r] = it ? it.text : null;
+      cells['C' + r] = it ? it.price : 0;
+      cells['D' + r] = it ? it.qty : 0;
+      cells['E' + r] = it ? it.times : 0;
+      ['G', 'H', 'I', 'J', 'K', 'L'].forEach(function (c, k) { cells[c + r] = it ? it.amounts[k] : 0; });
+    }
+    out[path] = dfCells_(files[path], cells);
+  });
+  // Excel works every formula out again when it opens the file.
+  out['xl/workbook.xml'] = /<calcPr\b/.test(wb) ? wb.replace(/<calcPr\b(?![^>]*fullCalcOnLoad)/, '<calcPr fullCalcOnLoad="1"') : wb;
+  return out;
+}
+
 // Round code of a Submissions row: its Round column, else the part of Org Key before the organization
 // (Org Key = <round>_<Org Ref>; Submission_Log has no Round column). '' = none (the pilot demo).
 function roundOf_(r) {
@@ -1490,7 +1653,8 @@ function cached_(key, fn) {
 // Submissions Sheet, 'schedule' = the scheduling site's Sheet ('-' when not set). A change there changes every key
 // built on it, so new submissions show within about STAMP_SECONDS without re-reading unchanged Sheets.
 function stamp_(name) {
-  return stamp0_(name) + (name === 'subs' && dummyOn_() ? '+dummy' : ''); // dummy data on / off = new cache keys
+  // Dummy data on / off, or more dummy forms made = new cache keys, so no cached answer keeps old rows or links.
+  return stamp0_(name) + (name === 'subs' && dummyOn_() ? '+dummy' + Object.keys(dummyForms_()).length : '');
 }
 function stamp0_(name) {
   return memo_('stamp:' + name, function () {
