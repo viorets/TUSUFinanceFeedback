@@ -5,12 +5,15 @@
 // Admins and Chiefs; Data team staff see the edit logs only. The server checks too.
 // v2.9: every save runs in the progress window, exports in a "Preparing export…" window; "Export data for mailing"
 // (Admins only, logged) builds the two sheets of the budget allocation email; "In charge of" is folded into a chip.
+// v2.13: round codes (First-Submission or Re-Submission per round of the pitching site); PDF editor defaults (text
+// size, text colour, shape colour, font).
 import { tr } from '../i18n.js';
 import { $, esc, icon, toast, dateTimeFmt, moneyBox, parseMoney, liveMoney, errorBox, confirmBox, ROLE_LABEL, busy, saving, dialog } from '../ui.js';
-import { call, cached, forget, peek, remember } from '../api.js';
+import { call, cached, forget, forgetAll, peek, remember } from '../api.js';
 import { ORGS } from '../masterdata.js';
 import { PENDING } from '../project.js';
 import { STEPS } from '../timeline.js';
+import { FONTS } from '../markup/pdf-markup.js';
 
 const ROLES = ['Admin', 'Chief', 'Staff', 'Data team staff'];
 const PHASE_LIST = [['prepitch', () => tr('Pre-pitch', 'ก่อนการนำเสนอ')], ['pitching', () => tr('Pitching', 'การนำเสนอ')], ['resubmit', () => tr('Re-submission', 'การส่งแก้ไข')]];
@@ -23,13 +26,15 @@ let st = null; // { users (working copy), saved (JSON), phases (draft), phasesSa
 const usersDirty = () => !!st?.users && JSON.stringify(st.users) !== st.saved;
 const phasesDirty = () => !!st?.phases && JSON.stringify(st.phases) !== st.phasesSaved;
 const datesDirty = () => !!st?.dates && JSON.stringify(st.dates) !== st.datesSaved;
-export const isDirty = () => usersDirty() || phasesDirty() || datesDirty();
+const roundsDirty = () => !!st?.rounds && JSON.stringify(st.rounds) !== st.roundsSaved;
+export const isDirty = () => usersDirty() || phasesDirty() || datesDirty() || roundsDirty();
 // Unsaved-changes window: Save and leave saves users and phases.
 export const canSaveAll = () => isDirty();
 export async function saveAll() {
   if (usersDirty()) await st.save.users();
   if (phasesDirty()) await st.save.phases();
   if (datesDirty()) await st.save.dates();
+  if (roundsDirty()) await st.save.rounds();
 }
 
 // This device's last copy shows at once; the fresh answer repaints unless someone is mid-edit.
@@ -58,6 +63,9 @@ function draw(page, ctx, d) {
   // Timeline dates (v2.12): a draft until Save, as the phase switches.
   st.dates = d.dates ? structuredClone(d.dates) : null;
   st.datesSaved = JSON.stringify(st.dates);
+  // Round codes (v2.13): { code: kind }, a draft until Save.
+  st.rounds = d.rounds ? Object.fromEntries(d.rounds.map((r) => [r.code, r.kind])) : null;
+  st.roundsSaved = JSON.stringify(st.rounds);
   const name = (ref) => ORGS.find((o) => o.code === ref)?.en || '';
 
   const admin = ctx.me.role === 'Admin';
@@ -96,12 +104,27 @@ function draw(page, ctx, d) {
         <button class="btn" id="saveMail">${icon('download', 16)}${tr('Export data for mailing', 'ส่งออกข้อมูลสำหรับส่งอีเมล')}</button></div></div>
     <p class="foot">${tr('Admins only. Excel: one sheet for organizations, one for projects, one per included phase and one for emails. CSV: one row per project with every included column, plus a second file of emails. Organizations hidden from the list are left out. The file holds phone numbers and emails: every export is logged.', 'เฉพาะผู้ดูแล Excel: ชีตองค์กร ชีตโครงการ หนึ่งชีตต่อช่วงที่เลือก และชีตอีเมล CSV: หนึ่งแถวต่อโครงการ พร้อมทุกคอลัมน์ที่เลือก และไฟล์อีเมลอีกหนึ่งไฟล์ ไม่รวมองค์กรที่ซ่อนจากรายชื่อ ไฟล์มีเบอร์โทรและอีเมล ทุกการส่งออกจะถูกบันทึก')}</p>`;
 
-  // PDF editor (v2.12): the default size of new text boxes; each person can still change it in the editor.
+  // Round codes (v2.13): which rounds of the pitching site feed Pre-pitch and Pitching, and which the Re-submission tab.
+  const KINDS = [['first', () => tr('First-Submission', 'ส่งครั้งแรก')], ['resub', () => tr('Re-Submission', 'ส่งแก้ไข')]];
+  const roundsPart = st.rounds ? `${title('clock', tr('Round codes', 'รหัสรอบ'))}
+    <div class="group" id="rounds">${Object.keys(st.rounds).length ? Object.entries(st.rounds).map(([code, kind]) => `<label class="row phase-row"><span class="grow mono">${esc(code)}</span>
+      <select data-round="${esc(code)}" aria-label="${esc(tr('Round {code}', 'รอบ {code}', { code }))}">${KINDS.map(([k, l]) => `<option value="${k}" ${kind === k ? 'selected' : ''}>${esc(l())}</option>`).join('')}</select></label>`).join('')
+    : `<div class="row muted">${tr('No submissions yet', 'ยังไม่มีการส่งข้อเสนอ')}</div>`}
+      <div class="table-actions"><span class="grow muted small" id="roundsNote"></span><button class="btn primary" id="saveRounds" disabled>${tr('Save', 'บันทึก')}</button></div></div>
+    <p class="foot">${tr('Round codes come from the pitching site (Settings → Round code). First-Submission rounds feed Pre-pitch and Pitching; Re-Submission rounds feed the Re-submission tab. A round not set here: the first code is First-Submission, every later one Re-Submission (2569A, then 2569B onwards). Admins and Chiefs can change it.', 'รหัสรอบมาจากเว็บไซต์เสนองบ (ตั้งค่า → รหัสรอบ) รอบส่งครั้งแรกใช้ในช่วงก่อนการนำเสนอและการนำเสนอ รอบส่งแก้ไขใช้ในแท็บการส่งแก้ไข รอบที่ยังไม่ได้ตั้ง: รหัสแรกเป็นส่งครั้งแรก รหัสถัดไปทั้งหมดเป็นส่งแก้ไข (2569A แล้ว 2569B เป็นต้นไป) ผู้ดูแลและหัวหน้าแก้ไขได้')}</p>` : '';
+
+  // PDF editor (v2.12 size, v2.13 colours and font): defaults of new text boxes and shapes; each person can still
+  // change them in the editor.
+  const mk = { size: 11, textColor: '#990000', shapeColor: '#990000', font: FONTS[0], ...(d.markup || {}) };
   const sizePart = `${title('pen', tr('PDF editor', 'เครื่องมือแก้ไข PDF'))}
-    <div class="group alloc"><span class="grow">${tr('Default text box size', 'ขนาดกล่องข้อความเริ่มต้น')}</span>
-      <input type="number" id="textSize" min="6" max="72" step="1" value="${esc(d.textSize ?? 11)}" aria-label="${esc(tr('Default text box size (pt)', 'ขนาดกล่องข้อความเริ่มต้น (pt)'))}"><span class="muted">pt</span>
-      <button class="btn primary" id="saveTextSize">${tr('Save', 'บันทึก')}</button></div>
-    <p class="foot">${tr('New text boxes in the PDF editor start at this size (6–72 pt). Staff can still change the size of any text box. Admins and Chiefs can change it.', 'กล่องข้อความใหม่ในเครื่องมือแก้ไข PDF จะเริ่มที่ขนาดนี้ (6–72 pt) เจ้าหน้าที่ยังปรับขนาดแต่ละกล่องได้ ผู้ดูแลและหัวหน้าแก้ไขได้')}</p>`;
+    <div class="group" id="markup">
+      <div class="row"><span class="grow">${tr('Default text box size', 'ขนาดกล่องข้อความเริ่มต้น')}</span>
+        <input type="number" id="mkSize" min="6" max="72" step="1" value="${esc(mk.size)}" aria-label="${esc(tr('Default text box size (pt)', 'ขนาดกล่องข้อความเริ่มต้น (pt)'))}"><span class="muted">pt</span></div>
+      <div class="row"><span class="grow">${tr('Default text colour', 'สีข้อความเริ่มต้น')}</span><input type="color" id="mkText" value="${esc(mk.textColor)}" aria-label="${esc(tr('Default text colour', 'สีข้อความเริ่มต้น'))}"></div>
+      <div class="row"><span class="grow">${tr('Default shape colour (draw, line, arrow, rectangle)', 'สีรูปร่างเริ่มต้น (วาด เส้น ลูกศร สี่เหลี่ยม)')}</span><input type="color" id="mkShape" value="${esc(mk.shapeColor)}" aria-label="${esc(tr('Default shape colour', 'สีรูปร่างเริ่มต้น'))}"></div>
+      <div class="row"><span class="grow">${tr('Default font', 'แบบอักษรเริ่มต้น')}</span><select id="mkFont" aria-label="${esc(tr('Default font', 'แบบอักษรเริ่มต้น'))}">${FONTS.map((f) => `<option ${f === mk.font ? 'selected' : ''}>${esc(f)}</option>`).join('')}</select></div>
+      <div class="table-actions"><span class="grow"></span><button class="btn primary" id="saveMarkup">${tr('Save', 'บันทึก')}</button></div></div>
+    <p class="foot">${tr('New text boxes in the PDF editor start at this size (6–72 pt), colour and font; new shapes start at the shape colour. Staff can still change any text box or shape. Admins and Chiefs can change these.', 'กล่องข้อความใหม่ในเครื่องมือแก้ไข PDF จะเริ่มที่ขนาด (6–72 pt) สี และแบบอักษรนี้ รูปร่างใหม่จะเริ่มที่สีรูปร่าง เจ้าหน้าที่ยังปรับแต่ละกล่องหรือรูปร่างได้ ผู้ดูแลและหัวหน้าแก้ไขได้')}</p>`;
 
   const allocPart = `${title('chart', tr('Allocated budget', 'กรอบงบประมาณ'))}
     <div class="group alloc"><span class="muted">฿</span><input type="text" inputmode="decimal" id="alloc" value="${esc(moneyBox(d.allocated))}" placeholder="0.00" aria-label="${esc(tr('Allocated budget', 'กรอบงบประมาณ'))}">
@@ -118,7 +141,7 @@ function draw(page, ctx, d) {
 
   page.innerHTML = `<h1 class="grad">${tr('Admin console', 'คอนโซลผู้ดูแล')}</h1>
     <div class="admin-top">${d.sheetUrl ? `<a class="btn" href="${esc(d.sheetUrl)}" target="_blank" rel="noopener">${icon('ext', 16)}${tr('Open Google Sheet', 'เปิด Google Sheet')}</a>` : ''}</div>
-    ${admin ? exportPart : ''}${usersPart}${phasesPart}${datesPart}${sizePart}${allocPart}${removedPart}
+    ${admin ? exportPart : ''}${usersPart}${phasesPart}${datesPart}${roundsPart}${sizePart}${allocPart}${removedPart}
     ${d.log ? logSection() : ''}`;
 
   // Projects in charge: the project counts of the user's organizations (boot data), e.g. "9 (3 orgs)".
@@ -181,19 +204,52 @@ function draw(page, ctx, d) {
     phaseState();
   };
 
-  $('#saveTextSize', page).onclick = async (e) => {
+  $('#saveMarkup', page).onclick = async (e) => {
     e.target.disabled = true;
     try {
-      const out = await saving(() => call('saveTextSize', { size: $('#textSize', page).value }));
-      $('#textSize', page).value = out.textSize;
-      d.textSize = out.textSize;
+      const v = { size: $('#mkSize', page).value, textColor: $('#mkText', page).value, shapeColor: $('#mkShape', page).value, font: $('#mkFont', page).value };
+      const out = await saving(() => call('saveMarkupDefaults', { defaults: v }));
+      $('#mkSize', page).value = out.markup.size;
+      d.markup = out.markup;
       remember('admin', {}, d); forget('admin');
-      toast(tr('Text size saved', 'บันทึกขนาดตัวอักษรแล้ว'));
+      toast(tr('PDF editor defaults saved', 'บันทึกค่าเริ่มต้นของเครื่องมือแก้ไข PDF แล้ว'));
     } catch (err) {
       await errorBox(err.message);
     }
     e.target.disabled = false;
   };
+
+  // Round codes: Save stays off until something changes. Saving changes what every tab reads, so all reads go.
+  if (st.rounds) {
+    const roundsState = () => {
+      $('#saveRounds', page).disabled = !roundsDirty();
+      $('#roundsNote', page).textContent = roundsDirty() ? tr('Not saved yet', 'ยังไม่ได้บันทึก') : '';
+    };
+    $('#rounds', page).onchange = (e) => {
+      const k = e.target.dataset.round;
+      if (!k) return;
+      st.rounds[k] = e.target.value;
+      roundsState();
+    };
+    st.save.rounds = async () => {
+      const out = await saving(() => call('saveRoundKinds', { kinds: st.rounds }));
+      st.rounds = Object.fromEntries(out.rounds.map((r) => [r.code, r.kind]));
+      st.roundsSaved = JSON.stringify(st.rounds);
+      d.rounds = out.rounds;
+      remember('admin', {}, d);
+      forgetAll();
+    };
+    $('#saveRounds', page).onclick = async (e) => {
+      e.target.disabled = true;
+      try {
+        await st.save.rounds();
+        toast(tr('Round codes saved', 'บันทึกรหัสรอบแล้ว'));
+      } catch (err) {
+        await errorBox(err.message);
+      }
+      roundsState();
+    };
+  }
 
   // Timeline dates: Save stays off until something changes.
   if (st.dates) {

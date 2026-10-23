@@ -12,24 +12,38 @@ const cache = new Map(); // reads only: key → { t, p }
 // call is tried again, up to twice, after 1.5 s and 3 s. Errors in English or Thai (the script owner's language).
 const BUSY = /lock timeout|หมดเวลาการล็อก|simultaneous|พร้อมกันมากเกินไป|invoked too many|^BUSY/i;
 
-export async function call(action, body = {}) {
+// Reads (cached) give up after READ_WAIT and are tried once more (v2.13): a hung server no longer leaves the page
+// loading for ever; the error says to press Refresh. Saves have no time limit, since one cut off may still be written.
+const READ_WAIT = 30e3;
+
+export async function call(action, body = {}, { wait = 0 } = {}) {
   for (let tries = 0; ; tries++) {
     try {
-      return await once(action, body);
+      return await once(action, body, wait);
     } catch (e) {
-      if (tries >= 2 || !BUSY.test(e.message)) throw e;
+      if (e.code === 'TIMEOUT' ? tries >= 1 : tries >= 2 || !BUSY.test(e.message)) throw e;
       await new Promise((r) => { setTimeout(r, 1500 * (tries + 1)); });
     }
   }
 }
 
-async function once(action, body) {
-  // text/plain keeps this a "simple" CORS request (Apps Script can't answer preflights).
-  const res = await fetch(SCRIPT_URL, {
-    method: 'POST', headers: { 'Content-Type': 'text/plain;charset=utf-8' },
-    body: JSON.stringify({ ...body, action, idToken: await idToken() }),
-  });
-  const text = await res.text();
+async function once(action, body, wait) {
+  const ac = new AbortController();
+  const timer = wait ? setTimeout(() => ac.abort(), wait) : 0;
+  let res; let text;
+  try {
+    // text/plain keeps this a "simple" CORS request (Apps Script can't answer preflights).
+    res = await fetch(SCRIPT_URL, {
+      method: 'POST', headers: { 'Content-Type': 'text/plain;charset=utf-8' },
+      body: JSON.stringify({ ...body, action, idToken: await idToken() }), signal: ac.signal,
+    });
+    text = await res.text();
+  } catch (e) {
+    if (e.name !== 'AbortError') throw e;
+    throw Object.assign(new Error(tr('The server did not answer in {s} seconds. Press Refresh to try again.', 'เซิร์ฟเวอร์ไม่ตอบภายใน {s} วินาที กรุณากดรีเฟรชเพื่อลองใหม่', { s: wait / 1000 })), { code: 'TIMEOUT' });
+  } finally {
+    clearTimeout(timer);
+  }
   let out;
   try { out = JSON.parse(text); } catch { throw new Error(tr('BUSY: the server is busy — please try again', 'BUSY: เซิร์ฟเวอร์ไม่ว่าง — กรุณาลองใหม่')); } // Google's "too many" page
   if (!out.ok) throw Object.assign(new Error(message(out.error)), { code: out.error });
@@ -55,11 +69,13 @@ export function cached(action, body = {}) {
   const k = action + JSON.stringify(body);
   const c = cache.get(k);
   if (c && Date.now() - c.t < TTL) return c.p;
-  const p = call(action, body).then((v) => { keep(k, v); return v; }).catch((e) => { cache.delete(k); throw e; });
+  const p = call(action, body, { wait: READ_WAIT }).then((v) => { keep(k, v); return v; }).catch((e) => { cache.delete(k); throw e; });
   cache.set(k, { t: Date.now(), p });
   return p;
 }
 export const forget = (action) => { for (const k of cache.keys()) if (k.startsWith(action)) cache.delete(k); };
+// Refresh (v2.13): every read is asked of the server again.
+export const forgetAll = () => cache.clear();
 
 /* ---------- copies kept on this device ---------- */
 let who = '';

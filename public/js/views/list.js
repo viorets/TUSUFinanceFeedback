@@ -5,6 +5,8 @@
 // Tabs (v2.10): All / Pre-pitch / Pitching / Re-submission. Each has its own budget column and a "% of total" column
 // (the organization's budget over the total of the organizations shown, so it follows the filters).
 // Filters (v2.10): category, campus and a budget range, kept on this device; they combine with search and "Mine only".
+// Round code (v2.13, Re-submission tab only): the organizations that re-submitted in any of the picked Re-Submission
+// rounds; Choose all / Clear all inside the picker. None picked = no filter, as the other pickers.
 // A mini dashboard above the list totals what is shown, for the open tab.
 // Status: Open / Closed, shown here; Admins and Chiefs change it at the top of the Re-submission tab.
 // A closed case counts as Done whatever its projects' progress (v2.3).
@@ -24,7 +26,7 @@ let tab = 'all'; // all | pre | pitch | resub
 let sub = 'all'; // Pitching and Re-submission: all | pending | done
 let mine = false;
 // Filters: cats / camps = codes picked (none picked = no filter); on / min / max = budget range; type = budget the
-// range uses on the All tab; rounds = submission round codes picked (Re-submission tab only, v2.13).
+// range uses on the All tab.
 let F = { cats: [], camps: [], rounds: [], on: false, min: null, max: null, type: 'proposed' };
 try {
   mine = localStorage.getItem('mineOnly') === '1';
@@ -49,7 +51,9 @@ export async function render(page, ctx) {
     <div class="toolbar"><input type="search" id="q" placeholder="${esc(tr('Search name, RefCode or person in charge', 'ค้นหาชื่อ รหัส หรือผู้รับผิดชอบ'))}" value="${esc(query)}">
       <details class="msel" id="fcat"><summary>${tr('Category', 'หมวด')} <small id="fcatN"></small></summary><div class="msel-body">${optList(CATEGORIES, F.cats, 'cats')}</div></details>
       <details class="msel" id="fcamp"><summary>${tr('Campus', 'วิทยาเขต')} <small id="fcampN"></small></summary><div class="msel-body">${optList(CAMPUSES, F.camps, 'camps')}</div></details>
-      <details class="msel" id="fround" hidden><summary>${tr('Round code', 'รหัสรอบ')} <small id="froundN"></small></summary><div class="msel-body" id="froundBody"></div></details>
+      <details class="msel" id="fround" hidden><summary>${tr('Round code', 'รหัสรอบ')} <small id="froundN"></small></summary><div class="msel-body">
+        <div class="msel-acts"><button type="button" class="btn plain" data-all="rounds">${tr('Choose all', 'เลือกทั้งหมด')}</button><button type="button" class="btn plain" data-none="rounds">${tr('Clear all', 'ล้างทั้งหมด')}</button></div>
+        <div id="froundList"></div></div></details>
       <label class="check"><input type="checkbox" id="mine" ${mine ? 'checked' : ''}>${tr('Mine only', 'เฉพาะของฉัน')} <small class="muted" id="mineN"></small></label></div>
     <div class="toolbar range" id="range">
       <label class="check sw-on"><input type="checkbox" id="ron" ${F.on ? 'checked' : ''}>${tr('Budget range', 'ช่วงงบประมาณ')}</label>
@@ -96,7 +100,7 @@ export async function render(page, ctx) {
   const decisionPill = (s) => (approvedNow(s) ? `<span class="pill green">${tr('Approved', 'อนุมัติ')}</span>` : `<span class="pill orange">${tr('Not approved', 'ยังไม่อนุมัติ')}</span>`);
   const resubCell = (s) => {
     if (!s.rs) return `<span class="pill">${tr('Not submitted', 'ยังไม่ส่ง')}</span>`;
-    const items = (s.vers || []).map((v) => `<li><b>v${v.v ?? '?'}</b> <span class="muted">${v.at ? esc(dateTimeFmt(v.at)) : '—'}</span>
+    const items = (s.vers || []).map((v) => `<li><b>${v.round ? `${esc(v.round)} ` : ''}v${v.v ?? '?'}</b> <span class="muted">${v.at ? esc(dateTimeFmt(v.at)) : '—'}</span>
       <span class="num">${v.total == null ? '' : `฿${num2(v.total)}`}</span> <span class="muted">${v.n == null ? '' : tr('{n} projects', '{n} โครงการ', { n: v.n })}</span> ${decisionPill(s)}</li>`).join('');
     return `<details class="vers"><summary><span class="pill blue">${tr('Submitted', 'ส่งแล้ว')}</span> ${decisionPill(s)}</summary><ul class="vers-list">${items}</ul></details>`;
   };
@@ -196,17 +200,14 @@ export async function render(page, ctx) {
     $('#show', page).innerHTML = Object.entries(TABS).map(([k, l]) => `<label><input type="radio" name="show" value="${k}" ${tab === k ? 'checked' : ''}><span>${esc(l())}</span></label>`).join('');
     syncRange(rows);
     $('#fcatN', page).textContent = F.cats.length || ''; $('#fcampN', page).textContent = F.camps.length || '';
-    // Round code (Re-submission tab): the rounds found in the submissions, picked ones first kept even if gone.
-    const roundOf = (o) => stat(o.code).round || '';
-    const byRound = tab === 'resub' && F.rounds.length > 0;
+    // Round codes: the Re-Submission rounds of the pitching site (admin console); codes no longer there are dropped.
+    const rounds = (boot.rounds || []).filter((r) => r.kind === 'resub').map((r) => r.code);
+    F.rounds = (F.rounds || []).filter((c) => rounds.includes(c));
     $('#fround', page).hidden = tab !== 'resub';
-    if (tab === 'resub') {
-      const rounds = [...new Set([...rows.map(roundOf).filter(Boolean), ...F.rounds])].sort();
-      $('#froundN', page).textContent = F.rounds.length || '';
-      $('#froundBody', page).innerHTML = rounds.length ? rounds.map((r) => `<label class="msel-opt"><input type="checkbox" data-f="rounds" value="${esc(r)}" ${F.rounds.includes(r) ? 'checked' : ''}>${esc(r)}
-        <small class="muted">${rows.filter((o) => roundOf(o) === r).length}</small></label>`).join('')
-        : `<p class="muted small msel-opt">${esc(tr('No round codes in the submissions yet', 'ยังไม่มีรหัสรอบในข้อมูลที่ส่งเข้ามา'))}</p>`;
-    }
+    $('#froundN', page).textContent = F.rounds.length || '';
+    $('#froundList', page).innerHTML = rounds.map((c) => `<label class="msel-opt"><input type="checkbox" data-f="rounds" value="${esc(c)}" ${F.rounds.includes(c) ? 'checked' : ''}><span class="mono">${esc(c)}</span></label>`).join('')
+      || `<span class="muted small">${tr('No Re-Submission rounds yet', 'ยังไม่มีรอบส่งแก้ไข')}</span>`;
+    const inRounds = (o) => tab !== 'resub' || !F.rounds.length || (stat(o.code).rounds || []).some((c) => F.rounds.includes(c));
     const q = query.trim().toLowerCase();
     const isMine = (o) => stat(o.code).people.includes(ctx.me.email);
     $('#mineN', page).textContent = rows.filter(isMine).length;
@@ -218,8 +219,7 @@ export async function render(page, ctx) {
     $('#subbar', page).innerHTML = tracked ? `<div class="seg filter" role="radiogroup" aria-label="${esc(tr('Show', 'แสดง'))}" id="sub">${Object.entries(SUBS).map(([k, l]) => `<label><input type="radio" name="sub" value="${k}" ${sub === k ? 'checked' : ''}><span>${esc(l())}
       <small>${rows.filter((o) => subKeep[k](o)).length}</small></span></label>`).join('')}</div>` : '';
     const inRange = (o) => { if (!F.on) return true; const v = valOf(o); return v >= (F.min ?? 0) && v <= (F.max ?? Infinity); };
-    const hit = (o) => (!F.cats.length || F.cats.includes(o.category)) && (!F.camps.length || F.camps.includes(o.campus)) && inRange(o)
-      && (!byRound || F.rounds.includes(roundOf(o)))
+    const hit = (o) => (!F.cats.length || F.cats.includes(o.category)) && (!F.camps.length || F.camps.includes(o.campus)) && inRange(o) && inRounds(o)
       && (!tracked || subKeep[sub](o)) && (!mine || isMine(o)) && (!q || `${o.en} ${o.code} ${stat(o.code).people.map((p) => `${p} ${ctx.nameOf(p)}`).join(' ')}`.toLowerCase().includes(q));
     const shown = rows.filter(hit);
     const pending = shown.filter((o) => left(o.code) > 0).length;
@@ -233,7 +233,7 @@ export async function render(page, ctx) {
     const HEAD = `<tr>${keys.map((k) => `<th${COL[k].r ? ' class="r"' : ''}>${esc(COL[k].h())}</th>`).join('')}</tr>`;
     const card = (top, body) => `<div class="group scroll-x campus-card"><table class="grid-table quotes">${COLS}<thead>${top}${HEAD}</thead><tbody>${body}</tbody></table></div>`;
     const x = { total: shown.reduce((t, o) => t + valOf(o), 0) };
-    const narrowed = q || mine || F.cats.length || F.camps.length || byRound || F.on || (tracked && sub !== 'all');
+    const narrowed = q || mine || F.cats.length || F.camps.length || F.on || (tracked && sub !== 'all') || (tab === 'resub' && F.rounds.length);
     $('#rows', page).innerHTML = CAMPUSES.map((c) => {
       const list = shown.filter((o) => o.campus === c.code).sort((a, b) => a.code.localeCompare(b.code));
       const pend = list.filter((o) => unfinished(o) > 0).length;
@@ -279,6 +279,14 @@ export async function render(page, ctx) {
       F[t.dataset.f] = [...page.querySelectorAll(`input[data-f="${t.dataset.f}"]:checked`)].map((i) => i.value);
       saveF(); paint();
     }
+  });
+  // Choose all / Clear all in a picker (the round codes).
+  page.addEventListener('click', (e) => {
+    const b = e.target.closest('[data-all], [data-none]');
+    if (!b) return;
+    const k = b.dataset.all || b.dataset.none;
+    F[k] = b.dataset.all ? [...page.querySelectorAll(`input[data-f="${k}"]`)].map((i) => i.value) : [];
+    saveF(); paint();
   });
   $('#mine', page).onchange = (e) => {
     mine = e.target.checked;

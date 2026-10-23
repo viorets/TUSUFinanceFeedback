@@ -112,7 +112,7 @@ function earlier(el, at, extra, onRestore, onDiscard) {
 // else marking it up = the waiting screen, and Yes hands the PDF over with the marks saved as the draft.
 async function openPdf(el, { restore = false } = {}) {
   stopPresence();
-  const [{ openPdfEditor }, out, claim] = await Promise.all([import('../markup/pdf-markup.js'), st.pdfOut || call('markupOpen', { org: st.org, id: st.id, bytes: true }),
+  const [{ openPdfEditor }, out, claim] = await Promise.all([import('../markup/pdf-markup.js'), st.pdfOut || call('markupOpen', { org: st.org, id: st.id, bytes: true }, { wait: 90e3 }),
     presence('claim').catch(() => ({ state: 'none' }))]);
   st.pdfOut = out;
   st.name = out.name; if (claim.site) st.site = claim.site;
@@ -126,7 +126,7 @@ async function openPdf(el, { restore = false } = {}) {
   if (local && !usable) writeLocal(null); // made on an older draft: the newer draft on the server is shown
   st.ed = await openPdfEditor($('[data-root]', el), {
     bytes: await bytesOf(out.data), name: st.name, draft: restore && usable ? local.marks : out.draft?.marks || null, t: tr,
-    onDraft: (marks) => { st.unsent = true; writeLocal({ marks, base: st.draft?.at || '', at: new Date().toISOString() }); }, textSize: out.textSize,
+    onDraft: (marks) => { st.unsent = true; writeLocal({ marks, base: st.draft?.at || '', at: new Date().toISOString() }); }, defaults: out.defaults,
   });
   if (restore && usable) st.unsent = true;
   if (claim.state === 'mine') startBeat(el);
@@ -173,7 +173,7 @@ async function openOffice(el, { fresh = false, page = false, restore = false } =
   stopPresence();
   const [mod, out, draft, claim] = await Promise.all([
     st.kind === 'xlsx' ? import('../markup/xlsx-edit.js') : import('../markup/docx-edit.js'),
-    call('markupOpen', { org: st.org, id: st.id, bytes: true }),
+    call('markupOpen', { org: st.org, id: st.id, bytes: true }, { wait: 90e3 }),
     fresh ? null : readDraft(),
     presence('claim', page ? { page: true } : {}).catch(() => ({ state: 'none' })),
   ]);

@@ -9,7 +9,7 @@
   <link rel="icon" href="icon.svg" type="image/svg+xml">
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-  <link href="https://fonts.googleapis.com/css2?family=Noto+Sans+Thai:wght@400;500;600;700&display=swap" rel="stylesheet">
+  <link href="https://fonts.googleapis.com/css2?family=Noto+Sans+Thai:wght@400;500;600;700&family=Sarabun:wght@400&display=swap" rel="stylesheet">
   <script>try { var t = localStorage.getItem('theme'); if (t) document.documentElement.dataset.theme = t; } catch (e) {}</script>
   <link rel="stylesheet" href="css/app.css">
   <link rel="stylesheet" href="css/markup.css">
@@ -32,5 +32,15 @@
 <body>
   <div id="app"></div>
   <script type="module" src="js/app.js"></script>
+  <!-- Oldest browser the site runs on: Safari 15.4 (iPadOS 15.4; iPad Air 4 and later can update). Older ones get this
+       message instead of a blank page (v2.13). -->
+  <script>
+    if (typeof structuredClone !== 'function' || !Array.prototype.at || typeof BroadcastChannel !== 'function') {
+      window.tooOld = true; // app.js stops at once
+      document.getElementById('app').innerHTML = '<div class="signin"><div class="card"><img src="icon.svg" alt=""><h2 style="margin-top:14px">Please update your browser</h2>'
+        + '<p class="muted">This site needs iPadOS 15.4 or later (Settings → General → Software Update), or a current Chrome, Edge or Safari.</p>'
+        + '<p class="muted">เว็บไซต์นี้ต้องใช้ iPadOS 15.4 ขึ้นไป (การตั้งค่า → ทั่วไป → รายการอัปเดตซอฟต์แวร์) หรือ Chrome, Edge, Safari รุ่นปัจจุบัน</p></div></div>';
+    }
+  </script>
 </body>
 </html>

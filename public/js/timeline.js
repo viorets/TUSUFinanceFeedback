@@ -4,7 +4,7 @@
 // finished as a darker fill. Dates: boot.dates (Settings "Phase Dates", edited in the admin console; keys and
 // defaults in TIMELINE in Code.gs). Folded or not is kept on this device.
 import { tr, locale } from './i18n.js';
-import { esc } from './ui.js';
+import { esc, toast } from './ui.js';
 
 // Keep in step with TIMELINE in Code.gs. [key, label, colour]; GROUPS put the steps under their phase.
 export const STEPS = [
@@ -97,4 +97,6 @@ export function timeline(dates, progress = {}) {
 export function bindTimeline(root) {
   const d = root.querySelector('details.timeline');
   if (d) d.ontoggle = () => { open = d.open; try { localStorage.setItem('timelineOpen', open ? '1' : '0'); } catch { /* this visit only */ } };
+  // A tap on a bar shows its dates and progress (v2.13): touch screens (iPad) never show the title tooltip.
+  if (d) d.onclick = (e) => { const b = e.target.closest('.g-bar'); if (b) toast(b.getAttribute('aria-label')); };
 }
