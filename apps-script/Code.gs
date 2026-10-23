@@ -174,6 +174,7 @@ const ACTIONS = {
 function doPost(e) {
   MEMO_ = {};
   try {
+    dummyAfter_(); // 31 Oct 2026 18:00 Bangkok: the site starts again empty (once)
     const req = JSON.parse(e.postData.contents);
     const fn = ACTIONS[req.action];
     if (!fn) throw new Error('Unknown action');
@@ -189,6 +190,8 @@ function doPost(e) {
 }
 
 function doGet(e) {
+  MEMO_ = {};
+  try { dummyAfter_(); } catch (err) { /* the next request tries again */ }
   // Dummy budget forms (v2.13.1): ?dummy=<DUMMY_KEY> (DummyData.gs) builds the next batch until it answers done.
   const key = e && e.parameter && e.parameter.dummy;
   if (key && typeof DUMMY_KEY !== 'undefined' && key === DUMMY_KEY && dummyOn_()) {
@@ -1337,6 +1340,53 @@ function dummy_(s) {
   };
   return { orgs: s.orgs.concat(DUMMY_DATA.orgs.filter(add).map(linked)), projects: s.projects.concat(DUMMY_DATA.projects.filter(add)), log: s.log.concat(DUMMY_DATA.log.filter(add)) };
 }
+// The end of the test (31 Oct 2026 18:00 Bangkok), at the first request after it, once: the site starts again as new.
+// 1. A copy of our Sheet ("... - before reset 2026-10-31", next to the daily backups, never rotated out).
+// 2. Every feedback tab emptied: Pre-pitch, Pitching, budget-form feedback, Correct Excel files, Re-submission
+//    decisions, case Open / Closed and every log. Users (without their persons-in-charge), Settings and Texts stay.
+// 3. Every file made in the organization folders since RESET_FROM (uploads, saved edits, Google copies, PDF drafts)
+//    and the dummy forms' folder go to the bin (Drive keeps it 30 days).
+// The pitching site's Submissions Sheet is not ours and is never touched.
+const RESET_FROM = Date.parse('2026-10-23T00:00:00+07:00');
+const RESET_TABS = ['PrePitch', 'PrePitch_Log', 'Pitching', 'Pitching_Log', 'OrgPrePitch', 'OrgPitching', 'Export_Log', 'Resubmission', 'Resubmission_Log', 'OrgStatus'];
+function dummyAfter_() {
+  if (Date.now() < DUMMY_UNTIL) return;
+  const props = PropertiesService.getScriptProperties();
+  if (props.getProperty('DUMMY_RESET')) return;
+  const lock = LockService.getScriptLock();
+  lock.waitLock(30000);
+  try {
+    if (props.getProperty('DUMMY_RESET')) return; // another request did it while this one waited
+    const out = dummyReset_();
+    props.setProperty('DUMMY_RESET', JSON.stringify(out));
+  } finally { lock.releaseLock(); }
+}
+function dummyReset_() {
+  const out = { at: new Date().toISOString(), backup: '', tabs: {}, people: 0, files: 0 };
+  // 1. Backup
+  const root = DriveApp.getRootFolder();
+  const found = root.getFoldersByName(BACKUP_FOLDER);
+  const folder = found.hasNext() ? found.next() : root.createFolder(BACKUP_FOLDER);
+  out.backup = DriveApp.getFileById(FEEDBACK_SHEET_ID).makeCopy('TUSU Pitch 2 Feedback - before reset ' + Utilities.formatDate(new Date(), Session.getScriptTimeZone(), 'yyyy-MM-dd HH-mm'), folder).getId();
+  // 2. Tabs
+  RESET_TABS.forEach(function (name) {
+    const sh = tab_(name); const last = sh.getLastRow();
+    if (last > 1) {
+      sh.getRange(2, 1, last - 1, sh.getMaxColumns()).clearContent();
+      if (sh.getMaxRows() > 2) sh.deleteRows(3, sh.getMaxRows() - 2); // a blank row 2 stays (a sheet keeps one row)
+    }
+    out.tabs[name] = Math.max(0, last - 1);
+  });
+  const users = tab_('Users'); const col = TABS.Users.indexOf('Org Refs') + 1;
+  if (users.getLastRow() > 1) { users.getRange(2, col, users.getLastRow() - 1, 1).clearContent(); out.people = users.getLastRow() - 1; }
+  // 3. Files
+  const trash = function (f) { const it = f.getFiles(); while (it.hasNext()) { const x = it.next(); if (x.getDateCreated().getTime() >= RESET_FROM) { x.setTrashed(true); out.files++; } } const sub = f.getFolders(); while (sub.hasNext()) trash(sub.next()); };
+  trash(DriveApp.getFolderById(DRIVE_FOLDER_ID));
+  dummyGone_();
+  bump_();
+  return out;
+}
+
 // After DUMMY_UNTIL (or once DummyData.gs is deleted): the dummy forms' folder goes to the bin, at the first request.
 function dummyGone_() {
   const forms = dummyForms_(); if (!forms._folder) return;
