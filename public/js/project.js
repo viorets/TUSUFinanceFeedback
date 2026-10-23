@@ -10,6 +10,9 @@ const near = (iso, n) => { const [y, m, d] = iso.split('-').map(Number); const t
 // The pitching site's calendar, read-only: one month grid per month from the first to the last project day.
 // A run of consecutive days is a tinted band with a solid circle at each end (classes as in its form.css):
 // l / r = the day before / after is a project day too; lc / rc = the band breaks at the row or month edge.
+// Until the dummy data ends (31 Oct 2026 18:00 Bangkok, DUMMY_UNTIL in Code.gs), only months with project days are
+// drawn: the dummy dates have year typos (2027-04-01 .. 2038-04-30) that would draw years of empty months.
+const USED_MONTHS_UNTIL = Date.parse('2026-10-31T18:00:00+07:00');
 export function calendar(dates) {
   const on = new Set((dates || []).filter((d) => /^\d{4}-\d{2}-\d{2}$/.test(d)));
   const ds = [...on].sort();
@@ -18,7 +21,10 @@ export function calendar(dates) {
   const [y0, m0] = ds[0].split('-').map(Number);
   const [y1, m1] = ds.at(-1).split('-').map(Number);
   const months = [];
+  const used = new Set(ds.map((d) => d.slice(0, 7)));
+  const onlyUsed = Date.now() < USED_MONTHS_UNTIL;
   for (let y = y0, m = m0; y < y1 || (y === y1 && m <= m1); m === 12 ? (y++, m = 1) : m++) {
+    if (onlyUsed && !used.has(`${y}-${pad(m)}`)) continue;
     const lead = (new Date(y, m - 1, 1).getDay() + 6) % 7; // Monday first
     const last = new Date(y, m, 0).getDate();
     const cells = Array.from({ length: lead }, () => '<span></span>');
