@@ -59,7 +59,7 @@ const status = (el, html) => { $('[data-status]', el).innerHTML = html; };
 const draftLine = () => (st.draft?.at ? tr('Draft saved {when} by {who}', 'บันทึกฉบับร่าง {when} โดย {who}', { when: dateTimeFmt(st.draft.at), who: esc(st.ctx.nameOf(st.draft.by)) }) : tr('No draft yet', 'ยังไม่มีฉบับร่าง'));
 
 async function openPdf(el) {
-  const [{ openPdfEditor }, out] = await Promise.all([import('../markup/pdf-markup.js'), call('markupOpen', { org: st.org, id: st.id, bytes: true })]);
+  const [{ openPdfEditor }, out] = await Promise.all([import('../markup/pdf-markup.js'), call('markupOpen', { org: st.org, id: st.id, bytes: true }, { wait: 90e3 })]);
   st.name = out.name;
   st.draft = out.draft ? { at: out.draft.at, by: out.draft.by } : null;
   $('[data-name]', el).textContent = st.name;
@@ -68,7 +68,7 @@ async function openPdf(el) {
   const useLocal = local && (local.base || '') === (st.draft?.at || '');
   st.ed = await openPdfEditor($('[data-root]', el), {
     bytes: await bytesOf(out.data), name: st.name, draft: useLocal ? local.marks : out.draft?.marks || null, t: tr,
-    onDraft: (marks) => writeLocal({ marks, base: st.draft?.at || '' }), textSize: out.textSize,
+    onDraft: (marks) => writeLocal({ marks, base: st.draft?.at || '' }), defaults: out.defaults,
   });
   if (local && !useLocal) writeLocal(null); // made on an older draft: the newer draft on the server is shown
   status(el, useLocal ? tr('Unsaved marks from this device were restored', 'กู้คืนเครื่องหมายที่ยังไม่บันทึกจากเครื่องนี้แล้ว') : draftLine());

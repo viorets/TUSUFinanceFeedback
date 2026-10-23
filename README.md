@@ -55,6 +55,12 @@ overrides the earlier styles. Glass turns solid for reduced transparency; motion
 
 ## Versions
 
+- `v2.13` (23 Oct, live: Apps Script @34): round codes, PDF editor defaults, Refresh, iPad.
+  - Round codes: each Round of the pitching site is First-Submission (Pre-pitch, Pitching) or Re-Submission (Re-submission tab); Admin console → Round codes (Settings "Round Kinds"; default: earliest code first, later ones Re-Submission). Re-submission cards show the latest Re-Submission round's data.
+  - Organizations → Re-submission: Round code filter (multi-select, Choose all / Clear all).
+  - PDF editor defaults: text size, text colour, shape colour, font (Settings "Markup Defaults"; LINE Seed Sans TH, Noto Sans Thai, Sarabun); Font picker in the editor.
+  - Refresh button in the top bar and on error pages; reads time out after 30 s (one retry), the editor's file after 90 s.
+  - iPad (Air 4 to Pro 13″): pdf.js legacy build for Safari < 17.4, Highlight selection button for touch, finger scrolls the PDF, tap shows timeline and chart tips, larger tap targets, "Please update your browser" below Safari 15.4. Rules for every new feature in `CLAUDE.md`; layout check `tools/device-audit.js`.
 - `v2.12` (20 Oct): edit files in the site, timeline, Pre-pitch documents.
   - Pitching shows the submitted Budget proposal form and each project's PDF / .docx with Mark up (PDF) or Edit in Docs / Sheets. The editor opens in a new tab (`#/markup`, `views/markup.js`): PDF marks are drawn in the browser and kept as a server draft ("markup draft <file id>.json" in the organization folder) plus a copy on the device; .docx / .xlsx open as a Google copy in the organization folder, shared only with the signed-in Gmail, showing Google's last edit. Save to site uploads the result (an edited budget form becomes the Correct Excel file with its locks put back; PDFs and .docx are added to Noted documents) and hands it to the open Pitching tab, where Save keeps it. Pre-pitch has no edit buttons.
   - "Show Pre-pitch data" on Pitching: each project's Pre-pitch notes and documents, read only.

@@ -10,7 +10,7 @@ import { esc, num2, dateTimeFmt, phoneFmt, dialog } from './ui.js';
 import { viewUrl } from './api.js';
 import { CAMPUSES, CATEGORIES, ORGS } from './masterdata.js';
 import { projNo, slotText, phaseOn, PENDING } from './project.js';
-import { NO_DATA, RESUB_FIELDS } from './views/resubmit.js';
+import { resubHead } from './views/resubmit.js';
 
 export const PHASES = [
   ['prepitch', () => tr('Pre-pitch', 'ก่อนการนำเสนอ')],
@@ -121,7 +121,7 @@ export function printSheet(ref, d, show = { prepitch: true, pitching: true, resu
     const dec = (v) => (v === 'Approved' ? pill('ok', tr('Approved', 'อนุมัติ')) : v === 'Not Approved' ? pill('bad', tr('Not Approved', 'ไม่อนุมัติ')) : pill('none', tr('No decision yet', 'ยังไม่ได้ตัดสิน')));
     const by = (x) => (x?.at ? `${dateTimeFmt(x.at)}<small>${esc(nameOf(x.by || ''))}</small>` : '—');
     return `<p class="p-case">${tr('Case', 'เคส')}: ${d.closed ? `${pill('closed', tr('Closed', 'ปิดแล้ว'))} ${esc(tr('Closed by {who} on {when}', 'ปิดโดย {who} เมื่อ {when}', { who: nameOf(d.closed.by), when: dateTimeFmt(d.closed.at) }))}` : pill('ok', tr('Open', 'เปิด'))}</p>
-      <p class="p-muted">${esc(RESUB_FIELDS().join(', '))}: ${esc(NO_DATA())}</p>
+      <p class="p-muted">${esc(resubHead(d))}</p>
       ${table(['#', tr('Project', 'โครงการ'), tr('Decision', 'ผลการพิจารณา'), tr('Decided', 'ตัดสินเมื่อ')], ps.map((p) => [projNo(p.ref), proj(p), dec(d.resub?.[p.ref]?.decision), by(d.resub?.[p.ref])]))}`;
   };
 

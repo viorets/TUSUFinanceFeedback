@@ -3,12 +3,19 @@
 // so a draft is a small JSON list. "Download" writes the marks into a copy of the PDF with pdf-lib; the original
 // bytes are never changed. Text boxes are drawn by the browser (correct Thai shaping) and embedded as PNG.
 // Libraries load only when the editor opens: pdf.js (pages + text layer) and pdf-lib (writing).
-const PDFJS = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/4.4.168/pdf.min.mjs';
-const PDFJS_WORKER = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/4.4.168/pdf.worker.min.mjs';
+// pdf.js 4.4 needs Promise.withResolvers (Safari 17.4). Older Safari (iPad on iPadOS 15.4–17.3, v2.13) gets the
+// legacy build of the same version, which brings its own polyfills; cdnjs has no legacy build, so it comes from jsDelivr.
+const PDFJS_BASE = Promise.withResolvers ? 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/4.4.168/' : 'https://cdn.jsdelivr.net/npm/pdfjs-dist@4.4.168/legacy/build/';
+const PDFJS = `${PDFJS_BASE}pdf.min.mjs`;
+const PDFJS_WORKER = `${PDFJS_BASE}pdf.worker.min.mjs`;
 const PDFLIB = 'https://cdnjs.cloudflare.com/ajax/libs/pdf-lib/1.17.1/pdf-lib.min.js';
 export const MAX_BYTES = 12 * 1024 * 1024; // marked files: 12 MB (decided 20 Oct)
 // Text box default (decided 20 Oct): LINE Seed Sans TH, 11 pt, #990000, clear background, no border.
 export const TEXT = { font: 'LINE Seed Sans TH', size: 11, color: '#990000', lineHeight: 1.35 };
+// Fonts a text box can use (v2.13; keep in step with MARKUP_FONTS in Code.gs). Noto Sans Thai and Sarabun come from
+// Google Fonts (index.html), LINE Seed Sans TH from fonts/.
+export const FONTS = ['LINE Seed Sans TH', 'Noto Sans Thai', 'Sarabun'];
+const fontOf = (m) => m.font || TEXT.font; // text boxes from v2.12 drafts have no font: the old default
 const HIGHLIGHT = '#ffe14d';
 const TOOLS = [
   ['select', 'Select', 'เลือก'], ['text', 'Text box', 'กล่องข้อความ'], ['highlight', 'Highlight', 'ไฮไลต์'],
@@ -31,24 +38,30 @@ function loadLibs() {
 
 // Opens the editor in `root`. bytes: the PDF (ArrayBuffer); name: file name; draft: saved marks or null.
 // t(en, th) translates labels. Resolves an editor handle { marks(), isDirty(), exportPdf() }.
-// textSize: the default size of new text boxes, in pt (admin console; TEXT.size when not given).
-export async function openPdfEditor(root, { bytes, name, draft = null, t = (en) => en, onDraft = () => {}, textSize = TEXT.size }) {
+// defaults (admin console, v2.13): { size, textColor, shapeColor, font } of new text boxes and shapes; TEXT where not given.
+export async function openPdfEditor(root, { bytes, name, draft = null, t = (en) => en, onDraft = () => {}, defaults = {} }) {
+  const textSize = defaults.size || TEXT.size;
+  const font0 = FONTS.includes(defaults.font) ? defaults.font : TEXT.font;
   if (bytes.byteLength > MAX_BYTES) throw new Error(t('This file is over 12 MB, so it cannot be marked. Open it in Drive instead.', 'ไฟล์ใหญ่เกิน 12 MB จึงทำเครื่องหมายไม่ได้ กรุณาเปิดใน Drive'));
   root.innerHTML = `<div class="mk"><div class="mk-bar" role="toolbar">
       <div class="mk-tools">${TOOLS.map(([k, en, th]) => `<button type="button" data-tool="${k}" aria-pressed="false">${t(en, th)}</button>`).join('')}</div>
+      <button type="button" id="mk-hl" class="mk-hl-btn">${t('Highlight selection', 'ไฮไลต์ข้อความที่เลือก')}</button>
       <label class="mk-ctl">${t('Width', 'ความหนา')} <input type="range" id="mk-w" min="1" max="12" step="0.5" value="2"><output id="mk-wv">2</output></label>
-      <label class="mk-ctl">${t('Colour', 'สี')} <input type="color" id="mk-c" value="${TEXT.color}"></label>
+      <label class="mk-ctl">${t('Colour', 'สี')} <input type="color" id="mk-c" value="${defaults.shapeColor || TEXT.color}"></label>
+      <label class="mk-ctl">${t('Font', 'แบบอักษร')} <select id="mk-f">${FONTS.map((f) => `<option ${f === font0 ? 'selected' : ''}>${f}</option>`).join('')}</select></label>
       <label class="mk-ctl">${t('Text size', 'ขนาดตัวอักษร')} <input type="number" id="mk-s" min="6" max="72" step="1" value="${textSize}"> pt</label>
       <span class="mk-grow"></span>
       <button type="button" id="mk-undo" title="Ctrl+Z">${t('Undo', 'เลิกทำ')}</button><button type="button" id="mk-redo" title="Ctrl+Y">${t('Redo', 'ทำซ้ำ')}</button>
       <button type="button" id="mk-del" disabled>${t('Delete', 'ลบ')}</button>
     </div><div class="mk-pages" id="mk-pages"><p class="mk-wait">${t('Loading…', 'กำลังโหลด…')}</p></div></div>`;
   const [pdfjs, PDFLib] = await loadLibs();
+  await Promise.all([font0, ...(draft || []).map(fontOf)].map((f) => document.fonts.load(`${TEXT.size}px "${f}"`).catch(() => {})));
   const doc = await pdfjs.getDocument({ data: bytes.slice(0) }).promise;
   const pagesEl = root.querySelector('#mk-pages');
   pagesEl.innerHTML = '';
 
-  const st = { tool: 'select', width: 2, color: TEXT.color, size: textSize, marks: draft ? structuredClone(draft) : [], undo: [], redo: [], sel: null, dirty: false };
+  // Two current colours (v2.13): one for text boxes, one for shapes; the colour box shows the one in use.
+  const st = { tool: 'select', width: 2, textColor: defaults.textColor || TEXT.color, shapeColor: defaults.shapeColor || TEXT.color, font: font0, size: textSize, marks: draft ? structuredClone(draft) : [], undo: [], redo: [], sel: null, dirty: false };
   const pages = []; // { el, svg, boxes, vp, scale, w, h }
   const avail = Math.max(320, pagesEl.clientWidth - 32);
 
@@ -78,7 +91,7 @@ export async function openPdfEditor(root, { bytes, name, draft = null, t = (en) 
   // ---------- marks ----------
   // Every mark: { id, page, type, ...geometry in page units (1 = 1/72 in, origin top-left), color, width }.
   // pen: pts [[x,y]…]; line/arrow: a [x,y], b [x,y]; rect: x, y, w, h; highlight: rects [[x,y,w,h]…];
-  // text: x, y, text, color, size.
+  // text: x, y, text, color, size, font.
   const uid = () => Math.random().toString(36).slice(2, 10);
   const snapshot = () => { st.undo.push(JSON.stringify(st.marks)); if (st.undo.length > 100) st.undo.shift(); st.redo = []; };
   const changed = () => { st.dirty = true; onDraft(st.marks); paint(); };
@@ -103,7 +116,7 @@ export async function openPdfEditor(root, { bytes, name, draft = null, t = (en) 
         if (m.type === 'text') {
           const b = document.createElement('div');
           b.className = `mk-box${st.sel === m.id ? ' on' : ''}`; b.dataset.id = m.id; b.textContent = m.text;
-          b.style.cssText = `left:${m.x * p.scale}px;top:${m.y * p.scale}px;color:${m.color};font-size:${m.size * p.scale}px;font-family:"${TEXT.font}";line-height:${TEXT.lineHeight}`;
+          b.style.cssText = `left:${m.x * p.scale}px;top:${m.y * p.scale}px;color:${m.color};font-size:${m.size * p.scale}px;font-family:"${fontOf(m)}";line-height:${TEXT.lineHeight}`;
           p.boxes.append(b);
           return;
         }
@@ -114,17 +127,22 @@ export async function openPdfEditor(root, { bytes, name, draft = null, t = (en) 
     });
     root.querySelector('#mk-del').disabled = !st.sel;
     const selText = st.marks.find((x) => x.id === st.sel && x.type === 'text');
-    if (selText) root.querySelector('#mk-s').value = selText.size; // the size box shows the picked text box's size
+    if (selText) { root.querySelector('#mk-s').value = selText.size; root.querySelector('#mk-f').value = fontOf(selText); } // the picked text box's size and font
+    const selMark = st.marks.find((x) => x.id === st.sel);
+    root.querySelector('#mk-c').value = selMark && selMark.color ? selMark.color : textMode() ? st.textColor : st.shapeColor;
     root.querySelector('#mk-undo').disabled = !st.undo.length;
     root.querySelector('#mk-redo').disabled = !st.redo.length;
   }
 
   // ---------- tools ----------
+  // The colour box is about text while the Text box tool is on or a text box is picked, else about shapes.
+  function textMode() { return st.tool === 'text' || st.marks.some((x) => x.id === st.sel && x.type === 'text'); }
   const setTool = (k) => {
     st.tool = k;
     root.querySelectorAll('[data-tool]').forEach((b) => b.setAttribute('aria-pressed', String(b.dataset.tool === k)));
     root.querySelector('.mk').dataset.tool = k;
-    if (k !== 'select') { st.sel = null; paint(); }
+    if (k !== 'select') st.sel = null;
+    paint();
   };
   root.querySelector('.mk-tools').onclick = (e) => { const b = e.target.closest('[data-tool]'); if (b) setTool(b.dataset.tool); };
   const wIn = root.querySelector('#mk-w');
@@ -136,7 +154,17 @@ export async function openPdfEditor(root, { bytes, name, draft = null, t = (en) 
     const m = st.marks.find((x) => x.id === st.sel && x.type === 'text');
     if (m && m.size !== v) { snapshot(); m.size = v; changed(); }
   };
-  root.querySelector('#mk-c').oninput = (e) => { st.color = e.target.value; const m = st.marks.find((x) => x.id === st.sel); if (m && m.type !== 'highlight') { m.color = st.color; changed(); } };
+  root.querySelector('#mk-c').oninput = (e) => {
+    if (textMode()) st.textColor = e.target.value; else st.shapeColor = e.target.value;
+    const m = st.marks.find((x) => x.id === st.sel); if (m && m.type !== 'highlight') { m.color = e.target.value; changed(); }
+  };
+  // Font: the picked text box, and every new one after it.
+  root.querySelector('#mk-f').onchange = async (e) => {
+    st.font = e.target.value;
+    await document.fonts.load(`${TEXT.size}px "${st.font}"`).catch(() => {});
+    const m = st.marks.find((x) => x.id === st.sel && x.type === 'text');
+    if (m && fontOf(m) !== st.font) { snapshot(); m.font = st.font; changed(); }
+  };
   const undo = () => { if (!st.undo.length) return; st.redo.push(JSON.stringify(st.marks)); st.marks = JSON.parse(st.undo.pop()); st.sel = null; changed(); };
   const redo = () => { if (!st.redo.length) return; st.undo.push(JSON.stringify(st.marks)); st.marks = JSON.parse(st.redo.pop()); st.sel = null; changed(); };
   const del = () => { if (!st.sel) return; snapshot(); st.marks = st.marks.filter((m) => m.id !== st.sel); st.sel = null; changed(); };
@@ -170,7 +198,7 @@ export async function openPdfEditor(root, { bytes, name, draft = null, t = (en) 
       const hit = e.target.closest('.mk-box');
       if (hit) { editBox(p, hit.dataset.id); e.preventDefault(); return; }
       snapshot();
-      const m = { id: uid(), page: p.el.dataset.page * 1, type: 'text', x: pt[0], y: pt[1] - st.size * 0.7, text: '', color: st.color, size: st.size };
+      const m = { id: uid(), page: p.el.dataset.page * 1, type: 'text', x: pt[0], y: pt[1] - st.size * 0.7, text: '', color: st.textColor, size: st.size, font: st.font };
       st.marks.push(m); st.sel = m.id; paint(); editBox(p, m.id, true); e.preventDefault();
       return;
     }
@@ -184,7 +212,7 @@ export async function openPdfEditor(root, { bytes, name, draft = null, t = (en) 
       return;
     }
     snapshot();
-    const base = { id: uid(), page: +pel.dataset.page, color: st.color, width: st.width };
+    const base = { id: uid(), page: +pel.dataset.page, color: st.shapeColor, width: st.width };
     const m = st.tool === 'pen' ? { ...base, type: 'pen', pts: [pt] } : st.tool === 'rect' ? { ...base, type: 'rect', x: pt[0], y: pt[1], w: 0, h: 0 } : { ...base, type: st.tool, a: pt, b: pt };
     st.marks.push(m); drag = { kind: 'draw', p, start: pt, m };
     pel.setPointerCapture(e.pointerId); e.preventDefault(); paint();
@@ -219,9 +247,13 @@ export async function openPdfEditor(root, { bytes, name, draft = null, t = (en) 
   pagesEl.addEventListener('pointerup', endDrag);
   pagesEl.addEventListener('pointercancel', endDrag);
 
-  // Highlight: the text selected with the Highlight tool becomes yellow boxes over those words.
-  pagesEl.addEventListener('mouseup', () => {
-    if (st.tool !== 'highlight') return;
+  // Highlight: the text selected with the Highlight tool becomes yellow boxes over those words. A mouse highlights on
+  // release; touch and Apple Pencil (iPad, v2.13) select with the handles first, then press "Highlight selection"
+  // (Safari sends no mouseup after a long-press selection).
+  pagesEl.addEventListener('mouseup', () => { if (st.tool === 'highlight') highlightSelection(); });
+  root.querySelector('#mk-hl').onclick = highlightSelection;
+  root.querySelector('#mk-hl').onpointerdown = (e) => e.preventDefault(); // keep the text selection
+  function highlightSelection() {
     const sel = window.getSelection(); if (!sel || sel.isCollapsed) return;
     const byPage = new Map();
     for (let i = 0; i < sel.rangeCount; i++) {
@@ -239,7 +271,7 @@ export async function openPdfEditor(root, { bytes, name, draft = null, t = (en) 
     snapshot();
     byPage.forEach((rects, page) => st.marks.push({ id: uid(), page, type: 'highlight', rects: mergeRects(rects) }));
     changed();
-  });
+  }
 
   // Text box editing: plain text, Enter = new line; an empty box is removed when it loses focus.
   function editBox(p, id, fresh = false) {
@@ -306,10 +338,10 @@ export async function openPdfEditor(root, { bytes, name, draft = null, t = (en) 
 async function textPng(m) {
   const k = 4; const lines = m.text.split('\n'); const lh = m.size * TEXT.lineHeight;
   const c = document.createElement('canvas'); const ctx = c.getContext('2d');
-  ctx.font = `${m.size * k}px "${TEXT.font}"`;
+  ctx.font = `${m.size * k}px "${fontOf(m)}"`;
   const w = Math.max(...lines.map((l) => ctx.measureText(l).width)) / k + 2; const h = lh * lines.length;
   c.width = Math.ceil(w * k); c.height = Math.ceil(h * k);
-  ctx.font = `${m.size * k}px "${TEXT.font}"`; ctx.fillStyle = m.color; ctx.textBaseline = 'middle';
+  ctx.font = `${m.size * k}px "${fontOf(m)}"`; ctx.fillStyle = m.color; ctx.textBaseline = 'middle';
   lines.forEach((l, i) => ctx.fillText(l, 0, (i + 0.5) * lh * k));
   const blob = await new Promise((r) => c.toBlob(r, 'image/png'));
   return { bytes: new Uint8Array(await blob.arrayBuffer()), w: c.width / k, h: c.height / k };

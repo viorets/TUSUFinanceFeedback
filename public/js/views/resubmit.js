@@ -1,17 +1,22 @@
-// Re-submission: PROTOTYPE cards. The resubmission website and its sheet aren't built yet, so every field that will
-// come from them (project name, dates, budgets, files) shows "No data submitted yet". The Approved / Not Approved
-// decision is real: it saves at once to our Resubmission tab.
+// Re-submission: one card per project. v2.13: the re-submitted data is the organization's latest Re-Submission round
+// on the pitching site (round codes in the admin console): project name, dates, proposed budget and the two files.
+// A project with nothing re-submitted shows "No data submitted yet". The Approved / Not Approved decision saves at
+// once to our Resubmission tab.
 // Top of the tab: the case status, Open or Closed. Admins, Chiefs and Data team staff (v2.11) close / reopen it here (v2.2; it was on the
 // organization list before). Closed = nothing in the organization can be changed (Code.gs refuses the writes).
 // A case can close only when every project is Approved (v2.4); Code.gs checks too. Reopening is always allowed.
 import { tr } from '../i18n.js';
 import { $, esc, icon, toast, dateTimeFmt, confirmBox, dialog, saving, errorBox } from '../ui.js';
 import { call, save as send, forget } from '../api.js';
-import { progress, projNo, star } from '../project.js';
+import { progress, projNo, star, cardTop, dlBtn } from '../project.js';
 
 const CHOICES = [['Approved', () => tr('Approved', 'อนุมัติ')], ['Not Approved', () => tr('Not Approved', 'ไม่อนุมัติ')]];
 export const NO_DATA = () => tr('No data submitted yet', 'ยังไม่มีข้อมูลที่ส่งเข้ามา');
 // Fields the resubmission sheet will fill, in card order.
+// Where the re-submitted data comes from, in one line (this tab and the print).
+export const resubHead = (d) => (d.resubmitted
+  ? tr('Re-submitted in round {round}, version {v}, on {when}', 'ส่งแก้ไขในรอบ {round} ฉบับที่ {v} เมื่อ {when}', { round: d.resubmitted.round, v: d.resubmitted.version ?? '—', when: d.resubmitted.at ? dateTimeFmt(d.resubmitted.at) : '—' })
+  : NO_DATA());
 export const RESUB_FIELDS = () => [
   tr('Project name', 'ชื่อโครงการ'), tr('Project dates', 'วันที่จัดโครงการ'),
   tr('Total project budget proposed', 'งบประมาณที่เสนอ'), tr('Total budget approved', 'งบประมาณที่อนุมัติรวม'),
@@ -32,12 +37,16 @@ export function render(el, d, ctx) {
       ${n && ctx.canCase ? `<small class="muted case-why">${tr('{n} projects not Approved — every project must be Approved to close the case', 'ยังไม่อนุมัติ {n} โครงการ — ต้องอนุมัติทุกโครงการก่อนปิดเคส', { n })}</small>` : ''}</span>
       ${ctx.canCase ? `<button class="btn ${closed ? '' : 'danger'}" data-case ${n ? 'disabled' : ''}>${icon('lock', 16)}${closed ? tr('Open case', 'เปิดเคส') : tr('Close case', 'ปิดเคส')}</button>` : ''}`;
   };
-  el.innerHTML = `<div class="group casebar" data-casebar>${caseBar()}</div><div data-progress></div><div class="notice blue">${icon('alert', 18)}<span>${tr('Prototype: the resubmission website is not built yet, so no resubmitted data is shown.', 'ต้นแบบ: ยังไม่มีเว็บไซต์สำหรับส่งแก้ไข จึงยังไม่มีข้อมูลที่ส่งแก้ไข')}</span></div>
+  el.innerHTML = `<div class="group casebar" data-casebar>${caseBar()}</div><div data-progress></div><div class="notice blue">${icon(d.resubmitted ? 'check' : 'alert', 18)}<span>${esc(resubHead(d))}</span></div>
     ${d.projects.map((p) => {
     const s = d.resub[p.ref];
+    const r = d.resubmitted?.projects?.[p.ref];
+    const [, , proposed, approved, pdf, docx] = RESUB_FIELDS();
+    const top = r ? cardTop({ ...r, ref: p.ref }, [[proposed, r.budget], [approved, d.pitch?.[p.ref]?.finalBudget]], dlBtn(r.pdf, pdf) + dlBtn(r.docx, docx))
+      : `<header class="pcard-head"><span class="eyebrow">${esc(tr('Project {n}', 'โครงการที่ {n}', { n: projNo(p.ref) }))}</span><h3>${esc(p.name || '—')}</h3><span class="code">${esc(p.ref)}</span></header>
+      <div class="pcard-body"><dl class="kv nodata">${RESUB_FIELDS().map((k) => `<dt>${esc(k)}</dt><dd class="muted">${esc(NO_DATA())}</dd>`).join('')}</dl></div>`;
     return `<section class="group pcard" data-ref="${esc(p.ref)}">
-      <header class="pcard-head"><span class="eyebrow">${esc(tr('Project {n}', 'โครงการที่ {n}', { n: projNo(p.ref) }))}</span><span class="code">${esc(p.ref)}</span></header>
-      <div class="pcard-body"><dl class="kv nodata">${RESUB_FIELDS().map((k) => `<dt>${esc(k)}</dt><dd class="muted">${esc(NO_DATA())}</dd>`).join('')}</dl></div>
+      ${top}
       <div class="fb"><div class="field"><label>${tr('Decision', 'ผลการพิจารณา')}${star(d, 'resub.decision')}</label>
         <div><div class="seg" role="radiogroup">${CHOICES.map(([v, label]) => `<label><input type="radio" name="rs-${esc(p.ref)}" value="${v}" ${s?.decision === v ? 'checked' : ''} ${ctx.canEdit ? '' : 'disabled'}><span>${esc(label())}</span></label>`).join('')}</div>
         <p class="muted small" data-saved>${saved(s)}</p>

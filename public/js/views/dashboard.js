@@ -189,8 +189,9 @@ function pie(parts, total) {
 // One tooltip for every slice on the page.
 function hover(el) {
   let t = document.getElementById('viz-tip');
-  if (!t) { t = document.createElement('div'); t.id = 'viz-tip'; t.setAttribute('role', 'tooltip'); t.hidden = true; document.body.append(t); }
-  el.onpointermove = (e) => {
+  if (!t) { t = document.createElement('div'); t.id = 'viz-tip'; t.setAttribute('role', 'tooltip'); t.hidden = true; document.body.append(t); document.addEventListener('pointerdown', (e) => { if (!e.target.closest('[data-tip]')) t.hidden = true; }); }
+  // Touch (iPad, v2.13): a tap shows the tip and it stays until the next tap; a finger sends no pointermove.
+  el.onpointermove = el.onpointerdown = (e) => {
     const s = e.target.closest('[data-tip]');
     if (!s) { t.hidden = true; return; }
     t.hidden = false;
@@ -198,7 +199,7 @@ function hover(el) {
     t.style.left = `${Math.min(e.clientX + 14, innerWidth - t.offsetWidth - 8)}px`;
     t.style.top = `${e.clientY + 14}px`;
   };
-  el.onpointerleave = () => { t.hidden = true; };
+  el.onpointerleave = (e) => { if (e.pointerType !== 'touch') t.hidden = true; };
 }
 
 
