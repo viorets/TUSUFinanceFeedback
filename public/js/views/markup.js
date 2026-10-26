@@ -1,15 +1,16 @@
 // Edit a file in the site (v2.12), opened in its own tab from an organization page (editBtn in project.js):
 // #/markup?org=<Org Ref>&id=<Drive file id>&kind=pdf|docx|xlsx&slot=<where the result goes>.
-// PDF: the markup editor (markup/pdf-markup.js). Its marks are a draft saved on the server (Save draft, and with every
-// Save to site) and kept on this device after each change, so a closed tab loses nothing.
+// PDF: the markup editor (markup/pdf-markup.js). Its marks are a draft saved on the server with every Save, and kept on
+// this device after each change, so a closed tab loses nothing.
 // .docx / .xlsx (v2.13 prototype): edited in this page (markup/docx-edit.js, markup/xlsx-edit.js), no Google account
 // needed; only the edited parts of the file change, and an Excel file keeps its locks. A draft (the edited file) is
-// kept on this device (IndexedDB): with Save draft, and by itself when the tab is hidden (an iPad switching apps).
+// kept on this device (IndexedDB) by itself when the tab is hidden (an iPad switching apps, a closed tab).
 // "Open in Google Docs / Sheets instead" keeps the v2.12 way for bigger changes: a Google copy in the organization's
 // folder, shared with the signed-in Gmail only; an Excel file gets its original's locks back (markup/xlsx-relock.js).
-// Save to site uploads the result as that slot's feedback file and hands it to the organization tab (sendMarked),
-// where Save keeps it, as with any upload. Download gives the same file. Before it replaces the slot's file, Save to
-// site checks that nobody saved a newer one since this page opened.
+// Save (v2.16) uploads the result as that slot's feedback file and saves it into its card on the server (saveMarked in
+// Code.gs; no second Save on the organization page), then tells an open organization tab (sendMarked). Save and quit
+// does the same, then goes back to the organization page. Download gives the same file. Before it replaces the slot's
+// file, Save checks that nobody saved a newer one since this page opened.
 // Who is editing (v2.13): one person at a time edits a .docx / .xlsx here (presence in Code.gs). Anyone else who
 // opens it waits while the editor is asked to share: Yes saves the editor's work to the site and moves everyone to
 // one Google copy made from that saved file; No, or no answer within a minute, leaves them read-only.
@@ -17,6 +18,7 @@ import { tr } from '../i18n.js';
 import { $, esc, icon, toast, busy, errorBox, confirmBox, dialog, dateTimeFmt } from '../ui.js';
 import { call, upload, previewUrl, viewUrl, downloadUrl } from '../api.js';
 import { sendMarked, openPreview } from '../project.js';
+import { ORGS } from '../masterdata.js';
 import { idToken } from '../firebase.js';
 import { SCRIPT_URL } from '../config.js';
 
@@ -33,6 +35,9 @@ let st = null; // { org, id, kind, slot, name, ed (PDF editor), office (Word/Exc
 export const isDirty = () => !!st && (!!st.unsent || !!st.ed?.isDirty() || !!st.office?.isDirty());
 export const unsaved = () => (isDirty() ? [{ ref: slotCode(), name: st.name, files: [] }] : []);
 const slotCode = () => String(st.slot).match(/^(?:pre|noted):([^:]+)/)?.[1] || st.org;
+// Card slots (Pitching tab) are saved into their card by Save; Pre-pitch slots (links from before v2.13) are handed over.
+const inCard = () => /^(xl|noted:)/.test(st.slot);
+const orgHref = () => `#/org/${encodeURIComponent(st.org)}/${inCard() ? 'pitching' : 'prepitch'}`;
 
 // Where the slot's result is uploaded (as in the organization tabs).
 function target(slot, org) {
@@ -64,7 +69,9 @@ export async function render(el, ctx, route) {
   if (!ctx.canEdit) throw new Error(tr('Only staff can edit files.', 'เฉพาะเจ้าหน้าที่เท่านั้นที่แก้ไขไฟล์ได้'));
   target(st.slot, st.org); // a bad link stops here
   el.classList.add('markup-page');
-  el.innerHTML = `<div class="mk-head group"><span class="grow"><b data-name>${esc(tr('Opening…', 'กำลังเปิด…'))}</b>
+  const orgName = ORGS.find((o) => o.code === st.org)?.en || st.org;
+  el.innerHTML = `<a class="btn plain back" href="${esc(orgHref())}">${icon('back', 18)}${esc(tr('Back to {org}', 'กลับไปที่ {org}', { org: orgName }))}</a>
+    <div class="mk-head group"><span class="grow"><b data-name>${esc(tr('Opening…', 'กำลังเปิด…'))}</b>
       <small class="muted" data-status></small></span>
     <span class="actions" data-actions></span></div><div class="mk-root" data-root><p class="muted">${esc(tr('Loading the file…', 'กำลังโหลดไฟล์…'))}</p></div>
     <p class="mk-foot muted small" data-foot></p>`;
@@ -78,14 +85,16 @@ const status = (el, html) => { $('[data-status]', el).innerHTML = html; foot(el)
 function foot(el) {
   const f = $('[data-foot]', el); if (!f) return;
   const parts = [];
-  if (st.saved) parts.push(tr('You saved {file} to the site at {when}. Press Save on the organization page to keep it.', 'คุณบันทึก {file} เข้าเว็บไซต์เมื่อ {when} กดบันทึกที่หน้าองค์กรเพื่อเก็บไฟล์', { file: esc(st.saved.name), when: dateTimeFmt(st.saved.at) }));
+  if (st.saved) parts.push(inCard() ? tr('You saved {file} at {when}.', 'คุณบันทึก {file} เมื่อ {when}', { file: esc(st.saved.name), when: dateTimeFmt(st.saved.at) })
+    : tr('You saved {file} to the site at {when}. Press Save on the organization page to keep it.', 'คุณบันทึก {file} เข้าเว็บไซต์เมื่อ {when} กดบันทึกที่หน้าองค์กรเพื่อเก็บไฟล์', { file: esc(st.saved.name), when: dateTimeFmt(st.saved.at) }));
   if (st.site?.at) parts.push(tr('Last saved on the site {when} by {who}', 'บันทึกล่าสุดบนเว็บไซต์ {when} โดย {who}', { when: dateTimeFmt(st.site.at), who: esc(st.ctx.nameOf(st.site.by) || '—') }));
   else if (st.site) parts.push(tr('Not saved on the site yet', 'ยังไม่เคยบันทึกบนเว็บไซต์'));
   f.innerHTML = parts.join(' · ');
 }
 const draftLine = () => {
-  const line = st.draft?.at ? tr('Draft saved {when} by {who}', 'บันทึกฉบับร่าง {when} โดย {who}', { when: dateTimeFmt(st.draft.at), who: esc(st.ctx.nameOf(st.draft.by)) }) : tr('No draft yet', 'ยังไม่มีฉบับร่าง');
-  return st.unsent ? `${line} · <b>${tr('not yet on the site', 'ยังไม่ได้บันทึกเข้าเว็บไซต์')}</b>` : line;
+  // The marks are kept on the server with every Save (and a hand-over), so they open again for more editing.
+  const line = st.draft?.at ? tr('Marks saved {when} by {who}', 'บันทึกเครื่องหมาย {when} โดย {who}', { when: dateTimeFmt(st.draft.at), who: esc(st.ctx.nameOf(st.draft.by)) }) : tr('No marks saved yet', 'ยังไม่มีเครื่องหมายที่บันทึก');
+  return st.unsent ? `${line} · <b>${tr('not saved yet', 'ยังไม่ได้บันทึก')}</b>` : line;
 };
 
 // "You have unsaved changes from earlier": a notice under the header with Restore and Discard (the iPad fallback:
@@ -135,9 +144,9 @@ async function openPdf(el, { restore = false } = {}) {
   if (usable && !restore) {
     earlier(el, local.at, '', () => openPdf(el, { restore: true }), () => writeLocal(null));
   }
-  $('[data-actions]', el).innerHTML = `<button class="btn" data-a="draft">${tr('Save draft', 'บันทึกฉบับร่าง')}</button>
-    <button class="btn" data-a="dl">${icon('download', 16)}${tr('Download', 'ดาวน์โหลด')}</button>
-    <button class="btn primary" data-a="site">${icon('upload', 16)}${tr('Save to site', 'บันทึกเข้าเว็บไซต์')}</button>`;
+  $('[data-actions]', el).innerHTML = `<button class="btn" data-a="dl">${icon('download', 16)}${tr('Download', 'ดาวน์โหลด')}</button>
+    <button class="btn" data-a="site">${icon('upload', 16)}${tr('Save', 'บันทึก')}</button>
+    <button class="btn primary" data-a="quit">${tr('Save and quit', 'บันทึกและออก')}</button>`;
   $('[data-actions]', el).onclick = (e) => act(el, e.target.closest('[data-a]')?.dataset.a);
 }
 
@@ -206,9 +215,9 @@ async function openOffice(el, { fresh = false, page = false, restore = false } =
   const app = st.kind === 'xlsx' ? 'Google Sheets' : 'Google Docs';
   $('[data-actions]', el).innerHTML = `<button class="btn plain" data-a="google" title="${esc(tr('For bigger changes (inserting rows, pictures, ...): edit a Google copy instead', 'สำหรับการแก้ไขใหญ่ (แทรกแถว รูปภาพ ฯลฯ): แก้ไขในสำเนา Google แทน'))}">${icon('ext', 16)}${tr('Open in {app} instead', 'เปิดใน {app} แทน', { app })}</button>
     ${st.local ? `<button class="btn plain" data-a="fresh">${tr('Discard draft', 'ทิ้งฉบับร่าง')}</button>` : ''}
-    <button class="btn" data-a="draft">${tr('Save draft', 'บันทึกฉบับร่าง')}</button>
     <button class="btn" data-a="dl">${icon('download', 16)}${tr('Download', 'ดาวน์โหลด')}</button>
-    <button class="btn primary" data-a="site">${icon('upload', 16)}${tr('Save to site', 'บันทึกเข้าเว็บไซต์')}</button>`;
+    <button class="btn" data-a="site">${icon('upload', 16)}${tr('Save', 'บันทึก')}</button>
+    <button class="btn primary" data-a="quit">${tr('Save and quit', 'บันทึกและออก')}</button>`;
   $('[data-actions]', el).onclick = (e) => act(el, e.target.closest('[data-a]')?.dataset.a);
 }
 
@@ -216,7 +225,7 @@ async function openOffice(el, { fresh = false, page = false, restore = false } =
 const officeLine = () => {
   if (!st.local) {
     return st.hold ? tr('You are editing this file · anyone else who opens it asks you first', 'คุณกำลังแก้ไขไฟล์นี้ · ผู้อื่นที่เปิดไฟล์จะต้องขอคุณก่อน')
-      : tr('Editing in this page · edits are kept on this device when you press Save draft', 'แก้ไขในหน้านี้ · กดบันทึกฉบับร่างเพื่อเก็บการแก้ไขไว้ในเครื่องนี้');
+      : tr('Editing in this page · unsaved edits are kept on this device if the tab closes', 'แก้ไขในหน้านี้ · การแก้ไขที่ยังไม่บันทึกจะเก็บไว้ในเครื่องนี้หากปิดแท็บ');
   }
   const line = tr('Draft saved on this device {when}, not yet on the site', 'บันทึกฉบับร่างในเครื่องนี้เมื่อ {when} ยังไม่ได้บันทึกเข้าเว็บไซต์', { when: dateTimeFmt(st.local.at) });
   return st.local.base !== st.size ? `${line} · <b>${tr('the original file has changed since', 'ไฟล์ต้นฉบับมีการเปลี่ยนแปลงหลังจากนั้น')}</b>` : line;
@@ -236,7 +245,7 @@ addEventListener('pagehide', keepOnDevice);
 
 async function toGoogle(el) {
   if (st.office?.isDirty() && !(await confirmBox(tr('Open a Google copy instead?', 'เปิดสำเนา Google แทนหรือไม่'),
-    tr('The changes made in this page are not in the Google copy. Save a draft first to keep them on this device.', 'การแก้ไขในหน้านี้จะไม่อยู่ในสำเนา Google กรุณาบันทึกฉบับร่างก่อนเพื่อเก็บไว้ในเครื่องนี้'),
+    tr('The changes made in this page are not in the Google copy. Press Save first to keep them.', 'การแก้ไขในหน้านี้จะไม่อยู่ในสำเนา Google กรุณากดบันทึกก่อนเพื่อเก็บไว้'),
     { ok: tr('Open Google copy', 'เปิดสำเนา Google') }))) return;
   const out = await call('markupCopy', { org: st.org, id: st.id });
   if (st.hold) await presence('handoff', { src: st.id, copy: out.copy }).catch(() => {}); // newcomers join this copy
@@ -268,14 +277,15 @@ async function openGoogle(el, { id = st.id, out = null, note = '' } = {}) {
   $('[data-root]', el).innerHTML = `<section class="group mk-steps">${note ? `<p class="notice blue mk-note">${icon('check', 18)}<span>${esc(note)}</span></p>` : ''}<ol>
       <li>${tr('Open the copy in {app} and make your changes. Google saves them as you type.', 'เปิดสำเนาใน {app} แล้วแก้ไข Google จะบันทึกให้อัตโนมัติ', { app })}
         <p><a class="btn primary" href="${esc(out.url)}" target="_blank" rel="noopener">${icon('ext', 16)}${tr('Open in {app}', 'เปิดใน {app}', { app })}</a></p></li>
-      <li>${tr('Come back to this tab and press Save to site. The file goes to the organization page, where you press Save.', 'กลับมาที่แท็บนี้แล้วกดบันทึกเข้าเว็บไซต์ ไฟล์จะไปอยู่ในหน้าองค์กร แล้วกดบันทึกที่นั่น')}</li>
+      <li>${tr('Come back to this tab and press Save. The file is saved into its card on the organization page.', 'กลับมาที่แท็บนี้แล้วกดบันทึก ไฟล์จะถูกบันทึกลงในการ์ดของหน้าองค์กร')}</li>
     </ol>
     ${st.kind === 'xlsx' ? `<p class="muted small mk-lock">${icon('lock', 14)}${tr('The form’s locks (protected sheets, locked cells, password) are put back from the original when you save.', 'การล็อกของแบบฟอร์ม (ชีตที่ป้องกัน เซลล์ที่ล็อก รหัสผ่าน) จะถูกใส่กลับจากไฟล์ต้นฉบับเมื่อบันทึก')}</p>` : ''}
     <p class="muted small">${tr('Everyone who opens this file here edits the same copy.', 'ทุกคนที่เปิดไฟล์นี้จากที่นี่จะแก้ไขสำเนาเดียวกัน')}</p>
     <p><button class="btn plain" data-back>${tr('Edit in this page instead', 'แก้ไขในหน้านี้แทน')}</button></p></section>`;
   $('[data-back]', el).onclick = () => { st.copy = ''; openOffice(el, { page: true }).catch((err) => errorBox(err.message, tr('Couldn’t open', 'เปิดไม่สำเร็จ'))); };
   $('[data-actions]', el).innerHTML = `<button class="btn" data-a="dl">${icon('download', 16)}${tr('Download', 'ดาวน์โหลด')}</button>
-    <button class="btn primary" data-a="site">${icon('upload', 16)}${tr('Save to site', 'บันทึกเข้าเว็บไซต์')}</button>`;
+    <button class="btn" data-a="site">${icon('upload', 16)}${tr('Save', 'บันทึก')}</button>
+    <button class="btn primary" data-a="quit">${tr('Save and quit', 'บันทึกและออก')}</button>`;
   $('[data-actions]', el).onclick = (e) => act(el, e.target.closest('[data-a]')?.dataset.a);
 }
 
@@ -308,15 +318,6 @@ async function act(el, a) {
       await writeDraft(null).catch(() => {});
       await openOffice(el, { fresh: true });
     }
-    if (a === 'draft' && st.office) {
-      await busy(tr('Saving the draft…', 'กำลังบันทึกฉบับร่าง…'), saveOfficeDraft);
-      status(el, officeLine());
-      toast(tr('Draft saved on this device — not yet on the site', 'บันทึกฉบับร่างในเครื่องนี้แล้ว — ยังไม่ได้บันทึกเข้าเว็บไซต์'));
-    } else if (a === 'draft') {
-      await busy(tr('Saving the draft…', 'กำลังบันทึกฉบับร่าง…'), saveDraft);
-      status(el, draftLine());
-      toast(tr('Draft saved — not yet on the site', 'บันทึกฉบับร่างแล้ว — ยังไม่ได้บันทึกเข้าเว็บไซต์'));
-    }
     if (a === 'dl') {
       const blob = await busy(tr('Preparing {file}…', 'กำลังเตรียม {file}…', { file: outName() }), produce);
       const link = document.createElement('a');
@@ -324,23 +325,26 @@ async function act(el, a) {
       document.body.append(link); link.click(); link.remove();
       setTimeout(() => URL.revokeObjectURL(link.href), 5000);
     }
-    if (a === 'site') {
+    if (a === 'site' || a === 'quit') {
       const file = await saveToSite(el);
       if (file) await hand(el, file);
+      if (file && a === 'quit') { location.hash = orgHref(); return; }
     }
   } catch (err) {
-    await errorBox(err.message, a === 'draft' ? undefined : tr('Couldn’t finish', 'ทำไม่สำเร็จ'));
+    await errorBox(err.message, tr('Couldn’t finish', 'ทำไม่สำเร็จ'));
   }
   btns.forEach((b) => { b.disabled = false; });
 }
 
-// Save to site: the slot's file is checked first (someone may have saved a newer one since this page opened), then
+// Save: the slot's file is checked first (someone may have saved a newer one since this page opened), then
 // the file is uploaded. Resolves the saved file { id, name }, or null when the person chose not to replace.
 async function saveToSite(el, { ask = true } = {}) {
   if (ask && !(await siteStillSame())) return null;
   const file = await busy(tr('Saving {file} to the site…', 'กำลังบันทึก {file} เข้าเว็บไซต์…', { file: outName() }), async (set) => {
     const f = new File([await produce((x) => set(x * 0.5))], outName(), { type: MIME[st.kind] });
-    const saved = await upload(f, target(st.slot, st.org), (x) => set(0.5 + x * 0.5));
+    const saved = await upload(f, target(st.slot, st.org), (x) => set(0.5 + x * 0.4));
+    // Into its card at once (v2.16): the card as saved comes back for the organization tab.
+    st.card = inCard() ? await call('saveMarked', { org: st.org, slot: st.slot, file: saved }) : null;
     if (st.ed) await saveDraft(); // the marks of the saved file stay editable
     if (st.office) { await writeDraft(null).catch(() => {}); st.local = null; } // saved to the site: no draft needed
     return saved;
@@ -349,7 +353,7 @@ async function saveToSite(el, { ask = true } = {}) {
   st.saved = { name: file.name, at: new Date().toISOString() };
   (st.own = st.own || new Set()).add(file.id); // my own saves never count as "changed by someone else"
   if (st.ed) status(el, draftLine());
-  if (st.office) status(el, tr('Saved to the site · you can keep editing', 'บันทึกเข้าเว็บไซต์แล้ว · แก้ไขต่อได้'));
+  if (st.office) status(el, tr('Saved · you can keep editing', 'บันทึกแล้ว · แก้ไขต่อได้'));
   return file;
 }
 
@@ -550,7 +554,7 @@ function showPassed(el, who) {
   const root = $('[data-root]', el);
   root.innerHTML = `<section class="group mk-wait-box"><p class="mk-wait-msg"><b>${esc(tr('Your marks are saved as a draft. {who} is marking up this PDF now.', 'บันทึกเครื่องหมายของคุณเป็นฉบับร่างแล้ว ตอนนี้ {who} กำลังทำเครื่องหมายบน PDF นี้', { who }))}</b></p>
       <p class="muted small">${esc(tr('You can view or download the PDF. To mark it up again, ask them to hand it back.', 'คุณดูหรือดาวน์โหลด PDF ได้ หากต้องการทำเครื่องหมายอีกครั้ง ให้ขอให้ส่งคืน'))}</p>
-      <p><button class="btn primary" data-retry>${esc(tr('Ask to mark up again', 'ขอทำเครื่องหมายอีกครั้ง'))}</button></p></section>`;
+      <p><button class="btn primary" data-retry>${esc(tr('Ask to edit again', 'ขอแก้ไขอีกครั้ง'))}</button></p></section>`;
   readOnlyActions(el);
   status(el, tr('Handed over · read only', 'ส่งต่อแล้ว · ดูได้อย่างเดียว'));
   $('[data-retry]', el).onclick = () => reopen(el).catch((err) => errorBox(err.message));
@@ -570,6 +574,13 @@ document.addEventListener('visibilitychange', () => {
   const el = document.querySelector('.markup-page'); if (!el) return;
   if (st.hold) beat(el); else if (st.waiting) poll(el);
 });
+// Leaving for another page of the site (Back, Save and quit, v2.16): let go of the file at once and stop asking.
+export function leave() {
+  if (!st) return;
+  if (st.hold) presence('release').catch(() => {});
+  stopPresence();
+  st = null;
+}
 addEventListener('pagehide', () => {
   if (!st?.hold || !st.token || !navigator.sendBeacon) return;
   navigator.sendBeacon(SCRIPT_URL, new Blob([JSON.stringify({ action: 'presence', op: 'release', org: st.org, id: st.id, idToken: st.token })], { type: 'text/plain;charset=utf-8' }));
@@ -577,7 +588,12 @@ addEventListener('pagehide', () => {
 
 // The saved file to the organization tab; if no tab took it, say so and offer to send it again.
 async function hand(el, file) {
-  const msg = { org: st.org, slot: st.slot, file };
+  const msg = { org: st.org, slot: st.slot, file, pitch: st.card?.pitch, orgPitch: st.card?.orgPitch };
+  if (st.card) { // saved into its card already: an open organization tab only shows it
+    await sendMarked(msg);
+    toast(tr('Saved into the card', 'บันทึกลงในการ์ดแล้ว'));
+    return;
+  }
   if (await sendMarked(msg)) {
     toast(tr('Sent to the organization page — press Save there to keep it', 'ส่งไปที่หน้าองค์กรแล้ว — กดบันทึกที่หน้านั้นเพื่อเก็บ'));
     return;

@@ -644,7 +644,8 @@ export async function openDocxEditor(root, bytes, { t = (en) => en } = {}) {
     else if (h != null) drag(e, (p, _, ev) => to(h === '0' ? boxOf(snap(b0, p, ev.shiftKey), b0) : boxOf(a0, snap(a0, p, ev.shiftKey))));
     else drag(e, (p, st0) => to({ ...g0, x: g0.x + p[0] - st0[0], y: g0.y + p[1] - st0[1] }));
   });
-  page.addEventListener('pointerdown', (e) => { if (!e.target.closest('.de-shape, .de-capture')) select(null); });
+  // The path as dispatched: picking a line or arrow redraws it, so its target is no longer in the page by now.
+  page.addEventListener('pointerdown', (e) => { if (!e.composedPath().some((n) => n.matches?.('.de-shape, .de-capture'))) select(null); });
   root.addEventListener('keydown', (e) => {
     if (e.key === 'Escape') { setTool('edit'); select(null); }
     // Ctrl+Z / Ctrl+Y: while there is typing not yet kept, the browser undoes the typing; otherwise these undo changes.

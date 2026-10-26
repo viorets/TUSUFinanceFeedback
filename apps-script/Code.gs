@@ -71,7 +71,7 @@ const ROWS_SECONDS = 600; // our own tabs (writes through the site change their 
 const STAMP_SECONDS = 30; // how often an outside Sheet's last-updated time is asked from Drive
 // Part of every cached answer's key: a deployment never reads answers cached by another code version (both share the
 // script cache). Change it whenever an answer's shape changes.
-const CODE_VERSION = 'v2.15';
+const CODE_VERSION = 'v2.16';
 const KINDS = {
   docx: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
   pdf: 'application/pdf',
@@ -97,7 +97,8 @@ const TABS = {
     'Docx Feedback File JSON', 'PDF Feedback File JSON', 'Documents', 'Documents JSON'],
   PrePitch_Log: ['Logged At', 'By', 'Project Ref', 'Org Ref', 'Field', 'Old', 'New'],
   Pitching: ['Project Ref', 'Org Ref', 'Project Name', 'Summary', 'Final Approved Budget', 'Noted Documents',
-    'Updated At', 'Updated By', 'Correct Excel File', 'Noted Documents JSON', 'Correct Excel File JSON'],
+    'Updated At', 'Updated By', 'Correct Excel File', 'Noted Documents JSON', 'Correct Excel File JSON',
+    'Finished At', 'Finished By'], // Finished (v2.16): "Mark as finished" on the card (setFinished_)
   Pitching_Log: ['Logged At', 'By', 'Project Ref', 'Org Ref', 'Field', 'Old', 'New'],
   OrgPrePitch: ['Org Ref', 'Feedback Note', 'Budget Form Feedback File', 'Updated At', 'Updated By', 'Budget Form Feedback File JSON'],
   OrgPitching: ['Org Ref', 'Correct Excel File', 'Updated At', 'Updated By', 'Correct Excel File JSON'],
@@ -170,7 +171,7 @@ const ACTIONS = {
   saveOrgPrePitch: saveOrgPrePitch_, myProjects: myProjects_, setRestored: setRestored_,
   saveOrgPitching: saveOrgPitching_, uploadStart: uploadStart_, uploadDone: uploadDone_, mailData: mailData_,
   savePhaseDates: savePhaseDates_, saveMarkupDefaults: saveMarkupDefaults_, saveRoundKinds: saveRoundKinds_, markupOpen: markupOpen_, saveMarkupDraft: saveMarkupDraft_, markupCopy: markupCopy_, markupExport: markupExport_,
-  presence: presence_,
+  presence: presence_, saveMarked: saveMarked_, setFinished: setFinished_,
 };
 
 function doPost(e) {
@@ -484,6 +485,7 @@ function savePitching_(req, user) {
   const sh = tab_('Pitching');
   const at = rowOf_(sh, p.ref);
   const old = (at && rowAt_(sh, at)) || demoRow_('Pitching', p.ref) || {};
+  row['Finished At'] = old['Finished At'] || ''; row['Finished By'] = old['Finished By'] || '';
   const log = PITCH_FIELDS.filter(function (k) { return logText_(old[k]) !== logText_(row[k]); })
     .map(function (k) { return [row['Updated At'], user.email, p.ref, p.org, k, cell_(logText_(old[k])), cell_(logText_(row[k]))]; });
   if (!log.length) return { pitch: pitchOut_(old), changed: 0 };
@@ -494,6 +496,52 @@ function savePitching_(req, user) {
   log.forEach(function (r) { lg.appendRow(r); });
   bump_('Pitching', 'Pitching_Log');
   return { pitch: pitchOut_(row), changed: log.length };
+}
+
+// Save in the editor (v2.16): the file saved from the editor goes straight into its card, with the card's other
+// answers as saved on the site (a card's unsaved edits in an open organization tab stay unsaved there).
+// slot 'xl' = the Correct Excel file; 'noted:<ref>[:pdf|docx]' = that project's Noted Word file or PDF.
+function saveMarked_(req, user) {
+  const slot = String(req.slot || '');
+  if (slot === 'xl') return saveOrgPitching_({ org: req.org, data: { excel: req.file } }, user);
+  const m = slot.match(/^noted:([^:]+)(?::(pdf|docx))?$/);
+  if (!m) throw new Error('Bad slot');
+  const p = project_(m[1]);
+  if (p.org !== String(req.org || '')) throw new Error('Bad slot');
+  const sh = tab_('Pitching');
+  const at = rowOf_(sh, p.ref);
+  const was = pitchOut_((at && rowAt_(sh, at)) || demoRow_('Pitching', p.ref) || {});
+  const k = notedKind_(req.file && req.file.name);
+  if (!k) throw new Error('Noted documents must be Word or PDF files');
+  const noted = was.noted.filter(function (f) { return notedKind_(f.name) !== k; }).concat([req.file]);
+  return savePitching_({ ref: p.ref, data: { summary: was.summary, finalBudget: was.finalBudget, noted: noted } }, user);
+}
+
+// "Mark as finished" on a Pitching card (v2.16): the staff confirm the project is finished; finished = false undoes it.
+// The card's answers and its Updated At stay as they are; the change is logged in Pitching_Log.
+function setFinished_(req, user) {
+  need_(user, 'Staff');
+  const p = project_(req.ref);
+  open_(p.org);
+  phaseOn_('pitching');
+  const sh = tab_('Pitching');
+  const at = rowOf_(sh, p.ref);
+  const old = (at && rowAt_(sh, at)) || demoRow_('Pitching', p.ref) || {};
+  const now = new Date();
+  const was = old['Finished At'] ? 'Yes' : '';
+  const is = req.finished === true ? 'Yes' : '';
+  if (was === is) return { pitch: pitchOut_(old), changed: 0 };
+  const row = {
+    'Project Ref': p.ref, 'Org Ref': p.org, 'Project Name': p.name, 'Summary': old['Summary'] || '',
+    'Final Approved Budget': old['Final Approved Budget'] == null ? '' : old['Final Approved Budget'], 'Noted Documents': files_(old['Noted Documents']),
+    'Updated At': old['Updated At'] || '', 'Updated By': old['Updated By'] || '', 'Correct Excel File': [],
+    'Finished At': is ? now : '', 'Finished By': is ? user.email : '',
+  };
+  stillOpen_(p.org);
+  saveRow_(sh, TABS.Pitching, row, at);
+  tab_('Pitching_Log').appendRow([now, user.email, p.ref, p.org, 'Finished', was, is]);
+  bump_('Pitching', 'Pitching_Log');
+  return { pitch: pitchOut_(row), changed: 1 };
 }
 
 // Correct Excel file (Pitching, v2.9): one per organization. A change is logged in Pitching_Log with an empty
@@ -1705,6 +1753,7 @@ function pitchOut_(r) {
     summary: String(r['Summary'] || ''), finalBudget: num_(r['Final Approved Budget']),
     noted: notedPair_(r['Noted Documents']),
     at: iso_(r['Updated At']), by: r['Updated By'] || '',
+    finished: r['Finished At'] ? { at: iso_(r['Finished At']), by: r['Finished By'] || '' } : null,
   };
 }
 

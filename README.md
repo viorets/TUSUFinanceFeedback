@@ -55,6 +55,10 @@ overrides the earlier styles. Glass turns solid for reduced transparency; motion
 
 ## Versions
 
+- `v2.16` (26 Oct): Save in the editor saves into the card, Mark as finished.
+  - Editor (`#/markup`): every edit button reads Edit (a PDF's was Mark up). Save draft is gone (PDF marks are still kept on the server with every Save; Word / Excel edits are still kept on the device when the tab is hidden). Save to site became Save: the file is uploaded and saved straight into its card (`saveMarked` in `Code.gs`, the card's other answers as saved), so there is no second Save on the organization page; an open Pitching tab shows it at once. Save and quit does the same, then goes back to the organization's Pitching tab. "Back to <organization>" at the top; leaving lets go of the file at once (`leave()`).
+  - Word editor: a picked line or arrow can be deleted again (picking it redrew it, so the page's "tap outside a shape" check dropped the pick).
+  - Pitching: Mark as finished on each project card, once its required answers are saved; Mark as not finished undoes it. `Pitching` columns Finished At / Finished By (`setFinished`, logged in `Pitching_Log` as Finished).
 - `v2.15` (26 Oct): easier filters, one Noted .docx and one Noted PDF, clickable links in exports.
   - Organizations: search on its own line, then one row of filter buttons (Category, Campus, Person in charge, Budget, Round code). A button in use turns teal with its count; the budget range opens inside its button; Choose all / Clear all in every picker; one picker open at a time (Esc or a click outside closes it). A chip per choice under the bar (× removes it) and Clear filters.
   - Person in charge filter: No person in charge yet, Me (replaces "Mine only"; a device that had it on starts with Me ticked) and everyone in charge of an organization, each with a count.

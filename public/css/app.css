@@ -236,6 +236,7 @@ input[inputmode=decimal] { max-width: 240px; text-align: right; font-variant-num
 .fb { border-top: 1px solid var(--sep); padding: 8px 28px 22px; background: linear-gradient(180deg, var(--mist), var(--bg2) 120px); }
 .fb h4 { margin: 16px 0 4px; font-size: 19px; font-weight: 600; display: flex; gap: 10px; align-items: center; }
 .fb .actions { display: flex; gap: 14px; align-items: center; justify-content: flex-end; padding-top: 16px; border-top: 1px solid var(--sep); }
+.fb .finish-row { border-top: 0; padding-top: 8px; gap: 10px; flex-wrap: wrap; } /* Mark as finished (v2.16) */
 .seg { display: inline-flex; padding: 3px; border-radius: 980px; background: var(--fill); }
 .seg input { position: absolute; opacity: 0; pointer-events: none; }
 .seg span { display: block; padding: 6px 22px; border-radius: 980px; cursor: pointer; font-size: 15px; font-weight: 500; }

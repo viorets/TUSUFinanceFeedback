@@ -124,8 +124,9 @@ export function editBtn(src, { org, slot, kind = KIND_OF(src?.name), plain = fal
   const id = fileId(src);
   if (!id || !kind) return '';
   const q = new URLSearchParams({ org, id, kind, slot });
-  // .docx / .xlsx open in the page's own editor (v2.13); Google Docs / Sheets is a choice on that page.
-  const label = kind === 'pdf' ? tr('Mark up', 'ทำเครื่องหมาย') : tr('Edit', 'แก้ไข');
+  // .docx / .xlsx open in the page's own editor (v2.13); Google Docs / Sheets is a choice on that page. Every kind
+  // reads Edit (v2.16; a PDF was "Mark up").
+  const label = tr('Edit', 'แก้ไข');
   return `<a class="${plain ? 'icon-btn' : 'btn'}" href="#/markup?${esc(q)}" target="_blank" rel="opener" title="${esc(label)}">${icon('pen', 16)}${plain ? '' : esc(label)}</a>`;
 }
 

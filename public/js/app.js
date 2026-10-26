@@ -202,6 +202,7 @@ window.addEventListener('hashchange', async () => {
     return;
   }
   if (!(await confirmLeave())) { history.replaceState(null, '', lastHash || '#/'); return; }
+  current?.leave?.(); // the view lets go of what it holds (the editor: who is editing)
   current = null;
   lastHash = location.hash;
   render();

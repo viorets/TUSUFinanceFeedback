@@ -6,8 +6,8 @@
 // can't reach the server is kept on this device and shows "Pending" until it is sent (api.save).
 import { tr } from '../i18n.js';
 import { $, esc, icon, toast, moneyBox, parseMoney, liveMoney, dateTimeFmt, busy, errorBox, moneyOr } from '../ui.js';
-import { save as send, upload, forget } from '../api.js';
-import { cardTop, dlBtn, fileChip, progress, slotLine, star, capNote, editBtn, onMarked, newFiles, markCard, kept, earlierNotice } from '../project.js';
+import { save as send, upload, forget, call } from '../api.js';
+import { cardTop, dlBtn, fileChip, progress, slotLine, star, capNote, editBtn, onMarked, newFiles, markCard, kept, earlierNotice, UNFINISHED } from '../project.js';
 
 // "Show Pre-pitch data" (v2.12): each card also shows its Pre-pitch notes, read only. Kept on this device.
 // "Show Pre-pitch data" (v2.13): one toggle per project card (and one for the Correct Excel box, key 'xl'); open ones
@@ -106,11 +106,13 @@ function restoreKept(k) {
 }
 
 // A file saved by the editor tab (v2.12): it replaces the Correct Excel file, or the Noted Word file / PDF of its slot
-// (v2.15; a slot from before v2.15 goes by the file's type); Save keeps it.
-function marked({ org, slot, file }) {
+// (v2.15; a slot from before v2.15 goes by the file's type). Since v2.16 the editor has saved it into the card
+// already (pitch / orgPitch: the card as saved): only the card's other unsaved edits stay unsaved here.
+function marked({ org, slot, file, pitch, orgPitch }) {
   if (!st?.el.isConnected || !st.can || org !== orgRef()) return false;
   if (slot === 'xl') {
     st.xl = file;
+    if (orgPitch) { st.d.orgPitch = orgPitch; st.ctx.persist?.(); $('[data-xl-saved]', st.el).innerHTML = savedLine(orgPitch); }
     $('[data-xl-slot]', st.el).innerHTML = xlSlot();
   } else {
     const m = String(slot).match(/^noted:([^:]+)(?::(pdf|docx))?$/);
@@ -119,9 +121,13 @@ function marked({ org, slot, file }) {
     const sec = ref && k && st.form[ref] && st.el.querySelector(`.pcard[data-ref="${CSS.escape(ref)}"]`);
     if (!sec) return false;
     setNoted(ref, k, file);
+    if (pitch) {
+      st.d.pitch[ref] = pitch; st.ctx.persist?.(); forget('dashboard'); progress(st.el, st.d, 'pitching');
+      $('[data-saved]', sec).innerHTML = savedLine(pitch); $('[data-finish]', sec).innerHTML = finishRow(ref);
+    }
     $('[data-noted]', sec).innerHTML = noted(ref);
   }
-  toast(tr('Edited file attached — press Save to keep it', 'แนบไฟล์ที่แก้ไขแล้ว — กดบันทึกเพื่อเก็บ'));
+  toast(pitch || orgPitch ? tr('Edited file saved', 'บันทึกไฟล์ที่แก้ไขแล้ว') : tr('Edited file attached — press Save to keep it', 'แนบไฟล์ที่แก้ไขแล้ว — กดบันทึกเพื่อเก็บ'));
   marks();
   return true;
 }
@@ -157,7 +163,35 @@ function card(p) {
       <div class="field"><label>${tr('Final approved budget', 'งบประมาณอนุมัติขั้นสุดท้าย')}${star(st.d, 'pitch.finalBudget')}</label><input type="text" inputmode="decimal" data-k="finalBudget" value="${esc(moneyBox(f.finalBudget))}" placeholder="0.00" ${dis}></div>
       <div class="field"><label>${tr('Noted documents', 'เอกสารบันทึก')}${star(st.d, 'pitch.noted')}</label><div data-noted>${noted(p.ref)}</div></div>
       <div class="actions"><span class="muted small" data-saved>${savedLine(st.d.pitch[p.ref])}</span>${st.can ? `<button class="btn primary" data-save>${tr('Save', 'บันทึก')}</button>` : ''}</div>
+      <div class="actions finish-row" data-finish>${finishRow(p.ref)}</div>
     </div></section>`;
+}
+
+// "Mark as finished" (v2.16): the staff confirm the project is finished (after its required answers are saved).
+function finishRow(ref) {
+  const f = st.d.pitch[ref]?.finished;
+  if (f) {
+    return `<span class="pill green">${icon('check', 13)}${tr('Finished', 'เสร็จสิ้น')}</span><span class="muted small grow">${tr('{when} by {who}', '{when} โดย {who}', { when: dateTimeFmt(f.at), who: esc(st.ctx.nameOf(f.by)) })}</span>
+      ${st.can ? `<button type="button" class="btn plain" data-finish-set="0">${tr('Mark as not finished', 'ยกเลิกเสร็จสิ้น')}</button>` : ''}`;
+  }
+  return st.can ? `<button type="button" class="btn" data-finish-set="1">${icon('check', 16)}${tr('Mark as finished', 'ทำเครื่องหมายว่าเสร็จสิ้น')}</button>` : '';
+}
+async function setFinished(ref, finished, btn) {
+  const p = st.d.projects.find((x) => x.ref === ref);
+  if (finished && dirty(ref)) return errorBox(tr('Save this project first.', 'กรุณาบันทึกโครงการนี้ก่อน'), tr('Not saved yet', 'ยังไม่ได้บันทึก'));
+  if (finished && UNFINISHED.pitching(st.d, p)) return errorBox(tr('Answer the required questions (*) and save first.', 'กรุณาตอบคำถามที่จำเป็น (*) และบันทึกก่อน'), tr('Not finished yet', 'ยังไม่ครบ'));
+  btn.disabled = true;
+  try {
+    const out = await busy(tr('Saving {name}…', 'กำลังบันทึก {name}…', { name: p?.name || ref }), () => call('setFinished', { ref, finished }));
+    st.d.pitch[ref] = { ...st.d.pitch[ref], ...out.pitch };
+    st.ctx.persist?.();
+    forget('dashboard');
+    toast(finished ? tr('Marked as finished', 'ทำเครื่องหมายว่าเสร็จสิ้นแล้ว') : tr('Marked as not finished', 'ยกเลิกเสร็จสิ้นแล้ว'));
+  } catch (err) {
+    await errorBox(err.message);
+  }
+  const sec = st.el.querySelector(`.pcard[data-ref="${CSS.escape(ref)}"]`);
+  if (sec) $('[data-finish]', sec).innerHTML = finishRow(ref);
 }
 
 // Pre-pitch notes, read only (shown with "Show Pre-pitch data").
@@ -255,6 +289,8 @@ async function onClick(e) {
     rm.closest('[data-noted]').innerHTML = noted(ref);
     return;
   }
+  const fin = e.target.closest('[data-finish-set]');
+  if (fin) { await setFinished(ref, fin.dataset.finishSet === '1', fin); return; }
   const btn = e.target.closest('[data-save]');
   if (btn) await run(btn, () => save(ref));
 }
@@ -283,7 +319,7 @@ async function save(ref) {
       () => send('savePitching', { ref, data: st.form[ref], base: prev?.at || '' }, `pitch:${ref}`));
   } catch (e) {
     if (e.code !== 'QUEUED') throw e;
-    out = { pitch: { ...st.form[ref], at: prev?.at || '', by: prev?.by || '', pending: true }, queued: true };
+    out = { pitch: { ...st.form[ref], at: prev?.at || '', by: prev?.by || '', finished: prev?.finished || null, pending: true }, queued: true };
   }
   st.d.pitch[ref] = out.pitch;
   progress(st.el, st.d, 'pitching');
@@ -291,7 +327,7 @@ async function save(ref) {
   forget('dashboard');
   st.form[ref] = pick(out.pitch);
   const sec = st.el.querySelector(`.pcard[data-ref="${CSS.escape(ref)}"]`);
-  if (sec) { $('[data-saved]', sec).innerHTML = savedLine(out.pitch); $('[data-noted]', sec).innerHTML = noted(ref); }
+  if (sec) { $('[data-saved]', sec).innerHTML = savedLine(out.pitch); $('[data-noted]', sec).innerHTML = noted(ref); $('[data-finish]', sec).innerHTML = finishRow(ref); }
   marks();
   return out;
 }
