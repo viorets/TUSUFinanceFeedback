@@ -102,6 +102,8 @@ h2 { font-size: 24px; font-weight: 600; letter-spacing: -0.02em; margin: 0 0 4px
 .topnav { display: flex; gap: 2px; margin-left: auto; align-items: center; }
 .topnav button { padding: 6px 12px; border-radius: 980px; font-size: 14px; background: none; border: 0; cursor: pointer; display: flex; align-items: center; gap: 6px; color: var(--text); }
 .topnav button:hover { background: var(--fill); }
+.rg-burger { flex: none; width: 42px; height: 42px; display: grid; place-items: center; margin-left: -8px; border: 0; border-radius: 12px; background: none; color: var(--text); cursor: pointer; } /* Regulations sidebar (v2.17) */
+.rg-burger:hover { background: var(--fill); }
 @media (max-width: 640px) { .topnav .lbl { display: none; } .brand .grow > span { display: none; } .brand b { font-size: 19px; } .brand-logo { width: 36px; height: 36px; } .topbar { min-height: 56px; } }
 .tabs { background: var(--bar2); backdrop-filter: saturate(180%) blur(20px); -webkit-backdrop-filter: saturate(180%) blur(20px); border-bottom: 1px solid var(--sep); }
 .tabs-in { max-width: 1180px; margin: 0 auto; display: flex; gap: 6px; padding: 8px 22px; overflow-x: auto; align-items: center; }

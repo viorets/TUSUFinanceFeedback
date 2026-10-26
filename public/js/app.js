@@ -74,6 +74,7 @@ function shell(route) {
   const tab = (href, ic, label, on) => `<a href="${href}" class="${on ? 'on' : ''}">${icon(ic, 18)}<span>${label}</span></a>`;
   const roleLabel = ROLE_LABEL(ctx.me.role);
   return `<div class="chrome"><header class="topbar">
+    <button id="regs" class="rg-burger" aria-label="ระเบียบและอัตรา" title="ระเบียบและอัตรา">${icon('menu', 22)}</button>
     <a class="brand" href="#/"><img class="brand-logo" src="icon.svg" alt=""><span class="grow"><b>${TITLE}</b><span>TUSU Budget Pitching</span></span></a>
     <nav class="topnav">
       <button id="refresh" title="${tr('Refresh: load this page again from the server (use when it hangs)', 'รีเฟรช: โหลดหน้านี้จากเซิร์ฟเวอร์อีกครั้ง (ใช้เมื่อหน้าค้าง)')}" aria-label="${tr('Refresh', 'รีเฟรช')}">${icon('refresh', 18)}<span class="lbl">${tr('Refresh', 'รีเฟรช')}</span></button>
@@ -137,6 +138,7 @@ async function render() {
   $('#acct').onclick = (e) => accountMenu(e.currentTarget);
   $('#theme').onclick = toggleTheme;
   $('#refresh').onclick = refresh;
+  $('#regs').onclick = () => import('./regs.js').then((m) => m.toggle()); // Regulations sidebar (v2.17)
   // Start loading the admin console when the pointer reaches its tab.
   document.querySelector('a[href="#/admin"]')?.addEventListener('pointerenter', () => api.cached('admin').catch(() => {}), { once: true });
   const page = $('#page');

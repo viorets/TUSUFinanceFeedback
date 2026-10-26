@@ -35,6 +35,7 @@ export const dateTimeFmt = (v) => {
 
 const P = {
   x: '<path d="M18 6 6 18M6 6l12 12"/>',
+  menu: '<path d="M4 7h16M4 12h16M4 17h16"/>',
   pen: '<path d="M4 20h4L19 9a2.8 2.8 0 0 0-4-4L4 16z"/><path d="m13.5 6.5 4 4"/>',
   file: '<path d="M14 3H6a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V9z"/><path d="M14 3v6h6"/>',
   upload: '<path d="M12 16V4M7 9l5-5 5 5M4 20h16"/>',
