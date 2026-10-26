@@ -139,14 +139,14 @@ function xlBox() {
   return `<section class="group xl-box"><div class="fb"><h4>${tr('Correct Excel file', 'ไฟล์ Excel ฉบับแก้ไข')}</h4>
     <p class="muted small">${tr('One per organization, for all its projects.', 'หนึ่งไฟล์ต่อองค์กร ใช้กับทุกโครงการ')}</p>
     <div class="dl-row src-row"><span class="muted small">${tr('Submitted form', 'แบบฟอร์มที่ส่งมา')}</span>${dlBtn(st.d.org?.budgetForm || '', tr('Budget proposal form', 'แบบฟอร์มงบประมาณ'))}
-      ${st.can ? editBtn(st.d.org?.budgetForm || '', { org: orgRef(), slot: 'xl', kind: 'xlsx' }) : ''}</div>
+      ${st.can ? editBtn(st.d.org?.budgetForm || '', { org: orgRef(), slot: 'xl', kind: 'xlsx', master: st.d.org?.budgetForm }) : ''}</div>
     <div data-pre-form>${preForm()}</div>
     <div data-xl-slot>${xlSlot()}</div>
     <div class="actions"><span class="muted small" data-xl-saved>${savedLine(st.d.orgPitch)}</span>${st.can ? `<button class="btn primary" data-save-xl>${tr('Save', 'บันทึก')}</button>` : ''}</div></div></section>`;
 }
 function xlSlot() {
   const f = st.xl;
-  return `<div class="upl">${fileChip(f, { unsaved: xlDirty() })}${st.can ? editBtn(f, { org: orgRef(), slot: 'xl', plain: true }) : ''}${!f && !st.can ? '<span class="muted">—</span>' : ''}
+  return `<div class="upl">${fileChip(f, { unsaved: xlDirty() })}${st.can ? editBtn(f, { org: orgRef(), slot: 'xl', plain: true, master: st.d.org?.budgetForm }) : ''}${!f && !st.can ? '<span class="muted">—</span>' : ''}
     ${st.can ? `<label class="btn">${icon('upload', 16)}${f ? tr('Replace', 'เปลี่ยนไฟล์') : tr('Upload Excel', 'อัปโหลด Excel')}<input type="file" hidden accept=".xlsx,.xls" data-xl></label>` : ''}
     ${f && st.can ? `<button type="button" class="btn plain" data-xl-clear>${tr('Remove', 'นำออก')}</button>` : ''}</div>${st.can ? capNote('.xlsx / .xls') : ''}`;
 }
@@ -154,7 +154,7 @@ function xlSlot() {
 function card(p) {
   const f = st.form[p.ref];
   const dis = st.can ? '' : 'disabled';
-  const files = `${dlBtn(p.pdf, tr('Project PDF', 'โครงการ PDF'))}${st.can ? editBtn(p.pdf, { org: orgRef(), slot: `noted:${p.ref}:pdf`, kind: 'pdf' }) : ''}${dlBtn(p.docx, tr('Project .docx', 'โครงการ .docx'))}${st.can ? editBtn(p.docx, { org: orgRef(), slot: `noted:${p.ref}:docx`, kind: 'docx' }) : ''}`;
+  const files = `${dlBtn(p.pdf, tr('Project PDF', 'โครงการ PDF'))}${st.can ? editBtn(p.pdf, { org: orgRef(), slot: `noted:${p.ref}:pdf`, kind: 'pdf', master: p.pdf }) : ''}${dlBtn(p.docx, tr('Project .docx', 'โครงการ .docx'))}${st.can ? editBtn(p.docx, { org: orgRef(), slot: `noted:${p.ref}:docx`, kind: 'docx', master: p.docx }) : ''}`;
   return `<section class="group pcard" data-ref="${esc(p.ref)}">
     ${cardTop(p, [[tr('Total project budget', 'งบประมาณโครงการ'), p.budget]], files, slotLine(st.d.slots?.[p.ref]))}
     <div data-pre>${prePeek(p.ref)}</div>
@@ -221,12 +221,13 @@ const savedLine = (s) => (s?.pending ? `<span class="pill orange">${tr('Pending'
 // Noted documents (v2.15): a Word row and a PDF row, one file each. A .doc gets no Edit button (the editor opens .docx).
 function noted(ref) {
   const list = st.form[ref].noted;
+  const proj = st.d.projects.find((p) => p.ref === ref) || {}; // its submitted PDF / .docx: the editor's Reset All
   const fresh = new Set(newFiles(list, st.d.pitch[ref]?.noted).map((f) => f.id));
   const row = (k) => {
     const f = notedOf(list, k);
     const name = k === 'pdf' ? tr('Noted PDF', 'เอกสารบันทึก PDF') : tr('Noted .docx', 'เอกสารบันทึก .docx');
     return `<div class="noted-row"><span class="muted small noted-k">${name}</span><div class="upl">${fileChip(f, { unsaved: !!f && fresh.has(f.id) })}
-      ${f && st.can ? editBtn(f, { org: orgRef(), slot: `noted:${ref}:${k === 'pdf' ? 'pdf' : 'docx'}`, plain: true }) : ''}${!f && !st.can ? '<span class="muted">—</span>' : ''}
+      ${f && st.can ? editBtn(f, { org: orgRef(), slot: `noted:${ref}:${k === 'pdf' ? 'pdf' : 'docx'}`, plain: true, master: k === 'pdf' ? proj.pdf : proj.docx }) : ''}${!f && !st.can ? '<span class="muted">—</span>' : ''}
       ${st.can ? `<label class="btn">${icon('upload', 16)}${f ? tr('Replace', 'เปลี่ยนไฟล์') : k === 'pdf' ? tr('Upload PDF', 'อัปโหลด PDF') : tr('Upload .docx', 'อัปโหลด .docx')}<input type="file" hidden accept="${k === 'pdf' ? '.pdf' : '.docx,.doc'}" data-up="${k}"></label>` : ''}
       ${f && st.can ? `<button type="button" class="btn plain" data-rm="${k}">${tr('Remove', 'นำออก')}</button>` : ''}</div>${st.can ? capNote(k === 'pdf' ? 'PDF' : '.docx / .doc') : ''}</div>`;
   };

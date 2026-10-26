@@ -553,8 +553,11 @@ export async function openDocxEditor(root, bytes, { t = (en) => en } = {}) {
     </div><div class="oe-scroll de-doc"></div></div>`;
   const $ = (id) => root.querySelector(`#${id}`);
   $('de-lwidth').value = String(SHAPE.width);
-  const lineColor = () => $('de-lcolor').value;
-  const lineWidth = () => +$('de-lwidth').value || SHAPE.width;
+  // The colour and width new lines and arrows take (v2.16.2): the person's last choice. Picking a shape only shows that
+  // shape's own line (a text box: black, No line) while it is picked; it never becomes the drawing default.
+  const pen = { color: SHAPE.color, width: SHAPE.width };
+  const lineColor = () => pen.color;
+  const lineWidth = () => pen.width;
   const note = (text) => { $('de-note').textContent = text; };
   const capture = document.createElement('div'); capture.className = 'de-capture';
   page.append(layer, capture);
@@ -621,7 +624,7 @@ export async function openDocxEditor(root, bytes, { t = (en) => en } = {}) {
       const ln = lineOf(s);
       if (/^#[0-9a-f]{6}$/i.test(ln.color)) $('de-lcolor').value = ln.color;
       const pt = ln.width * 0.75; $('de-lwidth').value = String(ln.none ? 0 : WIDTHS.reduce((b, w) => Math.abs(w - pt) < Math.abs(b - pt) ? w : b));
-    }
+    } else { $('de-lcolor').value = pen.color; $('de-lwidth').value = String(pen.width); }
     $('de-del').disabled = !s;
   }
   const pagePoint = (e) => { const r = page.getBoundingClientRect(); return [(e.clientX - r.left) / zoom, (e.clientY - r.top) / zoom]; };
@@ -700,8 +703,14 @@ export async function openDocxEditor(root, bytes, { t = (en) => en } = {}) {
       const input = $(g.dataset.for); input.value = b.dataset.c.toLowerCase(); input.dispatchEvent(new Event('change'));
     });
   });
-  $('de-lcolor').addEventListener('change', () => { if (sel) setLine(sel, lineColor(), +$('de-lwidth').value); });
-  $('de-lwidth').addEventListener('change', () => { if (sel) setLine(sel, lineColor(), +$('de-lwidth').value); });
+  // A colour or width chosen here is the new default too (No line only applies to the picked shape).
+  const onLine = () => {
+    const color = $('de-lcolor').value; const width = +$('de-lwidth').value;
+    pen.color = color; if (width) pen.width = width;
+    if (sel) setLine(sel, color, width);
+  };
+  $('de-lcolor').addEventListener('change', onLine);
+  $('de-lwidth').addEventListener('change', onLine);
 
   // ---------- text formatting ----------
   // The last text selection on the page is kept, as picking a font or colour takes the focus away from the page.

@@ -11,6 +11,8 @@
 // Code.gs; no second Save on the organization page), then tells an open organization tab (sendMarked). Save and quit
 // does the same, then goes back to the organization page. Download gives the same file. Before it replaces the slot's
 // file, Save checks that nobody saved a newer one since this page opened.
+// Reset All (v2.16.2): the editor opens the slot's master file (the submitted PDF / .docx / budget form, from the
+// link's master) again with no marks or edits; Save then replaces the slot's file with it.
 // Who is editing (v2.13): one person at a time edits a .docx / .xlsx here (presence in Code.gs). Anyone else who
 // opens it waits while the editor is asked to share: Yes saves the editor's work to the site and moves everyone to
 // one Google copy made from that saved file; No, or no answer within a minute, leaves them read-only.
@@ -65,7 +67,7 @@ const outName = () => {
 
 export async function render(el, ctx, route) {
   const q = route.q;
-  st = { org: q.get('org') || '', id: q.get('id') || '', kind: q.get('kind') || '', slot: q.get('slot') || '', name: '', ed: null, draft: null, copy: '', ctx };
+  st = { org: q.get('org') || '', id: q.get('id') || '', kind: q.get('kind') || '', slot: q.get('slot') || '', master: q.get('master') || '', name: '', ed: null, draft: null, copy: '', ctx };
   if (!ctx.canEdit) throw new Error(tr('Only staff can edit files.', 'เฉพาะเจ้าหน้าที่เท่านั้นที่แก้ไขไฟล์ได้'));
   target(st.slot, st.org); // a bad link stops here
   el.classList.add('markup-page');
@@ -120,7 +122,7 @@ function earlier(el, at, extra, onRestore, onDiscard) {
 
 // PDF (v2.13): who is marking it up is checked as for Word / Excel (claim runs alongside the download); someone
 // else marking it up = the waiting screen, and Yes hands the PDF over with the marks saved as the draft.
-async function openPdf(el, { restore = false } = {}) {
+async function openPdf(el, { restore = false, blank = false } = {}) {
   stopPresence();
   const [{ openPdfEditor }, out, claim] = await Promise.all([import('../markup/pdf-markup.js'), st.pdfOut || call('markupOpen', { org: st.org, id: st.id, bytes: true }, { wait: 90e3 }),
     presence('claim').catch(() => ({ state: 'none' }))]);
@@ -135,19 +137,33 @@ async function openPdf(el, { restore = false } = {}) {
   const usable = local && (local.base || '') === (st.draft?.at || '');
   if (local && !usable) writeLocal(null); // made on an older draft: the newer draft on the server is shown
   st.ed = await openPdfEditor($('[data-root]', el), {
-    bytes: await bytesOf(out.data), name: st.name, draft: restore && usable ? local.marks : out.draft?.marks || null, t: tr,
+    bytes: await bytesOf(out.data), name: st.name, draft: blank ? null : restore && usable ? local.marks : out.draft?.marks || null, t: tr,
     onDraft: (marks) => { st.unsent = true; writeLocal({ marks, base: st.draft?.at || '', at: new Date().toISOString() }); }, defaults: out.defaults,
   });
   if (restore && usable) st.unsent = true;
   if (claim.state === 'mine') startBeat(el);
   status(el, draftLine());
-  if (usable && !restore) {
+  if (usable && !restore && !blank) {
     earlier(el, local.at, '', () => openPdf(el, { restore: true }), () => writeLocal(null));
   }
   $('[data-actions]', el).innerHTML = `<button class="btn" data-a="dl">${icon('download', 16)}${tr('Download', 'ดาวน์โหลด')}</button>
-    <button class="btn" data-a="site">${icon('upload', 16)}${tr('Save', 'บันทึก')}</button>
+    ${allBtn()}<button class="btn" data-a="site">${icon('upload', 16)}${tr('Save', 'บันทึก')}</button>
     <button class="btn primary" data-a="quit">${tr('Save and quit', 'บันทึกและออก')}</button>`;
   $('[data-actions]', el).onclick = (e) => act(el, e.target.closest('[data-a]')?.dataset.a);
+}
+
+const allBtn = () => (st.master ? `<button class="btn plain" data-a="all" title="${esc(tr('Open the submitted file again, with no marks or edits', 'เปิดไฟล์ที่ส่งมาใหม่อีกครั้ง โดยไม่มีเครื่องหมายหรือการแก้ไข'))}">${tr('Reset All', 'เริ่มใหม่ทั้งหมด')}</button>` : '');
+async function resetAll(el) {
+  if (!(await confirmBox(tr('Start again from the submitted file?', 'เริ่มใหม่จากไฟล์ที่ส่งมาหรือไม่'),
+    tr('The editor opens the submitted file with no marks or edits. The file on the site stays as it is until you press Save.', 'ตัวแก้ไขจะเปิดไฟล์ที่ส่งมาโดยไม่มีเครื่องหมายหรือการแก้ไข ไฟล์บนเว็บไซต์ยังคงเดิมจนกว่าคุณจะกดบันทึก'),
+    { ok: tr('Reset All', 'เริ่มใหม่ทั้งหมด'), danger: true }))) return;
+  if (st.hold) await presence('release').catch(() => {}); // let go of the file being edited
+  stopPresence();
+  st.id = st.master; st.pdfOut = null; st.office = null; st.ed = null; st.copy = ''; st.unsent = false;
+  const q = new URLSearchParams(location.hash.split('?')[1] || ''); q.set('id', st.id);
+  history.replaceState(null, '', `#/markup?${q}`); // a refresh opens the master too
+  await busy(tr('Opening the submitted file…', 'กำลังเปิดไฟล์ที่ส่งมา…'), () => (isPdf() ? openPdf(el, { blank: true }) : openOffice(el, { fresh: true, page: true })));
+  toast(tr('Started again from the submitted file — press Save to replace the file on the site', 'เริ่มใหม่จากไฟล์ที่ส่งมาแล้ว — กดบันทึกเพื่อแทนที่ไฟล์บนเว็บไซต์'));
 }
 
 async function saveDraft() {
@@ -216,7 +232,7 @@ async function openOffice(el, { fresh = false, page = false, restore = false } =
   $('[data-actions]', el).innerHTML = `<button class="btn plain" data-a="google" title="${esc(tr('For bigger changes (inserting rows, pictures, ...): edit a Google copy instead', 'สำหรับการแก้ไขใหญ่ (แทรกแถว รูปภาพ ฯลฯ): แก้ไขในสำเนา Google แทน'))}">${icon('ext', 16)}${tr('Open in {app} instead', 'เปิดใน {app} แทน', { app })}</button>
     ${st.local ? `<button class="btn plain" data-a="fresh">${tr('Discard draft', 'ทิ้งฉบับร่าง')}</button>` : ''}
     <button class="btn" data-a="dl">${icon('download', 16)}${tr('Download', 'ดาวน์โหลด')}</button>
-    <button class="btn" data-a="site">${icon('upload', 16)}${tr('Save', 'บันทึก')}</button>
+    ${allBtn()}<button class="btn" data-a="site">${icon('upload', 16)}${tr('Save', 'บันทึก')}</button>
     <button class="btn primary" data-a="quit">${tr('Save and quit', 'บันทึกและออก')}</button>`;
   $('[data-actions]', el).onclick = (e) => act(el, e.target.closest('[data-a]')?.dataset.a);
 }
@@ -284,7 +300,7 @@ async function openGoogle(el, { id = st.id, out = null, note = '' } = {}) {
     <p><button class="btn plain" data-back>${tr('Edit in this page instead', 'แก้ไขในหน้านี้แทน')}</button></p></section>`;
   $('[data-back]', el).onclick = () => { st.copy = ''; openOffice(el, { page: true }).catch((err) => errorBox(err.message, tr('Couldn’t open', 'เปิดไม่สำเร็จ'))); };
   $('[data-actions]', el).innerHTML = `<button class="btn" data-a="dl">${icon('download', 16)}${tr('Download', 'ดาวน์โหลด')}</button>
-    <button class="btn" data-a="site">${icon('upload', 16)}${tr('Save', 'บันทึก')}</button>
+    ${allBtn()}<button class="btn" data-a="site">${icon('upload', 16)}${tr('Save', 'บันทึก')}</button>
     <button class="btn primary" data-a="quit">${tr('Save and quit', 'บันทึกและออก')}</button>`;
   $('[data-actions]', el).onclick = (e) => act(el, e.target.closest('[data-a]')?.dataset.a);
 }
@@ -314,6 +330,7 @@ async function act(el, a) {
   btns.forEach((b) => { b.disabled = true; });
   try {
     if (a === 'google') await toGoogle(el);
+    if (a === 'all') await resetAll(el);
     if (a === 'fresh' && await confirmBox(tr('Discard the draft?', 'ทิ้งฉบับร่างหรือไม่'), tr('The file opens again as it is on the site. The draft on this device is deleted.', 'ไฟล์จะเปิดใหม่ตามที่อยู่ในเว็บไซต์ และฉบับร่างในเครื่องนี้จะถูกลบ'), { ok: tr('Discard', 'ทิ้ง'), danger: true })) {
       await writeDraft(null).catch(() => {});
       await openOffice(el, { fresh: true });
