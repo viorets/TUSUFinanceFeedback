@@ -52,6 +52,7 @@ export async function openPdfEditor(root, { bytes, name, draft = null, t = (en) 
       <label class="mk-ctl">${t('Text size', 'ขนาดตัวอักษร')} <input type="number" id="mk-s" min="6" max="72" step="1" value="${textSize}"> pt</label>
       <span class="mk-grow"></span>
       <button type="button" id="mk-undo" title="Ctrl+Z">${t('Undo', 'เลิกทำ')}</button><button type="button" id="mk-redo" title="Ctrl+Y">${t('Redo', 'ทำซ้ำ')}</button>
+      <button type="button" id="mk-reset" title="${t('Remove every mark (Undo brings them back)', 'ลบเครื่องหมายทั้งหมด (เลิกทำเพื่อนำกลับมา)')}">${t('Reset edits', 'ล้างการแก้ไข')}</button>
       <button type="button" id="mk-del" disabled>${t('Delete', 'ลบ')}</button>
     </div><div class="mk-pages" id="mk-pages"><p class="mk-wait">${t('Loading…', 'กำลังโหลด…')}</p></div></div>`;
   const [pdfjs, PDFLib] = await loadLibs();
@@ -132,6 +133,7 @@ export async function openPdfEditor(root, { bytes, name, draft = null, t = (en) 
     root.querySelector('#mk-c').value = selMark && selMark.color ? selMark.color : textMode() ? st.textColor : st.shapeColor;
     root.querySelector('#mk-undo').disabled = !st.undo.length;
     root.querySelector('#mk-redo').disabled = !st.redo.length;
+    root.querySelector('#mk-reset').disabled = !st.marks.length;
   }
 
   // ---------- tools ----------
@@ -168,7 +170,10 @@ export async function openPdfEditor(root, { bytes, name, draft = null, t = (en) 
   const undo = () => { if (!st.undo.length) return; st.redo.push(JSON.stringify(st.marks)); st.marks = JSON.parse(st.undo.pop()); st.sel = null; changed(); };
   const redo = () => { if (!st.redo.length) return; st.undo.push(JSON.stringify(st.marks)); st.marks = JSON.parse(st.redo.pop()); st.sel = null; changed(); };
   const del = () => { if (!st.sel) return; snapshot(); st.marks = st.marks.filter((m) => m.id !== st.sel); st.sel = null; changed(); };
+  // Reset edits (v2.16): every mark goes in one step; Undo brings them back.
+  const reset = () => { if (!st.marks.length) return; snapshot(); st.marks = []; st.sel = null; changed(); };
   root.querySelector('#mk-undo').onclick = undo; root.querySelector('#mk-redo').onclick = redo; root.querySelector('#mk-del').onclick = del;
+  root.querySelector('#mk-reset').onclick = reset;
   const onKey = (e) => {
     if (!root.isConnected) { document.removeEventListener('keydown', onKey); return; }
     if (e.target.isContentEditable || /INPUT|TEXTAREA/.test(e.target.tagName)) return;

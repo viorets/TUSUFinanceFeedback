@@ -518,6 +518,7 @@ export async function openDocxEditor(root, bytes, { t = (en) => en } = {}) {
 
   renderBlock(body, page);
   if (!items.length) throw new Error(t('No text was found in this document.', 'ไม่พบข้อความในเอกสารนี้'));
+  const opened = body.cloneNode(true); // the file as it opened, for Reset edits
 
   // ---------- toolbar ----------
   const fontsUsed = new Set();
@@ -546,6 +547,7 @@ export async function openDocxEditor(root, bytes, { t = (en) => en } = {}) {
       <div class="de-group" role="group" aria-label="${t('Undo', 'เลิกทำ')}">
         <button type="button" id="de-undo" disabled title="${t('Undo the last formatting or shape change (Ctrl+Z)', 'เลิกทำการจัดรูปแบบหรือรูปร่างล่าสุด (Ctrl+Z)')}">${t('Undo', 'เลิกทำ')}</button>
         <button type="button" id="de-redo" disabled title="${t('Redo (Ctrl+Y)', 'ทำซ้ำ (Ctrl+Y)')}">${t('Redo', 'ทำซ้ำ')}</button>
+        <button type="button" id="de-reset" title="${t('Back to the file as it opened: every edit, text box, line and arrow goes (Undo brings them back)', 'กลับไปเป็นไฟล์ตอนเปิด: ลบการแก้ไข กล่องข้อความ เส้น และลูกศรทั้งหมด (เลิกทำเพื่อนำกลับมา)')}">${t('Reset edits', 'ล้างการแก้ไข')}</button>
       </div>
       <span class="oe-note" id="de-note">${EDIT_NOTE}</span>
     </div><div class="oe-scroll de-doc"></div></div>`;
@@ -607,6 +609,8 @@ export async function openDocxEditor(root, bytes, { t = (en) => en } = {}) {
   const undo = () => restore(undos, redos);
   const redo = () => restore(redos, undos);
   $('de-undo').onclick = undo; $('de-redo').onclick = redo;
+  // Reset edits (v2.16): back to the file as it opened in one step; Undo brings the edits back.
+  $('de-reset').onclick = () => { restore([opened.cloneNode(true)], undos); redos.length = 0; undoButtons(); };
 
   // ---------- picking and moving shapes ----------
   function select(s) {
