@@ -71,7 +71,7 @@ const ROWS_SECONDS = 600; // our own tabs (writes through the site change their 
 const STAMP_SECONDS = 30; // how often an outside Sheet's last-updated time is asked from Drive
 // Part of every cached answer's key: a deployment never reads answers cached by another code version (both share the
 // script cache). Change it whenever an answer's shape changes.
-const CODE_VERSION = 'v2.16';
+const CODE_VERSION = 'v2.17';
 const KINDS = {
   docx: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
   pdf: 'application/pdf',
@@ -340,7 +340,7 @@ function upload_(req, user) {
   if (!bytes.length) throw new Error('Empty file');
   if (bytes.length > MAX_BYTES) throw new Error('File larger than 12 MB');
   const f = u.folder.createFile(Utilities.newBlob(bytes, KINDS[u.kind], u.driveName));
-  return { file: { id: f.getId(), name: u.name } };
+  return intoCard_(req, user, { file: { id: f.getId(), name: u.name } });
 }
 
 // Who may upload what, where: role, organization / project, case, phase, type. Returns the target folder, the type
@@ -400,7 +400,12 @@ function uploadDone_(req, user) {
   const p = req.purpose === 'form' || req.purpose === 'excel' ? org__(req.org) : project_(req.ref);
   const f = file_({ id: req.id, name: req.name }, p.org);
   if (DriveApp.getFileById(f.id).getSize() > MAX_BYTES) { DriveApp.getFileById(f.id).setTrashed(true); throw new Error('File larger than 12 MB'); }
-  return { file: f };
+  return intoCard_(req, user, { file: f });
+}
+// The editor's Save (v2.17): with card (its slot) and cardOrg, the uploaded file also goes into its card in this same
+// call (saveMarked_, which checks the slot belongs to that organization), so Save needs one server call fewer.
+function intoCard_(req, user, out) {
+  return req.card ? Object.assign(out, saveMarked_({ org: req.cardOrg, slot: req.card, file: out.file }, user)) : out;
 }
 
 function savePrePitch_(req, user) {

@@ -18,7 +18,7 @@
 // one Google copy made from that saved file; No, or no answer within a minute, leaves them read-only.
 import { tr } from '../i18n.js';
 import { $, esc, icon, toast, busy, errorBox, confirmBox, dialog, dateTimeFmt } from '../ui.js';
-import { call, upload, previewUrl, viewUrl, downloadUrl, forget, peek, remember } from '../api.js';
+import { call, upload, uploadToCard, previewUrl, viewUrl, downloadUrl, forget, peek, remember } from '../api.js';
 import { sendMarked, openPreview } from '../project.js';
 import { ORGS } from '../masterdata.js';
 import { idToken } from '../firebase.js';
@@ -355,7 +355,7 @@ async function act(el, a) {
     if (a === 'site' || a === 'quit') {
       const file = await saveToSite(el);
       if (file) await hand(el, file);
-      if (file && a === 'quit') { location.hash = orgHref(); return; }
+      if (file && a === 'quit' && !st.unsent) { location.hash = orgHref(); return; } // marks not kept: stay to Save again
     }
   } catch (err) {
     await errorBox(err.message, tr('Couldn’t finish', 'ทำไม่สำเร็จ'));
@@ -365,24 +365,45 @@ async function act(el, a) {
 
 // Save: the slot's file is checked first (someone may have saved a newer one since this page opened), then
 // the file is uploaded. Resolves the saved file { id, name }, or null when the person chose not to replace.
+// v2.17: the file into its card and, for a PDF, its marks (kept on the server so they stay editable) are sent at
+// the same time, and either may fail alone. File not saved: the error, Save again (marks saved or not, nothing is
+// lost). File saved but marks not: the card has the new PDF, the marks stay on this device and the page stays
+// unsaved, with a message to press Save again.
 async function saveToSite(el, { ask = true } = {}) {
   if (ask && !(await siteStillSame())) return null;
-  const file = await busy(tr('Saving {file} to the site…', 'กำลังบันทึก {file} เข้าเว็บไซต์…', { file: outName() }), async (set) => {
+  const [sent, marks] = await busy(tr('Saving {file} to the site…', 'กำลังบันทึก {file} เข้าเว็บไซต์…', { file: outName() }), async (set) => {
     const f = new File([await produce((x) => set(x * 0.5))], outName(), { type: MIME[st.kind] });
-    const saved = await upload(f, target(st.slot, st.org), (x) => set(0.5 + x * 0.4));
-    // Into its card at once (v2.16): the card as saved comes back for the organization tab.
-    st.card = inCard() ? await call('saveMarked', { org: st.org, slot: st.slot, file: saved }) : null;
-    if (st.card) keepCard(st.card);
-    if (st.ed) await saveDraft(); // the marks of the saved file stay editable
-    if (st.office) { await writeDraft(null).catch(() => {}); st.local = null; } // saved to the site: no draft needed
-    return saved;
+    return Promise.allSettled([toCard(f, (x) => set(0.5 + x * 0.5)), st.ed ? saveDraft() : null]);
   });
-  st.unsent = false;
+  if (sent.status === 'rejected') throw sent.reason;
+  const file = sent.value;
+  if (st.office) { await writeDraft(null).catch(() => {}); st.local = null; } // saved to the site: no draft needed
   st.saved = { name: file.name, at: new Date().toISOString() };
-  (st.own = st.own || new Set()).add(file.id); // my own saves never count as "changed by someone else"
+  (st.own = st.own || new Set()).add(file.id);
+  if (marks.status === 'rejected') {
+    st.unsent = true; // the marks are on this device only (writeLocal)
+    status(el, draftLine());
+    await errorBox(tr('{file} is saved into the card, but its marks could not be kept for editing later ({why}). They are kept on this device: press Save again.',
+      '{file} บันทึกลงในการ์ดแล้ว แต่เก็บเครื่องหมายไว้แก้ไขภายหลังไม่สำเร็จ ({why}) เครื่องหมายยังอยู่ในเครื่องนี้ กรุณากดบันทึกอีกครั้ง', { file: file.name, why: marks.reason?.message || '' }),
+    tr('Marks not kept yet', 'ยังไม่ได้เก็บเครื่องหมาย'));
+    return file;
+  }
+  st.unsent = false;
   if (st.ed) status(el, draftLine());
   if (st.office) status(el, tr('Saved · you can keep editing', 'บันทึกแล้ว · แก้ไขต่อได้'));
   return file;
+}
+
+// The file to the slot. A card slot (Pitching): the server saves it into its card in the upload's own call (v2.17;
+// my own saves never count as "changed by someone else"); a server from before v2.17 answers without the card,
+// and the card is saved with saveMarked as in v2.16.
+async function toCard(f, prog) {
+  const where = target(st.slot, st.org);
+  if (!inCard()) { st.card = null; return upload(f, where, prog); }
+  const out = await uploadToCard(f, where, st.slot, st.org, prog);
+  st.card = out.pitch || out.orgPitch ? out : await call('saveMarked', { org: st.org, slot: st.slot, file: out.file });
+  keepCard(st.card);
+  return out.file;
 }
 
 // true = go ahead: the slot's file is the one it was when this page opened (or one this page saved), or the person

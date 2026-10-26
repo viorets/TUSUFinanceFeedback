@@ -109,7 +109,12 @@ const toBase64 = (blob) => new Promise((res, rej) => {
 // v2.9: the file goes straight from the browser to Google Drive (a resumable session the server opens in the
 // organization's folder), with no base64 and no Apps Script in between. If that route fails (network, or the
 // browser blocks it), the file goes the old way: base64 through the server.
-export async function upload(file, { ref, org, purpose, only = '' }, onProgress = () => {}) {
+export const upload = async (file, where, onProgress) => (await send(file, where, {}, onProgress)).file;
+// The editor's Save (v2.17): the same upload, and the server puts the file into its card in the same call
+// (card = the editor's slot, cardOrg = its organization). Resolves the server's answer: { file, pitch | orgPitch }; a
+// server from before v2.17 answers { file } only, and the caller saves the card itself.
+export const uploadToCard = (file, where, card, cardOrg, onProgress) => send(file, where, { card, cardOrg }, onProgress);
+async function send(file, { ref, org, purpose, only = '' }, extra, onProgress = () => {}) {
   const kind = (String(file.name).match(/\.([a-z0-9]+)$/i) || [])[1]?.toLowerCase();
   const fits = only === 'word' ? kind === 'docx' || kind === 'doc' : kind === 'doc' ? false
     : only === 'any' ? !!MIME[kind] : only === 'excel' ? EXCEL.includes(kind) : MIME[kind] && !EXCEL.includes(kind) && (!only || kind === only);
@@ -131,13 +136,13 @@ export async function upload(file, { ref, org, purpose, only = '' }, onProgress 
   if (start) {
     try {
       const id = await put(start.url, file, MIME[kind], onProgress);
-      return (await call('uploadDone', { ref, org, purpose, id, name: file.name })).file;
+      return await call('uploadDone', { ref, org, purpose, id, name: file.name, ...extra });
     } catch { /* the old way below */ }
   }
   onProgress(0.5);
-  const out = await call('upload', { ...what, data: await toBase64(file) });
+  const out = await call('upload', { ...what, ...extra, data: await toBase64(file) });
   onProgress(1);
-  return out.file;
+  return out;
 }
 
 // The raw file to a Drive resumable-upload session; resolves the new file's id.
