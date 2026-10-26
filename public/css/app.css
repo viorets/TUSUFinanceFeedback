@@ -245,6 +245,10 @@ input[inputmode=decimal] { max-width: 240px; text-align: right; font-variant-num
 .upl { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; margin-top: 10px; }
 .upl:empty { display: none; }
 .upl.busy { opacity: .5; pointer-events: none; }
+/* v2.15: Noted documents = a Word row and a PDF row */
+.noted-row + .noted-row { margin-top: 14px; }
+.noted-row .noted-k { display: block; margin-top: 6px; }
+.noted-row .upl { margin-top: 4px; }
 .fchip { display: inline-flex; gap: 6px; align-items: center; padding: 5px 6px 5px 12px; border-radius: 980px; background: var(--bg2); border: 1px solid var(--pale); font-size: 14px; max-width: 100%; }
 .fchip a:first-of-type { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .check { display: inline-flex; gap: 8px; align-items: center; margin-left: 16px; font-size: 15px; cursor: pointer; }
@@ -624,6 +628,29 @@ svg.chart [data-tip]:hover { opacity: .85; }
 .msel-acts { display: flex; gap: 4px; padding-bottom: 6px; margin-bottom: 4px; border-bottom: 1px solid var(--sep); }
 .msel-acts .btn { padding: 5px 12px; font-size: 14px; }
 .msel[hidden] { display: none; }
+/* v2.15 filter bar: search on its own line, then the filter buttons; a button in use is teal with its count */
+.search-bar { margin-bottom: 10px; }
+.fbar { gap: 8px; margin-top: 0; position: relative; }
+.fbar-k { display: inline-flex; gap: 6px; align-items: center; margin-right: 2px; }
+.msel.on > summary, .msel.on[open] > summary { background: var(--teal); color: #fff; }
+.msel.on > summary small { color: inherit; }
+.msel > summary::after { content: ''; display: inline-block; width: 6px; height: 6px; margin-left: 8px; border: solid currentColor; border-width: 0 1.5px 1.5px 0; transform: translateY(-3px) rotate(45deg); opacity: .6; }
+.msel-sep { border: 0; border-top: 1px solid var(--sep); margin: 4px 0; }
+.range-body { display: flex; flex-direction: column; gap: 12px; padding: 6px; min-width: 300px; }
+.range-body select { width: 100%; }
+.range-nums { display: flex; gap: 8px; align-items: center; }
+.range-nums input[type=number] { flex: 1; min-width: 0; }
+.range-body .dual { max-width: none; flex: none; }
+.fchips { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; margin: -4px 0 14px; }
+.fchips:empty { display: none; }
+.fpill { display: inline-flex; align-items: center; gap: 2px; padding: 3px 4px 3px 12px; border-radius: 980px; background: var(--fill); font-size: 14px; font-weight: 500; }
+.fpill .icon-btn { padding: 4px; }
+.fchips .btn.plain { padding: 5px 10px; font-size: 14px; }
+@media (max-width: 640px) {
+  .fbar .msel { position: static; }
+  .fbar .msel-body { left: 0; right: 0; min-width: 0; }
+  .range-body { min-width: 0; }
+}
 .pic-pick > summary { cursor: pointer; list-style: none; }
 .pic-pick > summary::after { content: ' ▾'; color: var(--text2); }
 .pic-pick .msel-body { min-width: 200px; }

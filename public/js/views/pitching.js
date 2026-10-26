@@ -1,6 +1,7 @@
 // Pitching: at the top, the organization's "Correct Excel file" (one .xlsx / .xls per organization since v2.9, with
 // its own Save, logged in Pitching_Log). Then per project: the pitching slot (from the scheduling site, read only),
-// the summary, the final approved budget and "Noted documents" (any number of .docx / PDF). Unfinished = a
+// the summary, the final approved budget and "Noted documents" (v2.15: one Word file, .docx or .doc, and one PDF,
+// each may be empty; Upload / Replace / Remove as on Pre-pitch). Unfinished = a
 // required question unanswered (project.js). Every save and upload runs in a progress window (busy); a save that
 // can't reach the server is kept on this device and shows "Pending" until it is sent (api.save).
 import { tr } from '../i18n.js';
@@ -15,7 +16,13 @@ const openPre = new Set();
 
 let st = null; // { el, d, can, form: { ref: working copy }, xl: Correct Excel working copy (file or null) }
 
-const pick = (x = {}) => ({ summary: x.summary || '', finalBudget: x.finalBudget ?? null, noted: [...(x.noted || [])] });
+// Noted documents (v2.15): 'word' (.docx / .doc) or 'pdf' by the file name; the list is [Word, PDF], either may be
+// missing (the server keeps the same pair: Code.gs notedPair_).
+const NK = (f) => (/\.pdf$/i.test(f?.name || '') ? 'pdf' : /\.docx?$/i.test(f?.name || '') ? 'word' : '');
+const notedOf = (list, k) => (list || []).filter((f) => NK(f) === k).pop() || null;
+const pair = (list) => [notedOf(list, 'word'), notedOf(list, 'pdf')].filter(Boolean);
+const setNoted = (ref, k, file) => { st.form[ref].noted = pair([...st.form[ref].noted.filter((f) => NK(f) !== k), ...(file ? [file] : [])]); };
+const pick = (x = {}) => ({ summary: x.summary || '', finalBudget: x.finalBudget ?? null, noted: pair(x.noted) });
 const dirty = (ref) => JSON.stringify(st.form[ref]) !== JSON.stringify(pick(st.d.pitch[ref]));
 const xlDirty = () => !!st && (st.xl?.id || '') !== (st.d.orgPitch?.file?.id || '');
 export const isDirty = () => !!st && (xlDirty() || st.d.projects.some((p) => dirty(p.ref)));
@@ -32,7 +39,7 @@ export async function saveAll() { for (const p of unsaved()) await (p.ref === 'e
 
 // restored: unsaved work kept on this device and put back ({ parts: { ref: working copy }, xl? }).
 export function render(el, d, ctx, restored = null) {
-  st = { el, d, ctx, can: ctx.canEdit, form: Object.fromEntries(d.projects.map((p) => [p.ref, restored?.parts?.[p.ref] || pick(d.pitch[p.ref])])),
+  st = { el, d, ctx, can: ctx.canEdit, form: Object.fromEntries(d.projects.map((p) => [p.ref, restored?.parts?.[p.ref] ? { ...restored.parts[p.ref], noted: pair(restored.parts[p.ref].noted) } : pick(d.pitch[p.ref])])),
     xl: restored && 'xl' in restored ? restored.xl : d.orgPitch?.file || null };
   el.innerHTML = `<div data-progress></div>${xlBox()}${d.projects.map(card).join('')}`;
   progress(el, d, 'pitching');
@@ -98,17 +105,20 @@ function restoreKept(k) {
   } else toast(tr('Restored — press Save to keep them', 'กู้คืนแล้ว — กดบันทึกเพื่อเก็บ'));
 }
 
-// A file saved by the editor tab (v2.12): the Correct Excel file is replaced, a Noted document is added; Save keeps it.
+// A file saved by the editor tab (v2.12): it replaces the Correct Excel file, or the Noted Word file / PDF of its slot
+// (v2.15; a slot from before v2.15 goes by the file's type); Save keeps it.
 function marked({ org, slot, file }) {
   if (!st?.el.isConnected || !st.can || org !== orgRef()) return false;
   if (slot === 'xl') {
     st.xl = file;
     $('[data-xl-slot]', st.el).innerHTML = xlSlot();
   } else {
-    const ref = String(slot).match(/^noted:(.+)$/)?.[1];
-    const sec = ref && st.form[ref] && st.el.querySelector(`.pcard[data-ref="${CSS.escape(ref)}"]`);
+    const m = String(slot).match(/^noted:([^:]+)(?::(pdf|docx))?$/);
+    const ref = m?.[1];
+    const k = m?.[2] ? (m[2] === 'pdf' ? 'pdf' : 'word') : NK(file);
+    const sec = ref && k && st.form[ref] && st.el.querySelector(`.pcard[data-ref="${CSS.escape(ref)}"]`);
     if (!sec) return false;
-    st.form[ref].noted.push(file);
+    setNoted(ref, k, file);
     $('[data-noted]', sec).innerHTML = noted(ref);
   }
   toast(tr('Edited file attached — press Save to keep it', 'แนบไฟล์ที่แก้ไขแล้ว — กดบันทึกเพื่อเก็บ'));
@@ -138,7 +148,7 @@ function xlSlot() {
 function card(p) {
   const f = st.form[p.ref];
   const dis = st.can ? '' : 'disabled';
-  const files = `${dlBtn(p.pdf, tr('Project PDF', 'โครงการ PDF'))}${st.can ? editBtn(p.pdf, { org: orgRef(), slot: `noted:${p.ref}`, kind: 'pdf' }) : ''}${dlBtn(p.docx, tr('Project .docx', 'โครงการ .docx'))}${st.can ? editBtn(p.docx, { org: orgRef(), slot: `noted:${p.ref}`, kind: 'docx' }) : ''}`;
+  const files = `${dlBtn(p.pdf, tr('Project PDF', 'โครงการ PDF'))}${st.can ? editBtn(p.pdf, { org: orgRef(), slot: `noted:${p.ref}:pdf`, kind: 'pdf' }) : ''}${dlBtn(p.docx, tr('Project .docx', 'โครงการ .docx'))}${st.can ? editBtn(p.docx, { org: orgRef(), slot: `noted:${p.ref}:docx`, kind: 'docx' }) : ''}`;
   return `<section class="group pcard" data-ref="${esc(p.ref)}">
     ${cardTop(p, [[tr('Total project budget', 'งบประมาณโครงการ'), p.budget]], files, slotLine(st.d.slots?.[p.ref]))}
     <div data-pre>${prePeek(p.ref)}</div>
@@ -174,12 +184,19 @@ function preForm() {
 const savedLine = (s) => (s?.pending ? `<span class="pill orange">${tr('Pending', 'รอส่ง')}</span> ${tr('Kept on this device; it is sent when the server can be reached', 'เก็บไว้ในเครื่องนี้ จะส่งเมื่อติดต่อเซิร์ฟเวอร์ได้')}`
   : s?.at ? tr('Saved {when} by {who}', 'บันทึก {when} โดย {who}', { when: dateTimeFmt(s.at), who: esc(st.ctx.nameOf(s.by)) }) : tr('Not saved yet', 'ยังไม่ได้บันทึก'));
 
+// Noted documents (v2.15): a Word row and a PDF row, one file each. A .doc gets no Edit button (the editor opens .docx).
 function noted(ref) {
   const list = st.form[ref].noted;
   const fresh = new Set(newFiles(list, st.d.pitch[ref]?.noted).map((f) => f.id));
-  return `<div class="upl">${list.map((f, i) => `${fileChip(f, { unsaved: fresh.has(f.id) })}${st.can ? editBtn(f, { org: orgRef(), slot: `noted:${ref}`, plain: true }) : ''}${st.can ? `<button class="icon-btn" data-rm="${i}" title="${esc(tr('Remove from list', 'นำออกจากรายการ'))}">${icon('x', 16)}</button>` : ''}`).join('')}
-    ${!list.length && !st.can ? '<span class="muted">—</span>' : ''}
-    ${st.can ? `<label class="btn">${icon('upload', 16)}${tr('Upload .docx or PDF', 'อัปโหลด .docx หรือ PDF')}<input type="file" hidden multiple accept=".docx,.pdf" data-up></label>` : ''}</div>${st.can ? capNote('.docx / PDF') : ''}`;
+  const row = (k) => {
+    const f = notedOf(list, k);
+    const name = k === 'pdf' ? tr('Noted PDF', 'เอกสารบันทึก PDF') : tr('Noted .docx', 'เอกสารบันทึก .docx');
+    return `<div class="noted-row"><span class="muted small noted-k">${name}</span><div class="upl">${fileChip(f, { unsaved: !!f && fresh.has(f.id) })}
+      ${f && st.can ? editBtn(f, { org: orgRef(), slot: `noted:${ref}:${k === 'pdf' ? 'pdf' : 'docx'}`, plain: true }) : ''}${!f && !st.can ? '<span class="muted">—</span>' : ''}
+      ${st.can ? `<label class="btn">${icon('upload', 16)}${f ? tr('Replace', 'เปลี่ยนไฟล์') : k === 'pdf' ? tr('Upload PDF', 'อัปโหลด PDF') : tr('Upload .docx', 'อัปโหลด .docx')}<input type="file" hidden accept="${k === 'pdf' ? '.pdf' : '.docx,.doc'}" data-up="${k}"></label>` : ''}
+      ${f && st.can ? `<button type="button" class="btn plain" data-rm="${k}">${tr('Remove', 'นำออก')}</button>` : ''}</div>${st.can ? capNote(k === 'pdf' ? 'PDF' : '.docx / .doc') : ''}</div>`;
+  };
+  return `${row('word')}${row('pdf')}`;
 }
 
 const refOf = (e) => e.target.closest('[data-ref]')?.dataset.ref;
@@ -206,19 +223,17 @@ async function onChange(e) {
     return;
   }
   const ref = refOf(e);
-  if (!ref || !e.target.hasAttribute('data-up')) return;
+  const k = e.target.dataset.up;
+  const file = e.target.files?.[0];
+  if (!ref || !k || !file) return;
   const box = e.target.closest('[data-noted]');
-  let got = 0;
-  for (const file of [...e.target.files]) {
-    try {
-      st.form[ref].noted.push(await busy(uploading(file.name), (set) => upload(file, { ref, purpose: 'noted' }, set)));
-      got++;
-    } catch (err) {
-      await errorBox(`${file.name}: ${err.message}`, tr('Couldn’t upload', 'อัปโหลดไม่สำเร็จ'));
-    }
+  try {
+    setNoted(ref, k, await busy(uploading(file.name), (set) => upload(file, { ref, purpose: 'noted', only: k }, set)));
+    toast(UPLOADED());
+  } catch (err) {
+    await errorBox(`${file.name}: ${err.message}`, tr('Couldn’t upload', 'อัปโหลดไม่สำเร็จ'));
   }
   box.innerHTML = noted(ref);
-  if (got) toast(UPLOADED());
 }
 
 async function onClick(e) {
@@ -236,7 +251,7 @@ async function onClick(e) {
   if (!ref) return;
   const rm = e.target.closest('[data-rm]');
   if (rm) {
-    st.form[ref].noted.splice(Number(rm.dataset.rm), 1);
+    setNoted(ref, rm.dataset.rm, null);
     rm.closest('[data-noted]').innerHTML = noted(ref);
     return;
   }

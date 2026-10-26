@@ -93,6 +93,7 @@ const MIME = {
   pdf: 'application/pdf',
   xlsx: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
   xls: 'application/vnd.ms-excel',
+  doc: 'application/msword', // v2.15: only = 'word' (Noted documents)
 };
 const EXCEL = ['xlsx', 'xls'];
 const toBase64 = (blob) => new Promise((res, rej) => {
@@ -102,17 +103,19 @@ const toBase64 = (blob) => new Promise((res, rej) => {
   r.readAsDataURL(blob);
 });
 
-// Upload one file to Drive. only = 'docx' | 'pdf' | 'excel' (.xlsx or .xls) | 'any' (any of the four) |
-// '' (.docx or PDF). ref = the project; org = the organization for purposes 'form' (budget-form feedback) and
+// Upload one file to Drive. only = 'docx' | 'pdf' | 'word' (.docx or .doc, v2.15) | 'excel' (.xlsx or .xls) |
+// 'any' (.xlsx, .xls, .docx or PDF) | '' (.docx or PDF). ref = the project; org = the organization for purposes 'form' (budget-form feedback) and
 // 'excel' (Correct Excel file, v2.9). onProgress(fraction) drives the progress bar. Resolves { id, name }.
 // v2.9: the file goes straight from the browser to Google Drive (a resumable session the server opens in the
 // organization's folder), with no base64 and no Apps Script in between. If that route fails (network, or the
 // browser blocks it), the file goes the old way: base64 through the server.
 export async function upload(file, { ref, org, purpose, only = '' }, onProgress = () => {}) {
   const kind = (String(file.name).match(/\.([a-z0-9]+)$/i) || [])[1]?.toLowerCase();
-  const fits = only === 'any' ? !!MIME[kind] : only === 'excel' ? EXCEL.includes(kind) : MIME[kind] && !EXCEL.includes(kind) && (!only || kind === only);
+  const fits = only === 'word' ? kind === 'docx' || kind === 'doc' : kind === 'doc' ? false
+    : only === 'any' ? !!MIME[kind] : only === 'excel' ? EXCEL.includes(kind) : MIME[kind] && !EXCEL.includes(kind) && (!only || kind === only);
   if (!fits) {
-    throw new Error(only === 'docx' ? tr('Only a Word file (.docx) can go here', 'ช่องนี้รับเฉพาะไฟล์ Word (.docx)')
+    throw new Error(only === 'word' ? tr('Only a Word file (.docx or .doc) can go here', 'ช่องนี้รับเฉพาะไฟล์ Word (.docx หรือ .doc)')
+      : only === 'docx' ? tr('Only a Word file (.docx) can go here', 'ช่องนี้รับเฉพาะไฟล์ Word (.docx)')
       : only === 'pdf' ? tr('Only a PDF file can go here', 'ช่องนี้รับเฉพาะไฟล์ PDF')
         : only === 'excel' ? tr('Only an Excel file (.xlsx or .xls) can go here', 'ช่องนี้รับเฉพาะไฟล์ Excel (.xlsx หรือ .xls)')
           : only === 'any' ? tr('Only .xlsx, .xls, .docx or PDF files', 'รับเฉพาะไฟล์ .xlsx, .xls, .docx หรือ PDF')

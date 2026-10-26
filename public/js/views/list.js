@@ -4,14 +4,19 @@
 // Budget totals per organization: proposed (its projects' budgets) and approved (Pitching final approved budgets).
 // Tabs (v2.10): All / Pre-pitch / Pitching / Re-submission. Each has its own budget column and a "% of total" column
 // (the organization's budget over the total of the organizations shown, so it follows the filters).
-// Filters (v2.10): category, campus and a budget range, kept on this device; they combine with search and "Mine only".
+// Filters (v2.10): category, campus and a budget range, kept on this device; they combine with search.
+// Filter bar (v2.15): search on its own line, then one row of filter buttons (Category · Campus · Person in charge ·
+// Budget · Round code); a button in use turns teal with its count, the budget range opens inside its button, every
+// picker has Choose all / Clear all, one opens at a time (Esc or a click outside closes it). A chip under the bar per
+// choice (× removes it) and "Clear filters".
+// Person in charge (v2.15): "No person in charge yet", "Me" (was "Mine only") and everyone in charge of an
+// organization; any ticked one matches.
 // Round code (v2.13, Re-submission tab only): the organizations that re-submitted in any of the picked Re-Submission
 // rounds; Choose all / Clear all inside the picker. None picked = no filter, as the other pickers.
 // A mini dashboard above the list totals what is shown, for the open tab.
 // Status: Open / Closed, shown here; Admins and Chiefs change it at the top of the Re-submission tab.
 // A closed case counts as Done whatever its projects' progress (v2.3).
 // Each campus is its own card; fixed column widths keep the cards lined up.
-// "Mine only" (v2.6) keeps the organizations I'm in charge of; it combines with the filters and is kept on this device.
 // "Print campus" (v2.7) prints a summary of that campus: each organization with its projects as sub-rows
 // (print.js campusSheet, one printData call).
 import { tr, getLang } from '../i18n.js';
@@ -24,14 +29,14 @@ import { timeline, bindTimeline } from '../timeline.js';
 let query = '';
 let tab = 'all'; // all | pre | pitch | resub
 let sub = 'all'; // Pitching and Re-submission: all | pending | done
-let mine = false;
-// Filters: cats / camps = codes picked (none picked = no filter); on / min / max = budget range; type = budget the
-// range uses on the All tab.
-let F = { cats: [], camps: [], rounds: [], on: false, min: null, max: null, type: 'proposed' };
+// Filters: cats / camps / rounds = codes picked (none picked = no filter); pics = persons in charge picked: NONE, ME
+// or emails; on / min / max = budget range; type = budget the range uses on the All tab.
+const NONE = '-none'; const ME = '-me';
+let F = { cats: [], camps: [], rounds: [], pics: null, on: false, min: null, max: null, type: 'proposed' };
 try {
-  mine = localStorage.getItem('mineOnly') === '1';
   F = { ...F, ...JSON.parse(localStorage.getItem('listFilters') || '{}') };
-} catch { /* private mode */ }
+  if (!Array.isArray(F.pics)) F.pics = localStorage.getItem('mineOnly') === '1' ? [ME] : []; // "Mine only" before v2.15
+} catch { F.pics = F.pics || []; /* private mode */ }
 const saveF = () => { try { localStorage.setItem('listFilters', JSON.stringify(F)); } catch { /* this visit only */ } };
 
 // The budget each tab is about, and the labels of the choices on All.
@@ -44,23 +49,25 @@ const TYPE_LABEL = {
 
 export async function render(page, ctx) {
   const optList = (list, picked, name) => list.map((x) => `<label class="msel-opt"><input type="checkbox" data-f="${name}" value="${esc(x.code)}" ${picked.includes(x.code) ? 'checked' : ''}>${esc(getLang() === 'th' ? x.th : x.en)}</label>`).join('');
+  const acts = (name) => `<div class="msel-acts"><button type="button" class="btn plain" data-all="${name}">${tr('Choose all', 'เลือกทั้งหมด')}</button><button type="button" class="btn plain" data-none="${name}">${tr('Clear all', 'ล้างทั้งหมด')}</button></div>`;
+  const picker = (id, label, body, extra = '') => `<details class="msel" id="${id}" ${extra}><summary>${label}<small id="${id}N"></small></summary><div class="msel-body">${body}</div></details>`;
   page.innerHTML = `<h1 class="grad">${tr('Organizations', 'องค์กร')}</h1><p class="muted" id="sum">&nbsp;</p><div id="timeline"></div>
     <div class="phase-bar"><div class="seg filter" role="radiogroup" aria-label="${esc(tr('Phase', 'ช่วง'))}" id="show"></div>
       <div class="track" id="track" aria-live="polite"></div></div>
     <div id="mini" class="kpis mini"></div>
-    <div class="toolbar"><input type="search" id="q" placeholder="${esc(tr('Search name, RefCode or person in charge', 'ค้นหาชื่อ รหัส หรือผู้รับผิดชอบ'))}" value="${esc(query)}">
-      <details class="msel" id="fcat"><summary>${tr('Category', 'หมวด')} <small id="fcatN"></small></summary><div class="msel-body">${optList(CATEGORIES, F.cats, 'cats')}</div></details>
-      <details class="msel" id="fcamp"><summary>${tr('Campus', 'วิทยาเขต')} <small id="fcampN"></small></summary><div class="msel-body">${optList(CAMPUSES, F.camps, 'camps')}</div></details>
-      <details class="msel" id="fround" hidden><summary>${tr('Round code', 'รหัสรอบ')} <small id="froundN"></small></summary><div class="msel-body">
-        <div class="msel-acts"><button type="button" class="btn plain" data-all="rounds">${tr('Choose all', 'เลือกทั้งหมด')}</button><button type="button" class="btn plain" data-none="rounds">${tr('Clear all', 'ล้างทั้งหมด')}</button></div>
-        <div id="froundList"></div></div></details>
-      <label class="check"><input type="checkbox" id="mine" ${mine ? 'checked' : ''}>${tr('Mine only', 'เฉพาะของฉัน')} <small class="muted" id="mineN"></small></label></div>
-    <div class="toolbar range" id="range">
-      <label class="check sw-on"><input type="checkbox" id="ron" ${F.on ? 'checked' : ''}>${tr('Budget range', 'ช่วงงบประมาณ')}</label>
-      <select id="rtype" aria-label="${esc(tr('Budget', 'งบประมาณ'))}">${Object.entries(TYPE_LABEL).map(([k, l]) => `<option value="${k}" ${F.type === k ? 'selected' : ''}>${esc(l())}</option>`).join('')}</select>
-      <input type="number" id="rmin" min="0" step="any" placeholder="${esc(tr('Min', 'ต่ำสุด'))}" aria-label="${esc(tr('Minimum', 'ต่ำสุด'))}">
-      <div class="dual"><input type="range" id="rlo" min="0" max="100" step="1" aria-label="${esc(tr('Minimum', 'ต่ำสุด'))}"><input type="range" id="rhi" min="0" max="100" step="1" aria-label="${esc(tr('Maximum', 'สูงสุด'))}"></div>
-      <input type="number" id="rmax" min="0" step="any" placeholder="${esc(tr('Max', 'สูงสุด'))}" aria-label="${esc(tr('Maximum', 'สูงสุด'))}"></div>
+    <div class="toolbar search-bar"><input type="search" id="q" placeholder="${esc(tr('Search name, RefCode or person in charge', 'ค้นหาชื่อ รหัส หรือผู้รับผิดชอบ'))}" value="${esc(query)}"></div>
+    <div class="toolbar fbar" role="group" aria-label="${esc(tr('Filters', 'ตัวกรอง'))}"><span class="muted small fbar-k">${icon('sliders', 16)}${tr('Filter', 'กรอง')}</span>
+      ${picker('fcat', tr('Category', 'หมวด'), acts('cats') + optList(CATEGORIES, F.cats, 'cats'))}
+      ${picker('fcamp', tr('Campus', 'วิทยาเขต'), acts('camps') + optList(CAMPUSES, F.camps, 'camps'))}
+      ${picker('fpic', tr('Person in charge', 'ผู้รับผิดชอบ'), `${acts('pics')}<div id="fpicList"></div>`)}
+      ${picker('fbud', tr('Budget', 'งบประมาณ'), `<div class="range-body" id="range">
+        <label class="check sw-on"><input type="checkbox" id="ron" ${F.on ? 'checked' : ''}>${tr('Budget range', 'ช่วงงบประมาณ')}</label>
+        <select id="rtype" aria-label="${esc(tr('Budget', 'งบประมาณ'))}">${Object.entries(TYPE_LABEL).map(([k, l]) => `<option value="${k}" ${F.type === k ? 'selected' : ''}>${esc(l())}</option>`).join('')}</select>
+        <div class="range-nums"><input type="number" id="rmin" min="0" step="any" placeholder="${esc(tr('Min', 'ต่ำสุด'))}" aria-label="${esc(tr('Minimum', 'ต่ำสุด'))}"><span class="muted">–</span>
+        <input type="number" id="rmax" min="0" step="any" placeholder="${esc(tr('Max', 'สูงสุด'))}" aria-label="${esc(tr('Maximum', 'สูงสุด'))}"></div>
+        <div class="dual"><input type="range" id="rlo" min="0" max="100" step="1" aria-label="${esc(tr('Minimum', 'ต่ำสุด'))}"><input type="range" id="rhi" min="0" max="100" step="1" aria-label="${esc(tr('Maximum', 'สูงสุด'))}"></div></div>`)}
+      ${picker('fround', tr('Round code', 'รหัสรอบ'), `${acts('rounds')}<div id="froundList"></div>`, 'hidden')}</div>
+    <div class="fchips" id="chips" aria-live="polite"></div>
     <div id="subbar" class="toolbar"></div>
     <div id="rows" class="org-list"></div>`;
 
@@ -187,30 +194,64 @@ export async function render(page, ctx) {
     const max = Math.max(0, ...rows.map(valOf));
     const top = Math.max(1, Math.ceil(max / 1000) * 1000);
     const lo = F.min == null ? 0 : Math.min(F.min, top); const hi = F.max == null ? top : Math.min(F.max, top);
-    ['#rlo', '#rhi'].forEach((id) => { $(id, page).max = top; $(id, page).step = Math.max(1, Math.round(top / 200)); $(id, page).disabled = !F.on; });
+    ['#rlo', '#rhi'].forEach((id) => { $(id, page).max = top; $(id, page).step = Math.max(1, Math.round(top / 200)); });
     $('#rlo', page).value = lo; $('#rhi', page).value = hi;
     $('#rmin', page).value = F.min ?? ''; $('#rmax', page).value = F.max ?? '';
-    ['#rmin', '#rmax'].forEach((id) => { $(id, page).disabled = !F.on; });
-    $('#rtype', page).hidden = tab !== 'all'; $('#rtype', page).disabled = !F.on;
+    $('#ron', page).checked = F.on;
+    $('#rtype', page).hidden = tab !== 'all';
+  };
+  const budgetOn = () => F.on && (F.min != null || F.max != null);
+
+  // Person in charge options (v2.15), with how many organizations on the list each has: No person in charge yet, Me,
+  // then everyone in charge of one, A to Z. Picks of people no longer in charge of any are dropped.
+  const listed = () => { const removed = new Set(boot.removed); return ORGS.filter((o) => !removed.has(o.code)); };
+  const paintPeople = (rows = listed()) => {
+    const n = {};
+    rows.forEach((o) => stat(o.code).people.forEach((p) => { n[p] = (n[p] || 0) + 1; }));
+    const me = ctx.me.email;
+    F.pics = F.pics.filter((v) => v === NONE || v === ME || n[v]);
+    const opt = (v, label, c) => `<label class="msel-opt"><input type="checkbox" data-f="pics" value="${esc(v)}" ${F.pics.includes(v) ? 'checked' : ''}><span class="grow">${esc(label)}</span><small class="muted num">${c}</small></label>`;
+    const others = Object.keys(n).filter((p) => p !== me).sort((a, b) => ctx.nameOf(a).localeCompare(ctx.nameOf(b)));
+    $('#fpicList', page).innerHTML = opt(NONE, NONE_LABEL(), rows.filter((o) => !stat(o.code).people.length).length) + opt(ME, ME_LABEL(), n[me] || 0)
+      + (others.length ? '<hr class="msel-sep">' : '') + others.map((p) => opt(p, ctx.nameOf(p), n[p])).join('');
+  };
+  const NONE_LABEL = () => tr('No person in charge yet', 'ยังไม่มีผู้รับผิดชอบ');
+  const ME_LABEL = () => tr('Me', 'ฉัน');
+  const picHit = (o) => {
+    if (!F.pics.length) return true;
+    const people = stat(o.code).people;
+    return F.pics.some((v) => (v === NONE ? !people.length : v === ME ? people.includes(ctx.me.email) : people.includes(v)));
+  };
+
+  // The filter buttons (teal with a count when in use) and a chip per choice; × removes it, "Clear filters" all.
+  const paintChips = () => {
+    const money = (v) => `฿${num2(v)}`;
+    const pick = { cats: (c) => label(CATEGORIES, c), camps: (c) => label(CAMPUSES, c), pics: (v) => (v === NONE ? NONE_LABEL() : v === ME ? ME_LABEL() : ctx.nameOf(v)), rounds: (c) => c };
+    const used = { fcat: F.cats.length, fcamp: F.camps.length, fpic: F.pics.length, fbud: budgetOn() ? 1 : 0, fround: tab === 'resub' ? F.rounds.length : 0 };
+    Object.entries(used).forEach(([id, n]) => { $(`#${id}`, page).classList.toggle('on', n > 0); $(`#${id}N`, page).textContent = n && id !== 'fbud' ? ` · ${n}` : ''; });
+    const chip = (key, text) => `<span class="fpill">${esc(text)}<button type="button" class="icon-btn" data-unf="${esc(key)}" aria-label="${esc(tr('Remove filter: {f}', 'นำตัวกรองออก: {f}', { f: text }))}">${icon('x', 14)}</button></span>`;
+    const list = ['cats', 'camps', 'pics', ...(tab === 'resub' ? ['rounds'] : [])].flatMap((k) => F[k].map((v) => chip(`${k}:${v}`, pick[k](v))));
+    if (budgetOn()) {
+      const range = F.min != null && F.max != null ? `${money(F.min)} – ${money(F.max)}` : F.min != null ? `≥ ${money(F.min)}` : `≤ ${money(F.max)}`;
+      list.push(chip('budget', `${tab === 'all' ? TYPE_LABEL[F.type]() : tr('Budget', 'งบประมาณ')} ${range}`));
+    }
+    $('#chips', page).innerHTML = list.length ? `${list.join('')}<button type="button" class="btn plain" data-clear-filters>${tr('Clear filters', 'ล้างตัวกรอง')}</button>` : '';
   };
 
   const paint = () => {
-    const removed = new Set(boot.removed);
-    const rows = ORGS.filter((o) => !removed.has(o.code));
+    const rows = listed();
     $('#show', page).innerHTML = Object.entries(TABS).map(([k, l]) => `<label><input type="radio" name="show" value="${k}" ${tab === k ? 'checked' : ''}><span>${esc(l())}</span></label>`).join('');
     syncRange(rows);
-    $('#fcatN', page).textContent = F.cats.length || ''; $('#fcampN', page).textContent = F.camps.length || '';
+    paintPeople(rows);
     // Round codes: the Re-Submission rounds of the pitching site (admin console); codes no longer there are dropped.
     const rounds = (boot.rounds || []).filter((r) => r.kind === 'resub').map((r) => r.code);
     F.rounds = (F.rounds || []).filter((c) => rounds.includes(c));
     $('#fround', page).hidden = tab !== 'resub';
-    $('#froundN', page).textContent = F.rounds.length || '';
     $('#froundList', page).innerHTML = rounds.map((c) => `<label class="msel-opt"><input type="checkbox" data-f="rounds" value="${esc(c)}" ${F.rounds.includes(c) ? 'checked' : ''}><span class="mono">${esc(c)}</span></label>`).join('')
       || `<span class="muted small">${tr('No Re-Submission rounds yet', 'ยังไม่มีรอบส่งแก้ไข')}</span>`;
+    paintChips();
     const inRounds = (o) => tab !== 'resub' || !F.rounds.length || (stat(o.code).rounds || []).some((c) => F.rounds.includes(c));
     const q = query.trim().toLowerCase();
-    const isMine = (o) => stat(o.code).people.includes(ctx.me.email);
-    $('#mineN', page).textContent = rows.filter(isMine).length;
     // Finished / Unfinished filter: Pitching and Re-submission (Pre-pitch is not tracked).
     const tracked = tab === 'pitch' || tab === 'resub';
     const isDone = (o) => !!closedOf(o.code) || (stat(o.code).count > 0 && !unfinished(o));
@@ -220,7 +261,7 @@ export async function render(page, ctx) {
       <small>${rows.filter((o) => subKeep[k](o)).length}</small></span></label>`).join('')}</div>` : '';
     const inRange = (o) => { if (!F.on) return true; const v = valOf(o); return v >= (F.min ?? 0) && v <= (F.max ?? Infinity); };
     const hit = (o) => (!F.cats.length || F.cats.includes(o.category)) && (!F.camps.length || F.camps.includes(o.campus)) && inRange(o) && inRounds(o)
-      && (!tracked || subKeep[sub](o)) && (!mine || isMine(o)) && (!q || `${o.en} ${o.code} ${stat(o.code).people.map((p) => `${p} ${ctx.nameOf(p)}`).join(' ')}`.toLowerCase().includes(q));
+      && (!tracked || subKeep[sub](o)) && picHit(o) && (!q || `${o.en} ${o.code} ${stat(o.code).people.map((p) => `${p} ${ctx.nameOf(p)}`).join(' ')}`.toLowerCase().includes(q));
     const shown = rows.filter(hit);
     const pending = shown.filter((o) => left(o.code) > 0).length;
     $('#sum', page).innerHTML = tr('{n} organizations · ', '{n} องค์กร · ', { n: shown.length })
@@ -233,7 +274,7 @@ export async function render(page, ctx) {
     const HEAD = `<tr>${keys.map((k) => `<th${COL[k].r ? ' class="r"' : ''}>${esc(COL[k].h())}</th>`).join('')}</tr>`;
     const card = (top, body) => `<div class="group scroll-x campus-card"><table class="grid-table quotes">${COLS}<thead>${top}${HEAD}</thead><tbody>${body}</tbody></table></div>`;
     const x = { total: shown.reduce((t, o) => t + valOf(o), 0) };
-    const narrowed = q || mine || F.cats.length || F.camps.length || F.on || (tracked && sub !== 'all') || (tab === 'resub' && F.rounds.length);
+    const narrowed = q || F.pics.length || F.cats.length || F.camps.length || budgetOn() || (tracked && sub !== 'all') || (tab === 'resub' && F.rounds.length);
     $('#rows', page).innerHTML = CAMPUSES.map((c) => {
       const list = shown.filter((o) => o.campus === c.code).sort((a, b) => a.code.localeCompare(b.code));
       const pend = list.filter((o) => unfinished(o) > 0).length;
@@ -280,22 +321,39 @@ export async function render(page, ctx) {
       saveF(); paint();
     }
   });
-  // Choose all / Clear all in a picker (the round codes).
+  // Choose all / Clear all in a picker; × on a filter chip; Clear filters (v2.15).
   page.addEventListener('click', (e) => {
     const b = e.target.closest('[data-all], [data-none]');
-    if (!b) return;
-    const k = b.dataset.all || b.dataset.none;
-    F[k] = b.dataset.all ? [...page.querySelectorAll(`input[data-f="${k}"]`)].map((i) => i.value) : [];
+    const x = e.target.closest('[data-unf]');
+    if (b) {
+      const k = b.dataset.all || b.dataset.none;
+      F[k] = b.dataset.all ? [...page.querySelectorAll(`input[data-f="${k}"]`)].map((i) => i.value) : [];
+    } else if (x) {
+      const [k, ...v] = x.dataset.unf.split(':');
+      if (k === 'budget') { F.on = false; F.min = null; F.max = null; } else F[k] = F[k].filter((c) => c !== v.join(':'));
+    } else if (e.target.closest('[data-clear-filters]')) {
+      F = { ...F, cats: [], camps: [], pics: [], rounds: [], on: false, min: null, max: null };
+    } else return;
     saveF(); paint();
   });
-  $('#mine', page).onchange = (e) => {
-    mine = e.target.checked;
-    try { localStorage.setItem('mineOnly', mine ? '1' : '0'); } catch { /* this visit only */ }
-    paint();
+  // One filter picker open at a time; Esc or a click outside closes it.
+  const pickers = () => [...page.querySelectorAll('.fbar details.msel')];
+  page.addEventListener('toggle', (e) => { if (e.target.matches?.('.fbar details.msel') && e.target.open) pickers().forEach((d) => { if (d !== e.target) d.open = false; }); }, true);
+  const closeOutside = (e) => {
+    if (!page.isConnected) { document.removeEventListener('click', closeOutside); document.removeEventListener('keydown', closeOutside); return; }
+    if (e.type === 'keydown' ? e.key === 'Escape' : !e.target.closest('.fbar details.msel')) pickers().forEach((d) => { d.open = false; });
   };
-  // Budget range: the switch, the type (All tab), the two sliders and the two boxes all write F.min / F.max.
+  document.addEventListener('click', closeOutside);
+  document.addEventListener('keydown', closeOutside);
+  // Budget range: the switch, the type (All tab), the two sliders and the two boxes all write F.min / F.max; setting
+  // a limit turns the range on (v2.15).
   const num = (v) => (v === '' || v == null || Number.isNaN(+v) ? null : Math.max(0, +v));
-  const setRange = (min, max) => { F.min = min; F.max = max; if (min != null && max != null && min > max) [F.min, F.max] = [max, min]; saveF(); paint(); };
+  const setRange = (min, max) => {
+    F.min = min; F.max = max;
+    if (min != null && max != null && min > max) [F.min, F.max] = [max, min];
+    if (F.min != null || F.max != null) F.on = true;
+    saveF(); paint();
+  };
   $('#ron', page).onchange = (e) => { F.on = e.target.checked; saveF(); paint(); };
   $('#rtype', page).onchange = (e) => { F.type = e.target.value; F.min = null; F.max = null; saveF(); paint(); };
   $('#rmin', page).onchange = (e) => setRange(num(e.target.value), F.max);
@@ -367,7 +425,7 @@ export async function render(page, ctx) {
       forget('admin'); // the console's Users version changed
       const sum = rowsEl.querySelector(`details[data-pic-for="${ref}"] summary`);
       if (sum) sum.innerHTML = picText(out.people);
-      $('#mineN', page).textContent = ORGS.filter((o) => stat(o.code).people.includes(ctx.me.email)).length;
+      paintPeople(); // the counts in the Person in charge filter
       toast(on ? tr('{who} is in charge of {ref}', '{who} รับผิดชอบ {ref}', { who: box.value, ref }) : tr('{who} is no longer in charge of {ref}', '{who} ไม่ได้รับผิดชอบ {ref} แล้ว', { who: box.value, ref }));
     } catch (err) {
       toast(err.message, 'bad');

@@ -118,7 +118,7 @@ export function earlierNotice(el, { at, names }, onRestore, onDiscard) {
 
 // Edit a file in the site (v2.12): opens the editor (views/markup.js) in a new tab. src = a Drive link or { id, name };
 // kind = 'pdf' | 'docx' | 'xlsx' (other types get no button); slot = where the result goes, read by that tab's
-// onMarked handler: 'pre:<ref>:pdf' | 'pre:<ref>:docx' | 'form' | 'xl' | 'noted:<ref>'.
+// onMarked handler: 'pre:<ref>:pdf' | 'pre:<ref>:docx' | 'form' | 'xl' | 'noted:<ref>:pdf' | 'noted:<ref>:docx' (v2.15).
 export const KIND_OF = (name) => ((String(name || '').match(/\.(pdf|docx|xlsx)$/i) || [])[1] || '').toLowerCase();
 export function editBtn(src, { org, slot, kind = KIND_OF(src?.name), plain = false }) {
   const id = fileId(src);

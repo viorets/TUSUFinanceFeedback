@@ -55,6 +55,12 @@ overrides the earlier styles. Glass turns solid for reduced transparency; motion
 
 ## Versions
 
+- `v2.15` (26 Oct): easier filters, one Noted .docx and one Noted PDF, clickable links in exports.
+  - Organizations: search on its own line, then one row of filter buttons (Category, Campus, Person in charge, Budget, Round code). A button in use turns teal with its count; the budget range opens inside its button; Choose all / Clear all in every picker; one picker open at a time (Esc or a click outside closes it). A chip per choice under the bar (× removes it) and Clear filters.
+  - Person in charge filter: No person in charge yet, Me (replaces "Mine only"; a device that had it on starts with Me ticked) and everyone in charge of an organization, each with a count.
+  - Pitching: Noted documents = one Word file (.docx or .doc) and one PDF per project, each Upload / Replace / Remove, either may be empty. Edit in the site saves into that slot (`noted:<ref>:docx|pdf`). The server keeps the newest of each kind (`notedPair_`); rows saved before keep their other files in Drive. Required = at least one of the two. A .doc gets no Edit button.
+  - Data for mailing: Feedback files became Feedback DOCX and Feedback PDF. Export data: Noted Documents became Noted DOCX and Noted PDF. Every cell holding one web address is a hyperlink in both Excel files.
+
 - `v2.12` (20 Oct): edit files in the site, timeline, Pre-pitch documents.
   - Pitching shows the submitted Budget proposal form and each project's PDF / .docx with Mark up (PDF) or Edit in Docs / Sheets. The editor opens in a new tab (`#/markup`, `views/markup.js`): PDF marks are drawn in the browser and kept as a server draft ("markup draft <file id>.json" in the organization folder) plus a copy on the device; .docx / .xlsx open as a Google copy in the organization folder, shared only with the signed-in Gmail, showing Google's last edit. Save to site uploads the result (an edited budget form becomes the Correct Excel file with its locks put back; PDFs and .docx are added to Noted documents) and hands it to the open Pitching tab, where Save keeps it. Pre-pitch has no edit buttons.
   - "Show Pre-pitch data" on Pitching: each project's Pre-pitch notes and documents, read only.

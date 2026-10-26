@@ -40,8 +40,9 @@ function target(slot, org) {
   if (slot === 'xl') return { org, purpose: 'excel', only: 'excel' };
   let m = String(slot).match(/^pre:(.+):(pdf|docx)$/);
   if (m) return { ref: m[1], purpose: 'feedback', only: m[2] };
-  m = String(slot).match(/^noted:(.+)$/);
-  if (m) return { ref: m[1], purpose: 'noted' };
+  // Noted documents (v2.15): the Word slot or the PDF slot; 'noted:<ref>' = a link from before v2.15 (adds a file).
+  m = String(slot).match(/^noted:([^:]+)(?::(pdf|docx))?$/);
+  if (m) return { ref: m[1], purpose: 'noted', ...(m[2] ? { only: m[2] === 'pdf' ? 'pdf' : 'word' } : {}) };
   throw new Error('Bad slot');
 }
 

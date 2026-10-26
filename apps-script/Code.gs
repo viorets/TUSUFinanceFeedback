@@ -71,12 +71,13 @@ const ROWS_SECONDS = 600; // our own tabs (writes through the site change their 
 const STAMP_SECONDS = 30; // how often an outside Sheet's last-updated time is asked from Drive
 // Part of every cached answer's key: a deployment never reads answers cached by another code version (both share the
 // script cache). Change it whenever an answer's shape changes.
-const CODE_VERSION = 'v2.14';
+const CODE_VERSION = 'v2.15';
 const KINDS = {
   docx: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
   pdf: 'application/pdf',
   xlsx: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
   xls: 'application/vnd.ms-excel',
+  doc: 'application/msword', // v2.15: Noted documents only (the old Word format)
 };
 const EXCEL = ['xlsx', 'xls'];
 // Staff: edit organization data. Data team staff: Staff + Control (with the Owner) + the edit log.
@@ -354,7 +355,11 @@ function uploadCheck_(req, user) {
   const kind = ((name.match(/\.([a-z0-9]+)$/i) || [])[1] || '').toLowerCase();
   if (!KINDS[kind] || req.mime !== KINDS[kind]) throw new Error('Only .docx, .pdf, .xlsx or .xls files');
   if (purpose !== 'form' && (purpose === 'excel' ? EXCEL.indexOf(kind) < 0 : EXCEL.indexOf(kind) >= 0)) throw new Error(purpose === 'excel' ? 'Only an Excel file (.xlsx or .xls) can go here' : 'Only .docx or .pdf files');
-  if (req.only && req.only !== 'excel' && req.only !== kind) throw new Error('Only a .' + req.only + ' file can go here');
+  if (kind === 'doc' && purpose !== 'noted') throw new Error('Only .docx or .pdf files');
+  // only 'word' (v2.15, Noted documents) = .docx or .doc
+  if (req.only && req.only !== 'excel' && (req.only === 'word' ? kind !== 'docx' && kind !== 'doc' : req.only !== kind)) {
+    throw new Error(req.only === 'word' ? 'Only a Word file (.docx or .doc) can go here' : 'Only a .' + req.only + ' file can go here');
+  }
   phaseOn_(purpose === 'feedback' || purpose === 'form' || purpose === 'docs' ? 'prepitch' : 'pitching');
   return { org: p.org, kind: kind, name: name, folder: child_(DriveApp.getFolderById(DRIVE_FOLDER_ID), p.org),
     driveName: (p.ref || p.org) + ' ' + purpose + ' — ' + name };
@@ -465,7 +470,11 @@ function savePitching_(req, user) {
   open_(p.org);
   phaseOn_('pitching');
   const d = req.data || {};
-  const noted = (Array.isArray(d.noted) ? d.noted : []).slice(0, 30).map(function (f) { return file_(f, p.org); }).filter(Boolean);
+  // v2.15: at most one Word file (.docx / .doc) and one PDF; the newest of each kind wins.
+  const noted = notedPair_((Array.isArray(d.noted) ? d.noted : []).slice(0, 30).map(function (f) {
+    const k = notedKind_(f && f.name);
+    return k ? file_(f, p.org, k) : null;
+  }).filter(Boolean));
   // Correct Excel File stays empty on project rows since v2.9 (one per organization: saveOrgPitching_).
   const row = {
     'Project Ref': p.ref, 'Org Ref': p.org, 'Project Name': p.name, 'Summary': text_(d.summary, 20000),
@@ -957,7 +966,7 @@ function exportData_(req, user) {
     out.pitching = projects.map(function (p) {
       const r = pit[p['Project Ref']] || {};
       return { 'Project Ref': p['Project Ref'], 'Pitched Final Approved Budget': num_(r['Final Approved Budget']), 'Summary': String(r['Summary'] || ''),
-        'Noted Documents': links(r['Noted Documents']), 'Correct Excel File': links((xl[p['Org Ref']] || {})['Correct Excel File']),
+        'Noted DOCX': notedLink_(r, 'word'), 'Noted PDF': notedLink_(r, 'pdf'), 'Correct Excel File': links((xl[p['Org Ref']] || {})['Correct Excel File']),
         'Updated At': iso_(r['Updated At']), 'Updated By': r['Updated By'] || '' };
     });
   }
@@ -1036,7 +1045,7 @@ function mailData_(req, user) {
       'Emergency contact': o['Emergency Contact'] || '', 'Emergency position': o['Emergency Position'] || '', 'Emergency phone': String(o['Emergency Phone'] || ''),
       'Requested budget': num_(p['Budget']), 'Approved budget': num_(r['Final Approved Budget']),
       'Committee feedback': String(r['Summary'] || ''), 'Proposal PDF': p['Proposal .pdf'] || '', 'Proposal DOCX': p['Proposal .docx'] || '',
-      'Feedback files': links(r['Noted Documents']),
+      'Feedback DOCX': notedLink_(r, 'word'), 'Feedback PDF': notedLink_(r, 'pdf'), // v2.15: one of each, or ''
     };
   });
   return { orgs: outOrgs, projects: outProjects };
@@ -1226,7 +1235,7 @@ function pitchDone_(r) {
   r = r || {};
   if (isReq_('pitch.summary') && !String(r['Summary'] || '').trim()) return false;
   if (isReq_('pitch.finalBudget') && num_(r['Final Approved Budget']) == null) return false;
-  if (isReq_('pitch.noted') && !files_(r['Noted Documents']).length) return false;
+  if (isReq_('pitch.noted') && !notedPair_(r['Noted Documents']).length) return false; // v2.15: either file counts
   return true;
 }
 function resubDone_(r) { return !isReq_('resub.decision') || !!(r && r['Decision']); }
@@ -1621,8 +1630,25 @@ function file_(f, org, kind) {
   const parent = it.getParents().hasNext() ? it.getParents().next() : null;
   const grand = parent && parent.getParents().hasNext() ? parent.getParents().next() : null;
   if (!parent || parent.getName() !== org || !grand || grand.getId() !== DRIVE_FOLDER_ID) throw new Error('File is not in this organization\'s folder');
-  if (kind && it.getMimeType() !== KINDS[kind]) throw new Error('Feedback file must be .' + kind);
+  if (kind === 'word' ? [KINDS.docx, KINDS.doc].indexOf(it.getMimeType()) < 0 : kind && it.getMimeType() !== KINDS[kind]) {
+    throw new Error(kind === 'word' ? 'Noted document must be .docx or .doc' : 'Feedback file must be .' + kind);
+  }
   return { id: id, name: String(f.name || it.getName()).slice(0, 180) };
+}
+// Noted documents (v2.15): 'word' (.docx / .doc) or 'pdf' by the file name, '' for anything else.
+function notedKind_(name) {
+  const m = String(name || '').match(/\.(docx?|pdf)$/i);
+  return m ? (m[1].toLowerCase() === 'pdf' ? 'pdf' : 'word') : '';
+}
+// The newest Word file and the newest PDF of a list (later = newer), Word first. Rows saved before v2.15 may hold more.
+function notedPair_(list) {
+  const pick = function (k) { return files_(list).filter(function (f) { return notedKind_(f.name) === k; }).pop() || null; };
+  return [pick('word'), pick('pdf')].filter(Boolean);
+}
+// A Pitching row's Noted Word file ('word') or PDF as a Drive link, '' when there is none (exports, v2.15).
+function notedLink_(r, k) {
+  const f = notedPair_(r['Noted Documents']).filter(function (x) { return notedKind_(x.name) === k; })[0];
+  return f ? driveUrl_(f.id) : '';
 }
 function one_(f) { return f ? [f] : []; }
 function files_(v) { return Array.isArray(v) ? v : []; }
@@ -1677,7 +1703,7 @@ function preOut_(r) {
 function pitchOut_(r) {
   return {
     summary: String(r['Summary'] || ''), finalBudget: num_(r['Final Approved Budget']),
-    noted: files_(r['Noted Documents']),
+    noted: notedPair_(r['Noted Documents']),
     at: iso_(r['Updated At']), by: r['Updated By'] || '',
   };
 }
@@ -2169,8 +2195,9 @@ function presenceStep_(e, op, who, now, a) {
   throw new Error('Bad presence op');
 }
 
-// The file a Save to site from the Edit page would replace: { id, at, by }. Noted documents add files instead of
-// replacing one: { id (the last), count, adds: true }.
+// The file a Save to site from the Edit page would replace: { id, at, by }. Noted documents (v2.15) have a Word slot
+// and a PDF slot ('noted:<ref>:docx' | 'noted:<ref>:pdf'); an editor opened before v2.15 sends 'noted:<ref>', which
+// adds: { id (the last), count, adds: true }.
 function slotFile_(org, slot) {
   slot = String(slot || '');
   const one = function (f, o) { return { id: f ? f.id : '', at: o ? o.at : '', by: o ? o.by : '' }; };
@@ -2182,10 +2209,11 @@ function slotFile_(org, slot) {
     const o = r ? preOut_(r) : null;
     return one(o && (m[2] === 'pdf' ? o.pdfFile : o.docxFile), o);
   }
-  m = slot.match(/^noted:(.+)$/);
+  m = slot.match(/^noted:([^:]+)(?::(pdf|docx))?$/);
   if (m) {
     const r = feedbackRows_('Pitching').filter(function (x) { return x['Project Ref'] === m[1]; })[0];
     const o = r ? pitchOut_(r) : null; const list = o ? o.noted : [];
+    if (m[2]) return one(list.filter(function (f) { return notedKind_(f.name) === (m[2] === 'pdf' ? 'pdf' : 'word'); })[0], o);
     return { id: list.length ? list[list.length - 1].id : '', count: list.length, at: o ? o.at : '', by: o ? o.by : '', adds: true };
   }
   throw new Error('Bad slot');

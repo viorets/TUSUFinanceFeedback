@@ -575,13 +575,24 @@ function withTotal(rows) {
   return [...rows, total];
 }
 
+// v2.15: a sheet whose cells holding one web address are hyperlinks (one click opens it); the text stays the address,
+// for mail-merge templates. A cell with several addresses (one per line) stays text: Excel links one per cell.
+function linked(X, rows) {
+  const ws = X.utils.json_to_sheet(rows);
+  Object.keys(ws).forEach((k) => {
+    const c = ws[k];
+    if (k[0] !== '!' && c.t === 's' && /^https?:\/\/\S+$/.test(c.v)) c.l = { Target: c.v, Tooltip: c.v };
+  });
+  return ws;
+}
+
 async function saveXlsx(d) {
   const X = await loadXlsx();
   const wb = X.utils.book_new();
-  X.utils.book_append_sheet(wb, X.utils.json_to_sheet(d.orgs), 'Organizations');
-  X.utils.book_append_sheet(wb, X.utils.json_to_sheet(d.projects), 'Projects');
-  PHASE_SHEETS.forEach(([k, label]) => { if (d[k]) X.utils.book_append_sheet(wb, X.utils.json_to_sheet(k === 'resubmit' ? d[k] : withTotal(d[k])), label); });
-  if (d.emails) X.utils.book_append_sheet(wb, X.utils.json_to_sheet(d.emails.length ? d.emails : [{ 'Org Ref': '', Organization: '', Campus: '', Email: '' }]), 'Emails');
+  X.utils.book_append_sheet(wb, linked(X, d.orgs), 'Organizations');
+  X.utils.book_append_sheet(wb, linked(X, d.projects), 'Projects');
+  PHASE_SHEETS.forEach(([k, label]) => { if (d[k]) X.utils.book_append_sheet(wb, linked(X, k === 'resubmit' ? d[k] : withTotal(d[k])), label); });
+  if (d.emails) X.utils.book_append_sheet(wb, linked(X, d.emails.length ? d.emails : [{ 'Org Ref': '', Organization: '', Campus: '', Email: '' }]), 'Emails');
   const out = X.write(wb, { bookType: 'xlsx', type: 'array' });
   download(new Blob([out], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' }), `pitch-feedback-${stamp()}.xlsx`);
 }
@@ -590,8 +601,8 @@ async function saveXlsx(d) {
 async function saveMailXlsx(d) {
   const X = await loadXlsx();
   const wb = X.utils.book_new();
-  X.utils.book_append_sheet(wb, X.utils.json_to_sheet(d.orgs.length ? d.orgs : [{ 'Org Ref': '' }]), 'Organizations');
-  X.utils.book_append_sheet(wb, X.utils.json_to_sheet(d.projects.length ? d.projects : [{ 'Project Ref': '' }]), 'Projects');
+  X.utils.book_append_sheet(wb, linked(X, d.orgs.length ? d.orgs : [{ 'Org Ref': '' }]), 'Organizations');
+  X.utils.book_append_sheet(wb, linked(X, d.projects.length ? d.projects : [{ 'Project Ref': '' }]), 'Projects');
   const out = X.write(wb, { bookType: 'xlsx', type: 'array' });
   download(new Blob([out], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' }), `pitch-mailing-${stamp()}.xlsx`);
 }
