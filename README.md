@@ -60,6 +60,7 @@ overrides the earlier styles. Glass turns solid for reduced transparency; motion
   - Reset edits (PDF and Word editors, next to Undo): one tap removes every mark (Word: back to the file as it opened, text edits, text boxes, lines and arrows included); Undo brings them back. Not in the Excel editor.
   - Reset All (v2.16.2, editor header): the editor opens the slot's master file again (the submitted project PDF / .docx, or the submitted budget form for the Correct Excel file; `master` in the edit link) with no marks or edits; Save then replaces the slot's file. Reset edits only goes back to the file as this page opened it.
   - Word editor (v2.16.2): the line / arrow colour and width chosen are the drawing default; picking a shape (a text box shows black, No line) no longer changes the next line's colour.
+  - Edit opens the editor in the same tab (v2.16.3); Back / Save and quit return to the organization page, which shows the saved card at once (the kept copy is updated on Save).
   - Word editor: a picked line or arrow can be deleted again (picking it redrew it, so the page's "tap outside a shape" check dropped the pick).
   - Pitching: Mark as finished on each project card, once its required answers are saved; Mark as not finished undoes it. `Pitching` columns Finished At / Finished By (`setFinished`, logged in `Pitching_Log` as Finished).
 - `v2.15` (26 Oct): easier filters, one Noted .docx and one Noted PDF, clickable links in exports.

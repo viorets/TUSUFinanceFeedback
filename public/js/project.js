@@ -116,7 +116,8 @@ export function earlierNotice(el, { at, names }, onRestore, onDiscard) {
   box.querySelector('[data-discard]').onclick = () => { box.remove(); onDiscard(); };
 }
 
-// Edit a file in the site (v2.12): opens the editor (views/markup.js) in a new tab. src = a Drive link or { id, name };
+// Edit a file in the site (v2.12): opens the editor (views/markup.js); in the same tab since v2.16.3 (Back and Save and
+// quit return to the organization page). src = a Drive link or { id, name };
 // kind = 'pdf' | 'docx' | 'xlsx' (other types get no button); slot = where the result goes, read by that tab's
 // onMarked handler: 'pre:<ref>:pdf' | 'pre:<ref>:docx' | 'form' | 'xl' | 'noted:<ref>:pdf' | 'noted:<ref>:docx' (v2.15).
 // master (v2.16.2) = the submitted file the slot started from, for the editor's Reset All.
@@ -128,7 +129,7 @@ export function editBtn(src, { org, slot, kind = KIND_OF(src?.name), plain = fal
   // .docx / .xlsx open in the page's own editor (v2.13); Google Docs / Sheets is a choice on that page. Every kind
   // reads Edit (v2.16; a PDF was "Mark up").
   const label = tr('Edit', 'แก้ไข');
-  return `<a class="${plain ? 'icon-btn' : 'btn'}" href="#/markup?${esc(q)}" target="_blank" rel="opener" title="${esc(label)}">${icon('pen', 16)}${plain ? '' : esc(label)}</a>`;
+  return `<a class="${plain ? 'icon-btn' : 'btn'}" href="#/markup?${esc(q)}" title="${esc(label)}">${icon('pen', 16)}${plain ? '' : esc(label)}</a>`;
 }
 
 // The editor tab sends each file it saved to the site on this channel; the open organization tab that owns the slot

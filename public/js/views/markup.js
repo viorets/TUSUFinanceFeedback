@@ -1,4 +1,4 @@
-// Edit a file in the site (v2.12), opened in its own tab from an organization page (editBtn in project.js):
+// Edit a file in the site (v2.12), opened from an organization page (editBtn in project.js; same tab since v2.16.3):
 // #/markup?org=<Org Ref>&id=<Drive file id>&kind=pdf|docx|xlsx&slot=<where the result goes>.
 // PDF: the markup editor (markup/pdf-markup.js). Its marks are a draft saved on the server with every Save, and kept on
 // this device after each change, so a closed tab loses nothing.
@@ -18,7 +18,7 @@
 // one Google copy made from that saved file; No, or no answer within a minute, leaves them read-only.
 import { tr } from '../i18n.js';
 import { $, esc, icon, toast, busy, errorBox, confirmBox, dialog, dateTimeFmt } from '../ui.js';
-import { call, upload, previewUrl, viewUrl, downloadUrl } from '../api.js';
+import { call, upload, previewUrl, viewUrl, downloadUrl, forget, peek, remember } from '../api.js';
 import { sendMarked, openPreview } from '../project.js';
 import { ORGS } from '../masterdata.js';
 import { idToken } from '../firebase.js';
@@ -152,6 +152,16 @@ async function openPdf(el, { restore = false, blank = false } = {}) {
   $('[data-actions]', el).onclick = (e) => act(el, e.target.closest('[data-a]')?.dataset.a);
 }
 
+// The organization page this tab goes back to: its kept copy gets the saved card at once (no flash of the old one),
+// and the next read asks the server.
+function keepCard({ pitch, orgPitch }) {
+  forget('org'); forget('dashboard');
+  const body = { ref: st.org }; const d = peek('org', body); if (!d) return;
+  const ref = String(st.slot).match(/^noted:([^:]+)/)?.[1];
+  if (pitch && ref && d.pitch) d.pitch[ref] = pitch;
+  if (orgPitch) d.orgPitch = orgPitch;
+  remember('org', body, d);
+}
 const allBtn = () => (st.master ? `<button class="btn plain" data-a="all" title="${esc(tr('Open the submitted file again, with no marks or edits', 'เปิดไฟล์ที่ส่งมาใหม่อีกครั้ง โดยไม่มีเครื่องหมายหรือการแก้ไข'))}">${tr('Reset All', 'เริ่มใหม่ทั้งหมด')}</button>` : '');
 async function resetAll(el) {
   if (!(await confirmBox(tr('Start again from the submitted file?', 'เริ่มใหม่จากไฟล์ที่ส่งมาหรือไม่'),
@@ -362,6 +372,7 @@ async function saveToSite(el, { ask = true } = {}) {
     const saved = await upload(f, target(st.slot, st.org), (x) => set(0.5 + x * 0.4));
     // Into its card at once (v2.16): the card as saved comes back for the organization tab.
     st.card = inCard() ? await call('saveMarked', { org: st.org, slot: st.slot, file: saved }) : null;
+    if (st.card) keepCard(st.card);
     if (st.ed) await saveDraft(); // the marks of the saved file stay editable
     if (st.office) { await writeDraft(null).catch(() => {}); st.local = null; } // saved to the site: no draft needed
     return saved;
@@ -606,8 +617,8 @@ addEventListener('pagehide', () => {
 // The saved file to the organization tab; if no tab took it, say so and offer to send it again.
 async function hand(el, file) {
   const msg = { org: st.org, slot: st.slot, file, pitch: st.card?.pitch, orgPitch: st.card?.orgPitch };
-  if (st.card) { // saved into its card already: an open organization tab only shows it
-    await sendMarked(msg);
+  if (st.card) { // saved into its card already: an organization page open in another tab only shows it (no waiting)
+    sendMarked(msg);
     toast(tr('Saved into the card', 'บันทึกลงในการ์ดแล้ว'));
     return;
   }
