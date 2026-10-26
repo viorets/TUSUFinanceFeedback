@@ -127,7 +127,7 @@ def samples():
         img = f'img/regs/p{c["page"]}.png'
         pic = (f'<a href="{img}" target="_blank" rel="noopener" title="เปิดภาพขนาดเต็ม"><img src="{img}" alt="{html.escape(c["title"])}" loading="lazy"></a>'
                if (ROOT / 'public' / img).exists()
-               else '<span class="rg-noimg">ยังไม่แสดงภาพตัวอย่าง (รอปิดข้อมูลส่วนบุคคล)</span>')
+               else '')  # no picture (blank or not exported): the card is text only
         note = f'<span>{html.escape(c["note"])}</span>' if c['note'] else ''
         cards.append(f'<figure class="rg-card">{pic}<figcaption><b>{html.escape(c["title"])}</b>{note}'
                      f'<small>สไลด์ "ข้อมูลภายใน" หน้า {c["page"]}</small></figcaption></figure>')
