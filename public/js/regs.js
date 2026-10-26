@@ -8,6 +8,7 @@
 import { esc, icon } from './ui.js';
 
 const ZOOM = { min: 0.7, max: 2, key: 'regs:zoom' };
+const WIDTH = { min: 360, def: 520, key: 'regs:width' }; // the panel's width, dragged by its right edge (not on phones)
 let el = null; // the panel
 let data = null;
 let mode = 'sum'; // 'sum' | 'reg'
@@ -52,15 +53,20 @@ function build() {
       <nav class="rg-nav" data-nav aria-label="หัวข้อ"></nav>
     </header>
     <div class="rg-body" data-body tabindex="-1"><div data-pane="sum"></div><div data-pane="reg" hidden></div>
-      <p class="rg-wait" data-wait>กำลังโหลด…</p></div>`;
+      <p class="rg-wait" data-wait>กำลังโหลด…</p></div>
+    <div class="rg-resize" role="separator" aria-orientation="vertical" aria-label="ปรับความกว้าง" title="ลากเพื่อปรับความกว้าง" tabindex="0"></div>`;
   document.body.append(el);
   el.addEventListener('click', onClick);
   $('[data-q]').addEventListener('input', () => search($('[data-q]').value));
   $('[data-q]').addEventListener('keydown', (e) => { if (e.key === 'Enter') { e.preventDefault(); step(e.shiftKey ? -1 : 1); } });
   $('[data-zoomr]').addEventListener('input', (e) => setZoom(e.target.value / 100));
-  document.addEventListener('keydown', (e) => { if (e.key === 'Escape' && el.classList.contains('open')) close(); });
+  document.addEventListener('keydown', (e) => {
+    if (e.key !== 'Escape') return;
+    if (document.querySelector('.rg-pic')) closePic(); else if (el.classList.contains('open')) close();
+  });
   zoomGestures();
   setZoom(+keep.get(ZOOM.key) || 1);
+  resizer();
 }
 
 async function load() {
@@ -102,6 +108,8 @@ function go(id, { flash = false } = {}) {
 
 function onClick(e) {
   if (e.target.closest('[data-close]')) return close();
+  const pic = e.target.closest('.rg-card a[href]');
+  if (pic) { e.preventDefault(); return showPic(pic.getAttribute('href'), pic.querySelector('img')?.alt || ''); }
   const m = e.target.closest('[data-mode]'); if (m) return setMode(m.dataset.mode);
   const to = e.target.closest('[data-to]'); if (to) { e.preventDefault(); return go(to.dataset.to); }
   const z = e.target.closest('[data-zoom]'); if (z) return setZoom(zoom + z.dataset.zoom * 0.1);
@@ -136,6 +144,18 @@ function linkClauses() {
     }));
   });
 }
+
+// ---------- a sample picture, full size on a dark screen in this page (v2.17): a tap on the dark part or Esc closes it ----------
+function showPic(src, alt) {
+  closePic();
+  const box = document.createElement('div');
+  box.className = 'rg-pic'; box.setAttribute('role', 'dialog'); box.setAttribute('aria-label', alt);
+  box.innerHTML = `<img src="${esc(src)}" alt="${esc(alt)}"><button class="rg-pic-x" aria-label="ปิด">${icon('x', 22)}</button>`;
+  box.onclick = (e) => { if (e.target !== box.querySelector('img')) closePic(); };
+  document.body.append(box);
+  box.querySelector('.rg-pic-x').focus({ preventScroll: true });
+}
+const closePic = () => document.querySelector('.rg-pic')?.remove();
 
 // ---------- search ----------
 const TH = '๐๑๒๓๔๕๖๗๘๙';
@@ -190,6 +210,28 @@ function step(d) {
   body.scrollTop += r.top - b.top - b.height / 3;
   const scroller = m.closest('.rg-table'); if (scroller) scroller.scrollLeft += r.left - scroller.getBoundingClientRect().left - 40;
   count();
+}
+
+// ---------- width: drag the right edge (mouse, pen or finger), or ← / → on the focused edge ----------
+function setWidth(w, save = true) {
+  const max = Math.max(WIDTH.min, innerWidth - 40);
+  w = Math.round(Math.min(max, Math.max(WIDTH.min, w)));
+  el.style.setProperty('--rg-w', `${w}px`);
+  el.querySelector('.rg-resize').setAttribute('aria-valuenow', w);
+  if (save) keep.set(WIDTH.key, String(w));
+}
+function resizer() {
+  const h = el.querySelector('.rg-resize');
+  setWidth(+keep.get(WIDTH.key) || WIDTH.def, false);
+  h.addEventListener('pointerdown', (e) => {
+    e.preventDefault(); h.setPointerCapture(e.pointerId); el.classList.add('rg-dragging');
+    const left = el.getBoundingClientRect().left;
+    const move = (ev) => setWidth(ev.clientX - left, false);
+    const up = (ev) => { setWidth(ev.clientX - left); el.classList.remove('rg-dragging'); h.removeEventListener('pointermove', move); h.removeEventListener('pointerup', up); h.removeEventListener('pointercancel', up); };
+    h.addEventListener('pointermove', move); h.addEventListener('pointerup', up); h.addEventListener('pointercancel', up);
+  });
+  h.addEventListener('keydown', (e) => { if (e.key === 'ArrowLeft' || e.key === 'ArrowRight') { e.preventDefault(); setWidth(el.offsetWidth + (e.key === 'ArrowRight' ? 40 : -40)); } });
+  h.addEventListener('dblclick', () => setWidth(WIDTH.def)); // back to the standard width
 }
 
 // ---------- zoom ----------

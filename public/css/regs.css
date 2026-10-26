@@ -3,7 +3,7 @@
 .rg-scrim { position: fixed; inset: 0; z-index: 60; background: rgba(0, 0, 0, .28); opacity: 0; pointer-events: none; transition: opacity .2s; }
 .rg-scrim.open { opacity: 1; pointer-events: auto; }
 .rg-panel {
-  position: fixed; top: 0; left: 0; bottom: 0; z-index: 61; width: min(520px, 100vw);
+  position: fixed; top: 0; left: 0; bottom: 0; z-index: 61; width: min(var(--rg-w, 520px), 100vw);
   display: flex; flex-direction: column; background: var(--bg2); color: var(--text);
   box-shadow: 0 0 48px rgba(0, 0, 0, .22); transform: translateX(-105%); visibility: hidden;
   transition: transform .25s ease, visibility 0s .25s;
@@ -11,7 +11,12 @@
   padding-left: env(safe-area-inset-left); letter-spacing: 0;
 }
 .rg-panel.open { transform: none; visibility: visible; transition: transform .25s ease; }
-@media (max-width: 640px) { .rg-panel { width: 100vw; } }
+@media (max-width: 640px) { .rg-panel { width: 100vw; } .rg-resize { display: none; } }
+/* The right edge: drag to resize (regs.js resizer); a wide, invisible hit area with a thin line. */
+.rg-resize { position: absolute; top: 0; bottom: 0; right: -8px; width: 16px; cursor: ew-resize; touch-action: none; z-index: 2; }
+.rg-resize::after { content: ""; position: absolute; top: 50%; left: 6px; width: 4px; height: 48px; margin-top: -24px; border-radius: 4px; background: var(--text3); opacity: .55; }
+.rg-resize:hover::after, .rg-resize:focus-visible::after, .rg-dragging .rg-resize::after { background: var(--teal); opacity: 1; }
+.rg-dragging, .rg-dragging * { user-select: none; transition: none !important; }
 @media (prefers-reduced-motion: reduce) { .rg-panel, .rg-scrim { transition: none; } }
 html.rg-lock, html.rg-lock body { overscroll-behavior: none; }
 
@@ -74,6 +79,7 @@ mark.rg-hit.rg-cur { background: #ff9f1a; box-shadow: 0 0 0 2px #ff9f1a; }
 
 .rg-cards { display: grid; grid-template-columns: repeat(auto-fill, minmax(min(200px, 100%), 1fr)); gap: 12px; margin: .6em 0; }
 .rg-card { margin: 0; border-radius: 12px; overflow: hidden; background: var(--bg3); box-shadow: inset 0 0 0 1px var(--sep); }
+.rg-card a { display: block; cursor: zoom-in; }
 .rg-card img { display: block; width: 100%; height: auto; background: #fff; }
 .rg-noimg { display: grid; place-items: center; aspect-ratio: 16 / 9; padding: 8px; text-align: center; font-size: .85em; color: var(--text2); background: var(--fill); }
 .rg-card figcaption { padding: .5em .7em .7em; display: grid; gap: .2em; }
@@ -88,3 +94,8 @@ mark.rg-hit.rg-cur { background: #ff9f1a; box-shadow: 0 0 0 2px #ff9f1a; }
 :root[data-theme="dark"] mark.rg-hit { background: #7a6214; }
 :root[data-theme="dark"] mark.rg-hit.rg-cur { background: #c46f00; box-shadow: 0 0 0 2px #c46f00; }
 :root[data-theme="dark"] .rg-guide .rg-tag { color: #f0b45a; }
+
+/* A sample picture full size (regs.js showPic): dark screen over everything; a tap outside the picture closes it. */
+.rg-pic { position: fixed; inset: 0; z-index: 95; display: grid; place-items: center; padding: max(16px, env(safe-area-inset-top)) 16px 16px; background: rgba(0, 0, 0, .9); cursor: zoom-out; touch-action: pinch-zoom; }
+.rg-pic img { max-width: min(100%, 1600px); max-height: calc(100vh - 96px); max-height: calc(100dvh - 96px); width: auto; height: auto; object-fit: contain; cursor: default; border-radius: 4px; background: #fff; }
+.rg-pic-x { position: absolute; top: max(12px, env(safe-area-inset-top)); right: 12px; width: 44px; height: 44px; display: grid; place-items: center; border: 0; border-radius: 50%; background: rgba(255, 255, 255, .16); color: #fff; cursor: pointer; }
