@@ -414,6 +414,7 @@ button.btn-pill:disabled { opacity: .5; cursor: default; }
 .modal .err { color: var(--red); }
 .unsaved { list-style: none; padding: 0; margin: 0 0 20px; display: grid; gap: 8px; max-height: 40dvh; overflow: auto; }
 .unsaved li { display: flex; gap: 10px; align-items: baseline; }
+.unsaved li .code { flex: none; white-space: nowrap; } /* the project code stays one line (v2.16.4) */
 .modal .actions { flex-wrap: wrap; }
 .kv.nodata { margin: 0; }
 .kv.nodata dd { font-style: italic; }

@@ -1,8 +1,9 @@
 // Word editor (prototype): the document is shown as a page in its own fonts, sizes, colours, alignment and spacing,
 // with its tables and images, and the text of any paragraph or table cell can be changed in place. The file is opened
 // as a zip (JSZip) and only word/document.xml changes, so styles, headers, footers, images and page layout stay as
-// they were. Only the changed characters are rewritten, so the rest of a paragraph keeps its bold, colours and fonts,
-// and new text takes the formatting of the text before it; edited paragraphs are redrawn as saved after Download.
+// they were. Only the changed characters are rewritten, so the rest of a paragraph keeps its bold, colours and fonts.
+// New text takes the font and size of the text before it; typed into the document (not a text box) it is in the
+// feedback colour (TYPED, v2.16.4), and it is written into the file as it is typed, so it shows in that colour at once.
 // The toolbar sets the font, size and colour of selected text, and adds text boxes, lines and arrows (Word shapes);
 // shapes and text boxes already in the file are shown, can be moved or deleted, and their text edited.
 // Headers and footers are not shown.
@@ -26,6 +27,7 @@ const WIDTHS = [0.75, 1, 1.5, 2.25, 3, 4.5, 6]; // line widths (pt), as Word off
 // New text boxes and shapes take the PDF tab's defaults: LINE Seed Sans TH, 11 pt, #990000, clear, no border.
 const BOX = { font: 'LINE Seed Sans TH', size: 11, color: '#990000' };
 const SHAPE = { color: '#990000', width: 1.5 };
+const TYPED = BOX.color; // text typed into the document (v2.16.4): the feedback colour, as in text boxes
 const LINES = /^(line|straightConnector1|bentConnector\d|curvedConnector\d)$/;
 // Run properties must be written in this order, or Word reports the file as damaged.
 const RPR_ORDER = ['rStyle', 'rFonts', 'b', 'bCs', 'i', 'iCs', 'caps', 'smallCaps', 'strike', 'dstrike', 'outline', 'shadow', 'emboss', 'imprint', 'noProof', 'snapToGrid', 'vanish', 'webHidden', 'color', 'spacing', 'w', 'kern', 'position', 'sz', 'szCs', 'highlight', 'u', 'effect', 'bdr', 'shd', 'fitText', 'vertAlign', 'rtl', 'cs', 'em', 'lang', 'eastAsianLayout', 'specVanish', 'oMath', 'rPrChange'];
@@ -579,28 +581,67 @@ export async function openDocxEditor(root, bytes, { t = (en) => en } = {}) {
   new ResizeObserver(() => { fitWidth(); layout(); }).observe(page); // images loading, edits that change heights
   document.fonts?.ready.then(layout);
 
-  const changed = new Set();
+  const changed = new Set(); // paragraphs whose typing is not in the file yet (an IME still composing)
+  let typing = -1; // the paragraph of the typing under way: one undo step per paragraph typed in
   page.addEventListener('input', (e) => {
     const div = e.target.closest('.de-p'); if (!div) return;
     const i = +div.dataset.i;
-    if (textOf(div) === items[i].text) changed.delete(i); else changed.add(i);
-    div.classList.toggle('de-changed', changed.has(i));
-    layout();
+    if (textOf(div) === items[i].text) { changed.delete(i); return; }
+    changed.add(i);
+    if (e.isComposing) { layout(); return; } // written when the composition ends
+    live(i);
   });
+  page.addEventListener('compositionend', (e) => { const div = e.target.closest?.('.de-p'); if (div && changed.has(+div.dataset.i)) live(+div.dataset.i); });
+  // Typing into the file at once and the paragraph redrawn as saved (the typed words in TYPED), caret kept.
+  function live(i) {
+    if (typing !== i) { changed.delete(i); checkpoint(); typing = i; } // the copy before this typing, for Undo
+    const it = items[i]; const s = getSelection();
+    const at = s.rangeCount && it.div.contains(s.focusNode) ? lenTo(it.div, s.focusNode, s.focusOffset) : null;
+    commit(i); changed.delete(i);
+    const fresh = renderPara(it.p, i); it.div.replaceWith(fresh); fresh.classList.add('de-changed'); items[i].text = textOf(fresh);
+    if (at != null) { const r = document.createRange(); r.setStart(...pointAt(fresh, at)); r.collapse(true); s.removeAllRanges(); s.addRange(r); }
+    layout();
+  }
+  // Neighbouring text runs with the same formatting become one (typing letter by letter would leave a run per letter).
+  function mergeRuns(p) {
+    const plain = (r) => r?.namespaceURI === W && r.localName === 'r' && [...r.children].every((c) => (c.namespaceURI === W && c.localName === 'rPr') || isPiece(c));
+    const fmt = (r) => { const x = kid(r, 'rPr'); return x ? new XMLSerializer().serializeToString(x) : ''; };
+    let r = p.firstElementChild;
+    while (r) {
+      const next = r.nextElementSibling;
+      if (plain(r) && plain(next) && fmt(r) === fmt(next)) { r.append(...[...next.children].filter(isPiece)); next.remove(); continue; }
+      r = next;
+    }
+    for (const run of p.getElementsByTagNameNS(W, 'r')) {
+      for (const t of [...run.children]) {
+        const prev = t.previousElementSibling;
+        if (t.localName === 't' && prev?.localName === 't' && t.namespaceURI === W) { prev.textContent += t.textContent; prev.setAttributeNS(XML_NS, 'xml:space', 'preserve'); t.remove(); }
+      }
+    }
+  }
+  // A paragraph's typed text into the file: the new characters in TYPED, unless in a text box (its own colours).
+  function commit(i) {
+    const it = items[i]; const text = textOf(it.div);
+    const typed = setText(it.p, text);
+    if (!it.div.closest('.de-shape')) for (const [s, e] of typed) for (const run of isolate(it.p, s, e)) SET.color(TYPED)(rPrOf(run));
+    mergeRuns(it.p);
+    pieces.set(it.p, collect(it.p));
+    it.text = text; dirty = true;
+  }
 
   // ---------- undo / redo ----------
   // Before each formatting or shape change, a copy of the document body is kept; typed text is written into the file
   // first, so nothing typed is lost. Undo puts the copy back and redraws the page at the same scroll position.
   const undos = [], redos = [];
   function keepTyping() {
-    for (const i of changed) { const it = items[i]; setText(it.p, textOf(it.div)); it.text = textOf(it.div); dirty = true; }
+    for (const i of changed) commit(i);
     changed.clear();
   }
   function undoButtons() { $('de-undo').disabled = !undos.length; $('de-redo').disabled = !redos.length; }
-  function checkpoint() { keepTyping(); undos.push(body.cloneNode(true)); if (undos.length > 50) undos.shift(); redos.length = 0; undoButtons(); }
+  function checkpoint() { keepTyping(); typing = -1; undos.push(body.cloneNode(true)); if (undos.length > 50) undos.shift(); redos.length = 0; undoButtons(); }
   function restore(from, to) {
     if (!from.length) return;
-    keepTyping(); to.push(body.cloneNode(true));
+    keepTyping(); typing = -1; to.push(body.cloneNode(true));
     const copy = from.pop(); body.replaceWith(copy); body = copy;
     const scroller = root.querySelector('.de-doc'); const top = scroller.scrollTop;
     select(null); saved = null;
@@ -821,7 +862,7 @@ export async function openDocxEditor(root, bytes, { t = (en) => en } = {}) {
     checkpoint();
     for (const t of targets) {
       const it = items[t.i];
-      if (changed.has(t.i)) { setText(it.p, textOf(it.div)); changed.delete(t.i); } // typed text first, so offsets match the file
+      if (changed.has(t.i)) { commit(t.i); changed.delete(t.i); } // typed text first, so offsets match the file
       const len = collect(it.p).map(pieceText).join('').length; t.e = Math.min(t.e, len);
       for (const run of isolate(it.p, t.s, t.e)) set(rPrOf(run));
       if (t.all || !len) set(markRPr(it.p));
@@ -855,7 +896,7 @@ export async function openDocxEditor(root, bytes, { t = (en) => en } = {}) {
   }
   // Replace a paragraph's text, keeping each run's formatting: only the part between the unchanged start and end is
   // rewritten, and new text takes the formatting of the character before it, as typing in Word does. A paragraph
-  // with no text gets a new run in the paragraph mark's formatting.
+  // with no text gets a new run in the paragraph mark's formatting. Returns the typed characters' [start, end) ranges.
   function setText(p, text) {
     const old = pieces.get(p) || [];
     if (!old.length) {
@@ -868,7 +909,7 @@ export async function openDocxEditor(root, bytes, { t = (en) => en } = {}) {
       }
       const added = textPieces(text); run.append(...added); p.append(run);
       pieces.set(p, added);
-      return;
+      return text ? [[0, text.length]] : [];
     }
     const oldText = old.map(pieceText).join('');
     const { keep, ins } = diff(oldText, text);
@@ -883,6 +924,9 @@ export async function openDocxEditor(root, bytes, { t = (en) => en } = {}) {
       const repl = textPieces(s); el.replaceWith(...repl); result.push(...repl);
     });
     pieces.set(p, result);
+    const typed = []; let j = 0; // where the inserted text sits in the new text
+    for (let k = 0; k <= oldText.length; k++) { if (ins[k]) { typed.push([j, j + ins[k].length]); j += ins[k].length; } if (k < oldText.length && keep[k]) j++; }
+    return typed;
   }
   // Character diff (longest common subsequence): keep[i] says whether old character i stays; ins[i] is the text
   // inserted just before old character i (ins[old.length]: at the end). Long paragraphs fall back to one changed span
@@ -913,7 +957,7 @@ export async function openDocxEditor(root, bytes, { t = (en) => en } = {}) {
     async save() {
       for (const i of changed) {
         const it = items[i];
-        setText(it.p, textOf(it.div));
+        commit(i);
         const fresh = renderPara(it.p, i); it.div.replaceWith(fresh); // show the paragraph as it is saved
         items[i].text = textOf(fresh);
       }
