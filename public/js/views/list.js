@@ -38,6 +38,11 @@ try {
   if (!Array.isArray(F.pics)) F.pics = localStorage.getItem('mineOnly') === '1' ? [ME] : []; // "Mine only" before v2.15
 } catch { F.pics = F.pics || []; /* private mode */ }
 const saveF = () => { try { localStorage.setItem('listFilters', JSON.stringify(F)); } catch { /* this visit only */ } };
+// Sort by (v2.17): any column of the open tab (its `s` value), up or down, inside each campus; kept on this device.
+// A column the open tab doesn't show falls back to RefCode. Cells shown as — (nothing submitted) sort last either way.
+let SORT = { k: 'ref', up: true };
+try { SORT = { ...SORT, ...JSON.parse(localStorage.getItem('listSort') || '{}') }; } catch { /* private mode */ }
+const saveSort = () => { try { localStorage.setItem('listSort', JSON.stringify(SORT)); } catch { /* this visit only */ } };
 
 // The budget each tab is about, and the labels of the choices on All.
 const VAL = { proposed: (s) => s.proposed || 0, est: (s) => s.est || 0, approved: (s) => s.approved || 0, fin: (s) => s.fin || 0 };
@@ -55,7 +60,9 @@ export async function render(page, ctx) {
     <div class="phase-bar"><div class="seg filter" role="radiogroup" aria-label="${esc(tr('Phase', 'ช่วง'))}" id="show"></div>
       <div class="track" id="track" aria-live="polite"></div></div>
     <div id="mini" class="kpis mini"></div>
-    <div class="toolbar search-bar"><input type="search" id="q" placeholder="${esc(tr('Search name, RefCode or person in charge', 'ค้นหาชื่อ รหัส หรือผู้รับผิดชอบ'))}" value="${esc(query)}"></div>
+    <div class="toolbar search-bar"><input type="search" id="q" placeholder="${esc(tr('Search name, RefCode or person in charge', 'ค้นหาชื่อ รหัส หรือผู้รับผิดชอบ'))}" value="${esc(query)}">
+      <label class="ctl">${tr('Sort by', 'เรียงตาม')}<select id="sortk"></select></label>
+      <button type="button" class="btn plain sort-dir" id="sortdir"></button></div>
     <div class="toolbar fbar" role="group" aria-label="${esc(tr('Filters', 'ตัวกรอง'))}"><span class="muted small fbar-k">${icon('sliders', 16)}${tr('Filter', 'กรอง')}</span>
       ${picker('fcat', tr('Category', 'หมวด'), acts('cats') + optList(CATEGORIES, F.cats, 'cats'))}
       ${picker('fcamp', tr('Campus', 'วิทยาเขต'), acts('camps') + optList(CAMPUSES, F.camps, 'camps'))}
@@ -120,22 +127,22 @@ export async function render(page, ctx) {
 
   // Columns: heading, width weight, cell. `share` is filled in paint (needs the total shown).
   const COL = {
-    cat: { h: () => tr('Category', 'หมวด'), w: 6, c: (o) => `<td class="mono" title="${esc(label(CATEGORIES, o.category))}">${esc(o.category)}</td>` },
-    name: { h: () => tr('Name', 'ชื่อ'), w: 20, c: (o) => `<td>${esc(o.en)}</td>` },
-    ref: { h: () => tr('RefCode', 'รหัส'), w: 9, c: (o) => `<td class="mono">${esc(o.code)}</td>` },
-    n: { h: () => tr('Projects', 'โครงการ'), w: 6, r: 1, c: (o, s) => `<td class="r">${s.count || '—'}</td>` },
-    prop: { h: () => tr('Total proposed project budget', 'งบประมาณโครงการที่เสนอรวม'), w: 11, r: 1, c: (o, s) => `<td class="r">${s.count ? money(s.proposed) : '—'}</td>` },
-    appr: { h: () => tr('Total approved budget', 'งบประมาณที่อนุมัติรวม'), w: 11, r: 1, c: (o, s) => `<td class="r">${money(s.approved)}</td>` },
-    est: { h: () => tr('Estimated budget', 'งบประมาณที่คาดว่าจะอนุมัติ'), w: 11, r: 1, c: (o, s) => `<td class="r">${s.count ? money(s.est) : '—'}</td>` },
-    fin: { h: () => tr('Final budget', 'งบประมาณสุดท้าย'), w: 11, r: 1, c: (o, s) => `<td class="r">${money(s.fin)}</td>` },
-    share: { h: () => tr('% of total', '% ของยอดรวม'), w: 6, r: 1, c: (o, s, x) => `<td class="r">${x.total ? `${(Math.round((VAL[valKey()](s) / x.total) * 1000) / 10).toLocaleString('en-US')}%` : '—'}</td>` },
-    next: { h: () => tr('Next pitching', 'นำเสนอครั้งถัดไป'), w: 13, c: (o, s) => { const n = nextSlot(s); return `<td class="small">${n ? esc(slotText(n)).replace(/ · Microsoft Teams$/, '') : '<span class="muted">—</span>'}</td>`; } },
-    prog: { h: () => tr('Pitching progress', 'ความคืบหน้าการนำเสนอ'), w: 11, r: 1, c: (o, s) => { const n = nextSlot(s); const t = n ? timeLeft(n) : ''; return `<td class="r">${progCell(o, s)}${t ? `<small class="muted block">${esc(t)}</small>` : ''}</td>`; } },
-    rs: { h: () => tr('Re-submission', 'การส่งแก้ไข'), w: 14, c: (o, s) => `<td class="small">${resubCell(s)}</td>` },
-    pic: { h: () => tr('Person in charge', 'ผู้รับผิดชอบ'), w: 15, c: (o) => `<td class="small">${pic(o)}</td>` },
-    unf: { h: () => tr('Unfinished', 'ยังไม่ครบ'), w: 8, r: 1, c: (o, s) => `<td class="r">${unfCell(o, s, left(o.code))}</td>` },
-    unfR: { h: () => tr('Unfinished', 'ยังไม่ครบ'), w: 8, r: 1, c: (o, s) => `<td class="r">${unfCell(o, s, leftR(o.code))}</td>` },
-    case: { h: () => tr('Status', 'สถานะ'), w: 8, c: (o) => `<td>${status(o)}</td>` },
+    cat: { h: () => tr('Category', 'หมวด'), w: 6, s: (o) => o.category, c: (o) => `<td class="mono" title="${esc(label(CATEGORIES, o.category))}">${esc(o.category)}</td>` },
+    name: { h: () => tr('Name', 'ชื่อ'), w: 20, s: (o) => o.en, c: (o) => `<td>${esc(o.en)}</td>` },
+    ref: { h: () => tr('RefCode', 'รหัส'), w: 9, s: (o) => o.code, c: (o) => `<td class="mono">${esc(o.code)}</td>` },
+    n: { h: () => tr('Projects', 'โครงการ'), w: 6, r: 1, s: (o, s) => s.count || null, c: (o, s) => `<td class="r">${s.count || '—'}</td>` },
+    prop: { h: () => tr('Total proposed project budget', 'งบประมาณโครงการที่เสนอรวม'), w: 11, r: 1, s: (o, s) => (s.count ? s.proposed || 0 : null), c: (o, s) => `<td class="r">${s.count ? money(s.proposed) : '—'}</td>` },
+    appr: { h: () => tr('Total approved budget', 'งบประมาณที่อนุมัติรวม'), w: 11, r: 1, s: (o, s) => s.approved ?? null, c: (o, s) => `<td class="r">${money(s.approved)}</td>` },
+    est: { h: () => tr('Estimated budget', 'งบประมาณที่คาดว่าจะอนุมัติ'), w: 11, r: 1, s: (o, s) => (s.count ? s.est || 0 : null), c: (o, s) => `<td class="r">${s.count ? money(s.est) : '—'}</td>` },
+    fin: { h: () => tr('Final budget', 'งบประมาณสุดท้าย'), w: 11, r: 1, s: (o, s) => s.fin ?? null, c: (o, s) => `<td class="r">${money(s.fin)}</td>` },
+    share: { h: () => tr('% of total', '% ของยอดรวม'), w: 6, r: 1, s: (o, s) => (s.count ? VAL[valKey()](s) : null), c: (o, s, x) => `<td class="r">${x.total ? `${(Math.round((VAL[valKey()](s) / x.total) * 1000) / 10).toLocaleString('en-US')}%` : '—'}</td>` },
+    next: { h: () => tr('Next pitching', 'นำเสนอครั้งถัดไป'), w: 13, s: (o, s) => { const n = nextSlot(s); return n ? `${n.date} ${n.start}` : null; }, c: (o, s) => { const n = nextSlot(s); return `<td class="small">${n ? esc(slotText(n)).replace(/ · Microsoft Teams$/, '') : '<span class="muted">—</span>'}</td>`; } },
+    prog: { h: () => tr('Pitching progress', 'ความคืบหน้าการนำเสนอ'), w: 11, r: 1, s: (o, s) => (s.count ? (s.count - leftP(o.code)) / s.count : null), c: (o, s) => { const n = nextSlot(s); const t = n ? timeLeft(n) : ''; return `<td class="r">${progCell(o, s)}${t ? `<small class="muted block">${esc(t)}</small>` : ''}</td>`; } },
+    rs: { h: () => tr('Re-submission', 'การส่งแก้ไข'), w: 14, s: (o, s) => s.rs || 0, c: (o, s) => `<td class="small">${resubCell(s)}</td>` },
+    pic: { h: () => tr('Person in charge', 'ผู้รับผิดชอบ'), w: 15, s: (o, s) => s.people.map((p) => ctx.nameOf(p)).sort().join(', ') || null, c: (o) => `<td class="small">${pic(o)}</td>` },
+    unf: { h: () => tr('Unfinished', 'ยังไม่ครบ'), w: 8, r: 1, s: (o, s) => (s.count || closedOf(o.code) ? left(o.code) : null), c: (o, s) => `<td class="r">${unfCell(o, s, left(o.code))}</td>` },
+    unfR: { h: () => tr('Unfinished', 'ยังไม่ครบ'), w: 8, r: 1, s: (o, s) => (s.count || closedOf(o.code) ? leftR(o.code) : null), c: (o, s) => `<td class="r">${unfCell(o, s, leftR(o.code))}</td>` },
+    case: { h: () => tr('Status', 'สถานะ'), w: 8, s: (o) => (closedOf(o.code) ? 1 : 0), c: (o) => `<td>${status(o)}</td>` },
   };
   const COLSET = {
     all: ['cat', 'name', 'ref', 'n', 'prop', 'appr', 'share', 'pic', 'unf', 'case'],
@@ -269,6 +276,19 @@ export async function render(page, ctx) {
     $('#mini', page).innerHTML = mini(shown);
     $('#track', page).innerHTML = track(shown);
     const keys = COLSET[tab];
+    // Sort by: the open tab's columns; another tab's column (or an old choice) falls back to RefCode.
+    const sk = keys.includes(SORT.k) ? SORT.k : 'ref';
+    $('#sortk', page).innerHTML = keys.map((k) => `<option value="${k}" ${k === sk ? 'selected' : ''}>${esc(COL[k].h())}</option>`).join('');
+    const dirLabel = SORT.up ? tr('Ascending', 'น้อยไปมาก') : tr('Descending', 'มากไปน้อย');
+    $('#sortdir', page).innerHTML = `${SORT.up ? '↑' : '↓'} <span>${esc(dirLabel)}</span>`;
+    $('#sortdir', page).setAttribute('aria-label', dirLabel);
+    const byCol = (a, b) => {
+      const va = COL[sk].s(a, stat(a.code)); const vb = COL[sk].s(b, stat(b.code));
+      if (va == null || vb == null) return va == null && vb == null ? 0 : va == null ? 1 : -1; // empty last, either way
+      const d = typeof va === 'number' && typeof vb === 'number' ? va - vb : String(va).localeCompare(String(vb), getLang() === 'th' ? 'th' : 'en', { numeric: true });
+      return SORT.up ? d : -d;
+    };
+    const order = (a, b) => byCol(a, b) || a.code.localeCompare(b.code); // ties: RefCode
     const weight = keys.reduce((t, k) => t + COL[k].w, 0);
     const COLS = `<colgroup>${keys.map((k) => `<col style="width:${(COL[k].w / weight * 100).toFixed(2)}%">`).join('')}</colgroup>`;
     const HEAD = `<tr>${keys.map((k) => `<th${COL[k].r ? ' class="r"' : ''}>${esc(COL[k].h())}</th>`).join('')}</tr>`;
@@ -276,7 +296,7 @@ export async function render(page, ctx) {
     const x = { total: shown.reduce((t, o) => t + valOf(o), 0) };
     const narrowed = q || F.pics.length || F.cats.length || F.camps.length || budgetOn() || (tracked && sub !== 'all') || (tab === 'resub' && F.rounds.length);
     $('#rows', page).innerHTML = CAMPUSES.map((c) => {
-      const list = shown.filter((o) => o.campus === c.code).sort((a, b) => a.code.localeCompare(b.code));
+      const list = shown.filter((o) => o.campus === c.code).sort(order);
       const pend = list.filter((o) => unfinished(o) > 0).length;
       const head = `<tr class="grp"><th colspan="${keys.length}">${esc(c.en.toUpperCase())}<span class="muted"> · ${esc(c.th)} · ${list.length}</span>
         ${pend ? `<span class="pill orange">${tr('{n} pending', 'รอ {n}', { n: pend })}</span>` : ''}
@@ -312,6 +332,8 @@ export async function render(page, ctx) {
   }
 
   $('#q', page).oninput = (e) => { query = e.target.value; paint(); };
+  $('#sortk', page).onchange = (e) => { SORT.k = e.target.value; saveSort(); paint(); };
+  $('#sortdir', page).onclick = () => { SORT.up = !SORT.up; saveSort(); paint(); };
   page.addEventListener('change', (e) => {
     const t = e.target;
     if (t.name === 'show') { tab = t.value; paint(); }

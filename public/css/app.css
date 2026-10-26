@@ -394,6 +394,7 @@ input[inputmode=decimal] { max-width: 240px; text-align: right; font-variant-num
 /* ---------- dashboard: every-project table ---------- */
 .ctl { display: flex; gap: 8px; align-items: center; font-size: 14px; color: var(--text2); white-space: nowrap; }
 .ctl select { width: auto; min-height: 40px; padding: 6px 12px; font-size: 15px; color: var(--text); }
+.sort-dir { min-height: 40px; white-space: nowrap; } /* Organizations Sort by direction (v2.17) */
 .budgets-table td b { display: block; font-weight: 600; }
 .budgets-table td small { display: block; font-size: 12px; }
 .budgets-table tbody tr[data-org] { cursor: pointer; }
