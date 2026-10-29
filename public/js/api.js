@@ -220,4 +220,6 @@ export const fileId = (u) => (typeof u === 'string' ? idOf(u) : u?.id || '');
 export const viewUrl = (u) => { const id = fileId(u); return id ? `https://drive.google.com/file/d/${encodeURIComponent(id)}/view` : ''; };
 // Drive's own viewer (PDF and .docx), shown inside the site by openPreview() in project.js.
 export const previewUrl = (u) => { const id = fileId(u); return id ? `https://drive.google.com/file/d/${encodeURIComponent(id)}/preview` : ''; };
-export const downloadUrl = (u) => { const id = fileId(u); return id ? `https://drive.google.com/uc?export=download&id=${encodeURIComponent(id)}` : ''; };
+// Straight to Drive's download host (v2.17): drive.google.com/uc only redirects there, one more round trip before the
+// file starts; confirm=t skips the "can't scan for viruses" page.
+export const downloadUrl = (u) => { const id = fileId(u); return id ? `https://drive.usercontent.google.com/download?id=${encodeURIComponent(id)}&export=download&confirm=t` : ''; };
