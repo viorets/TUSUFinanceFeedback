@@ -77,6 +77,20 @@ document.addEventListener('click', (e) => {
   openPreview({ preview: b.dataset.preview, view: b.dataset.view, dl: b.dataset.dl, title: b.dataset.title });
 });
 
+// Download links (v2.17): the connection to Drive's download host is opened as the pointer or focus reaches one, so
+// the click doesn't wait for DNS and TLS. Again after a minute, since an idle connection is closed.
+let warmAt = 0;
+const warm = (e) => {
+  if (!e.target.closest?.('a[download][href^="https://drive.usercontent.google.com/"]') || Date.now() - warmAt < 60e3) return;
+  warmAt = Date.now();
+  const l = document.createElement('link');
+  l.rel = 'preconnect'; l.href = 'https://drive.usercontent.google.com';
+  document.head.append(l);
+  setTimeout(() => l.remove(), 60e3);
+};
+document.addEventListener('pointerover', warm, { passive: true });
+document.addEventListener('focusin', warm);
+
 // A saved file: name (opens the preview) and a download link.
 // opt.unsaved (v2.13): the file was uploaded or sent from the Edit page but not kept with Save yet.
 export const fileChip = (f, opt) => (f?.id ? `<span class="fchip">${icon('file', 16)}<a href="${esc(viewUrl(f))}" data-preview="${esc(previewUrl(f))}" data-view="${esc(viewUrl(f))}" data-dl="${esc(downloadUrl(f))}" data-title="${esc(f.name || f.id)}" title="${esc(tr('Preview', 'ดูตัวอย่าง'))}">${esc(f.name || f.id)}</a>
