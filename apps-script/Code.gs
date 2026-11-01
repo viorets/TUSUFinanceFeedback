@@ -130,37 +130,7 @@ const FORM_FIELDS = { 'Feedback Note': 'Budget form note', 'Budget Form Feedback
  * Used only while the Submissions Sheet has no row for RS-ACA-01; saved Pre-pitch / Pitching rows replace the samples.
  * To remove: set DEMO = null.
  */
-const DEMO = {
-  org: {
-    'Org Ref': 'RS-ACA-01', 'Version': 1, 'Submitted At': '2026-10-01T03:00:00.000Z', 'Submitted By': 'ตัวอย่าง ผู้ส่ง (demo)',
-    'Submitter Position': 'ประธานชุมนุม', 'Telegram Phone': '0812345678', 'Emergency Contact': 'ตัวอย่าง ผู้ติดต่อ (demo)',
-    'Emergency Position': 'รองประธานชุมนุม', 'Emergency Phone': '0898765432', 'Total Proposed Budget': 185000, 'Project Count': 3,
-  },
-  projects: [
-    { 'Project Ref': 'RS-ACA-01-P01', 'Project Name': 'TEDxThammasatU 2027: Main Event', 'Org Ref': 'RS-ACA-01', 'Project No': 1,
-      'Budget': 120000, 'Project Dates': '2027-07-17, 2027-07-18', 'Proposal .docx': '', 'Proposal .pdf': '' },
-    { 'Project Ref': 'RS-ACA-01-P02', 'Project Name': 'Speaker Coaching Workshop', 'Org Ref': 'RS-ACA-01', 'Project No': 2,
-      'Budget': 45000, 'Project Dates': '2027-06-14, 2027-06-15, 2027-06-16, 2027-06-21', 'Proposal .docx': '', 'Proposal .pdf': '' },
-    { 'Project Ref': 'RS-ACA-01-P03', 'Project Name': 'TEDx Salon Night Series', 'Org Ref': 'RS-ACA-01', 'Project No': 3,
-      'Budget': 20000, 'Project Dates': '2027-08-06, 2027-08-20, 2027-09-03', 'Proposal .docx': '', 'Proposal .pdf': '' },
-  ],
-  PrePitch: {
-    'RS-ACA-01-P01': { 'Approved Budget': 110000, 'Docx Approved': 'Yes', 'PDF Approved': 'Yes',
-      'Feedback Note': 'Clear plan. Venue quotation attached in the budget sheet.', 'Updated By': 'demo' },
-    'RS-ACA-01-P02': { 'Approved Budget': 40000, 'Docx Approved': 'No', 'PDF Approved': 'Yes',
-      'Feedback Note': 'Please add the trainer fee breakdown to the .docx.', 'Updated By': 'demo' },
-  },
-  Pitching: {
-    'RS-ACA-01-P01': { 'Summary': 'Strong pitch. Committee asked to cut printing costs and confirm the venue date.',
-      'Final Approved Budget': 105000, 'Updated By': 'demo' },
-    'RS-ACA-01-P02': { 'Summary': 'Approved with a smaller trainer budget.', 'Final Approved Budget': 38000, 'Updated By': 'demo' },
-  },
-  Schedule: {
-    'RS-ACA-01-P01': { date: '2026-10-20', start: '13:00', end: '13:20', room: 'Demo room SC 1001' },
-    'RS-ACA-01-P02': { date: '2026-10-20', start: '13:20', end: '13:40', room: 'Demo room SC 1001' },
-    'RS-ACA-01-P03': { date: '2026-10-21', start: '09:00', end: '09:20', room: 'Microsoft Teams' },
-  },
-};
+const DEMO = null; // removed 31 Oct 2026: the sample RS-ACA-01 submission is gone
 
 const ACTIONS = {
   boot: boot_, org: org_, upload: upload_, savePrePitch: savePrePitch_, savePitching: savePitching_,
