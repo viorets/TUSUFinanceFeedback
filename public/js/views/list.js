@@ -13,6 +13,8 @@
 // organization; any ticked one matches.
 // Round code (v2.13, Re-submission tab only): the organizations that re-submitted in any of the picked Re-Submission
 // rounds; Choose all / Clear all inside the picker. None picked = no filter, as the other pickers.
+// Submitted only (v2.18): the list shows organizations with a submission; Data team staff, Chiefs and Admins get a
+// "Show all master data" switch for the rest (kept on this device).
 // A mini dashboard above the list totals what is shown, for the open tab.
 // Status: Open / Closed, shown here; Admins and Chiefs change it at the top of the Re-submission tab.
 // A closed case counts as Done whatever its projects' progress (v2.3).
@@ -23,6 +25,7 @@ import { tr, getLang } from '../i18n.js';
 import { $, esc, icon, toast, num2, dateTimeFmt, dialog } from '../ui.js';
 import { cached, call, peek, remember, forget } from '../api.js';
 import { CAMPUSES, CATEGORIES, ORGS } from '../masterdata.js';
+import { COUNCIL } from '../council.js';
 import { slotText, timeLeft } from '../project.js';
 import { timeline, bindTimeline } from '../timeline.js';
 
@@ -32,7 +35,7 @@ let sub = 'all'; // Pitching and Re-submission: all | pending | done
 // Filters: cats / camps / rounds = codes picked (none picked = no filter); pics = persons in charge picked: NONE, ME
 // or emails; on / min / max = budget range; type = budget the range uses on the All tab.
 const NONE = '-none'; const ME = '-me';
-let F = { cats: [], camps: [], rounds: [], pics: null, on: false, min: null, max: null, type: 'proposed' };
+let F = { cats: [], camps: [], rounds: [], pics: null, on: false, min: null, max: null, type: 'proposed', all: false };
 try {
   F = { ...F, ...JSON.parse(localStorage.getItem('listFilters') || '{}') };
   if (!Array.isArray(F.pics)) F.pics = localStorage.getItem('mineOnly') === '1' ? [ME] : []; // "Mine only" before v2.15
@@ -53,6 +56,7 @@ const TYPE_LABEL = {
 };
 
 export async function render(page, ctx) {
+  const canAll = ['Data team staff', 'Chief', 'Admin'].includes(ctx.me?.role);
   const optList = (list, picked, name) => list.map((x) => `<label class="msel-opt"><input type="checkbox" data-f="${name}" value="${esc(x.code)}" ${picked.includes(x.code) ? 'checked' : ''}>${esc(getLang() === 'th' ? x.th : x.en)}</label>`).join('');
   const acts = (name) => `<div class="msel-acts"><button type="button" class="btn plain" data-all="${name}">${tr('Choose all', 'เลือกทั้งหมด')}</button><button type="button" class="btn plain" data-none="${name}">${tr('Clear all', 'ล้างทั้งหมด')}</button></div>`;
   const picker = (id, label, body, extra = '') => `<details class="msel" id="${id}" ${extra}><summary>${label}<small id="${id}N"></small></summary><div class="msel-body">${body}</div></details>`;
@@ -74,6 +78,7 @@ export async function render(page, ctx) {
         <input type="number" id="rmax" min="0" step="any" placeholder="${esc(tr('Max', 'สูงสุด'))}" aria-label="${esc(tr('Maximum', 'สูงสุด'))}"></div>
         <div class="dual"><input type="range" id="rlo" min="0" max="100" step="1" aria-label="${esc(tr('Minimum', 'ต่ำสุด'))}"><input type="range" id="rhi" min="0" max="100" step="1" aria-label="${esc(tr('Maximum', 'สูงสุด'))}"></div></div>`)}
       ${picker('fround', tr('Round code', 'รหัสรอบ'), `${acts('rounds')}<div id="froundList"></div>`, 'hidden')}</div>
+    ${canAll ? `<label class="check sw-on"><input type="checkbox" id="showall" ${F.all ? 'checked' : ''}>${tr('Show all master data (including organizations with no submission)', 'แสดงข้อมูลหลักทั้งหมด (รวมองค์กรที่ยังไม่ได้ส่ง)')}</label>` : ''}
     <div class="fchips" id="chips" aria-live="polite"></div>
     <div id="subbar" class="toolbar"></div>
     <div id="rows" class="org-list"></div>`;
@@ -132,6 +137,7 @@ export async function render(page, ctx) {
     ref: { h: () => tr('RefCode', 'รหัส'), w: 9, s: (o) => o.code, c: (o) => `<td class="mono">${esc(o.code)}</td>` },
     n: { h: () => tr('Projects', 'โครงการ'), w: 6, r: 1, s: (o, s) => s.count || null, c: (o, s) => `<td class="r">${s.count || '—'}</td>` },
     prop: { h: () => tr('Total proposed project budget', 'งบประมาณโครงการที่เสนอรวม'), w: 11, r: 1, s: (o, s) => (s.count ? s.proposed || 0 : null), c: (o, s) => `<td class="r">${s.count ? money(s.proposed) : '—'}</td>` },
+    p1: { h: () => tr('Pitch#1 Approved Budget', 'งบประมาณที่อนุมัติ Pitch#1'), w: 11, r: 1, s: (o) => COUNCIL[o.code] ?? null, c: (o) => `<td class="r">${money(COUNCIL[o.code])}</td>` },
     appr: { h: () => tr('Total approved budget', 'งบประมาณที่อนุมัติรวม'), w: 11, r: 1, s: (o, s) => s.approved ?? null, c: (o, s) => `<td class="r">${money(s.approved)}</td>` },
     est: { h: () => tr('Estimated budget', 'งบประมาณที่คาดว่าจะอนุมัติ'), w: 11, r: 1, s: (o, s) => (s.count ? s.est || 0 : null), c: (o, s) => `<td class="r">${s.count ? money(s.est) : '—'}</td>` },
     fin: { h: () => tr('Final budget', 'งบประมาณสุดท้าย'), w: 11, r: 1, s: (o, s) => s.fin ?? null, c: (o, s) => `<td class="r">${money(s.fin)}</td>` },
@@ -145,7 +151,7 @@ export async function render(page, ctx) {
     case: { h: () => tr('Status', 'สถานะ'), w: 8, s: (o) => (closedOf(o.code) ? 1 : 0), c: (o) => `<td>${status(o)}</td>` },
   };
   const COLSET = {
-    all: ['cat', 'name', 'ref', 'n', 'prop', 'appr', 'share', 'pic', 'unf', 'case'],
+    all: ['cat', 'name', 'ref', 'n', 'prop', 'p1', 'appr', 'share', 'pic', 'unf', 'case'],
     pre: ['cat', 'name', 'ref', 'n', 'prop', 'est', 'share', 'pic', 'case'],
     pitch: ['cat', 'name', 'ref', 'n', 'prop', 'appr', 'share', 'next', 'prog', 'pic', 'case'],
     resub: ['cat', 'name', 'ref', 'n', 'prop', 'fin', 'share', 'rs', 'pic', 'unfR', 'case'],
@@ -211,7 +217,7 @@ export async function render(page, ctx) {
 
   // Person in charge options (v2.15), with how many organizations on the list each has: No person in charge yet, Me,
   // then everyone in charge of one, A to Z. Picks of people no longer in charge of any are dropped.
-  const listed = () => { const removed = new Set(boot.removed); return ORGS.filter((o) => !removed.has(o.code)); };
+  const listed = () => { const removed = new Set(boot.removed); return ORGS.filter((o) => !removed.has(o.code) && ((canAll && F.all) || stat(o.code).count > 0)); };
   const paintPeople = (rows = listed()) => {
     const n = {};
     rows.forEach((o) => stat(o.code).people.forEach((p) => { n[p] = (n[p] || 0) + 1; }));
@@ -376,6 +382,7 @@ export async function render(page, ctx) {
     if (F.min != null || F.max != null) F.on = true;
     saveF(); paint();
   };
+  if (canAll) $('#showall', page).onchange = (e) => { F.all = e.target.checked; saveF(); paint(); };
   $('#ron', page).onchange = (e) => { F.on = e.target.checked; saveF(); paint(); };
   $('#rtype', page).onchange = (e) => { F.type = e.target.value; F.min = null; F.max = null; saveF(); paint(); };
   $('#rmin', page).onchange = (e) => setRange(num(e.target.value), F.max);

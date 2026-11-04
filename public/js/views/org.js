@@ -7,6 +7,7 @@ import { tr, getLang } from '../i18n.js';
 import { $, esc, icon, phoneFmt, dateTimeFmt, toast, num2 } from '../ui.js';
 import { cached, peek, remember } from '../api.js';
 import { CAMPUSES, CATEGORIES, ORGS } from '../masterdata.js';
+import { COUNCIL } from '../council.js';
 import { UNFINISHED, phaseOn, PENDING } from '../project.js';
 import { askPhases, printSheet, printNow } from '../print.js';
 
@@ -84,7 +85,8 @@ function paintTabs() {
   const { page, ref, data, tab } = state;
   const fins = data.projects.map((p) => data.pitch?.[p.ref]?.finalBudget).filter((v) => v != null && v !== '' && Number.isFinite(+v));
   const money = (v) => (v == null ? '—' : `฿${num2(v)}`);
-  $('#totals', page).innerHTML = `<div><dt>${tr('Total proposed project budget', 'งบประมาณโครงการที่เสนอรวม')}</dt><dd>${data.projects.length ? money(data.projects.reduce((t, p) => t + (+p.budget || 0), 0)) : '—'}</dd></div>
+  $('#totals', page).innerHTML = `<div><dt>${tr('Pitch#1 Approved Budget:', 'งบประมาณที่อนุมัติ Pitch#1:')}</dt><dd>${money(COUNCIL[ref] ?? null)}</dd></div>
+    <div><dt>${tr('Total proposed project budget', 'งบประมาณโครงการที่เสนอรวม')}</dt><dd>${data.projects.length ? money(data.projects.reduce((t, p) => t + (+p.budget || 0), 0)) : '—'}</dd></div>
     <div><dt>${tr('Total approved budget', 'งบประมาณที่อนุมัติรวม')}</dt><dd>${money(fins.length ? fins.reduce((t, v) => t + +v, 0) : null)}</dd></div>`;
   $('#tabs', page).innerHTML = Object.entries(TABS).map(([k, t]) => {
     const n = phaseOn(data, k) && !data.closed ? data.projects.filter((p) => UNFINISHED[k](data, p)).length : 0;
