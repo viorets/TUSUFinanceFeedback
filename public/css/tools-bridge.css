@@ -1,0 +1,15 @@
+/* The TUSU Finance Team Tools PDF editor in this site: their colour names mapped to this site's
+   (css/app.css), only on the editors and their pop-ups, so the rest of the page keeps its own (--ink is teal here). */
+.mk, .vt-help, .vt-menu, .vt-modal-back {
+  --ink: var(--text); --ink-2: var(--text2); --primary: var(--teal); --on-primary: #fff; --tint: var(--fill);
+  --accent: var(--cyan); --border: var(--sep); --border-strong: rgba(0, 99, 113, .28); --border-color: var(--sep);
+  --surface: var(--bg2); --surface-2: var(--pearl, #e8f3f5); --danger: var(--red); --danger-tint: rgba(215, 0, 21, .1); --bar-h: 56px;
+}
+/* The tools' glass bars and pop-ups, in this site's bar colours. */
+.mk-bar, .vt-menu, .vt-help {
+  background: var(--bar); -webkit-backdrop-filter: blur(16px); backdrop-filter: blur(16px);
+  border: 1px solid var(--sep); box-shadow: var(--shadow);
+}
+@supports not ((backdrop-filter: blur(1px)) or (-webkit-backdrop-filter: blur(1px))) {
+  .mk-bar, .vt-menu, .vt-help { background: var(--bg2); }
+}

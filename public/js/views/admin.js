@@ -13,7 +13,7 @@ import { call, cached, forget, forgetAll, peek, remember } from '../api.js';
 import { ORGS } from '../masterdata.js';
 import { PENDING } from '../project.js';
 import { STEPS } from '../timeline.js';
-import { FONTS } from '../markup/pdf-markup.js';
+import { MARKUP_FONTS as FONTS } from '../markup-fonts.js';
 
 const ROLES = ['Admin', 'Chief', 'Staff', 'Data team staff'];
 const PHASE_LIST = [['prepitch', () => tr('Pre-pitch', 'ก่อนการนำเสนอ')], ['pitching', () => tr('Pitching', 'การนำเสนอ')], ['resubmit', () => tr('Re-submission', 'การส่งแก้ไข')]];

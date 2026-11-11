@@ -4,6 +4,10 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>PDF markup test</title>
+<link rel="stylesheet" href="css/app.css">
+<link rel="stylesheet" href="css/tools-markup.css">
+<link rel="stylesheet" href="css/tools-view.css">
+<link rel="stylesheet" href="css/tools-bridge.css">
 <link rel="stylesheet" href="css/markup.css">
 <style>
   /* Local test run only (not deployed: firebase.json ignores this page). */
@@ -36,6 +40,9 @@
 </div>
 <script type="module">
 import { openPdfEditor, MAX_BYTES } from './js/markup/pdf-markup.js';
+import { setFontDir } from './js/markup/pdf-realtext.js';
+import { MARKUP_FONTS } from './js/markup-fonts.js';
+setFontDir('fonts/');
 
 const $ = (s) => document.querySelector(s);
 const status = (t) => { $('#status').textContent = t; };
@@ -49,7 +56,7 @@ async function open(bytes, fileName) {
   status(`Opening ${fileName} (${mb(bytes.byteLength)})…`);
   const t0 = performance.now();
   try {
-    ed = await openPdfEditor($('#editor'), { bytes, name: fileName, draft });
+    ed = await openPdfEditor($('#editor'), { bytes, name: fileName, draft, editText: false, ocr: false, maxBytes: 12 * 1024 * 1024, fonts: MARKUP_FONTS, onStatus: status }); // as views/markup.js opens it
     status(`${fileName} · ${mb(bytes.byteLength)} · opened in ${Math.round(performance.now() - t0)} ms${draft ? ' · draft restored' : ''}`);
     $('#draft').disabled = false; $('#dl').disabled = false;
   } catch (e) { status(e.message); console.error(e); }
