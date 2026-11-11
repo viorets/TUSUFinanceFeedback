@@ -3,7 +3,12 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>PDF markup test</title>
+<title>Editors test</title>
+<link rel="stylesheet" href="css/app.css">
+<link rel="stylesheet" href="css/tools-markup.css">
+<link rel="stylesheet" href="css/tools-view.css">
+<link rel="stylesheet" href="css/tools-office.css">
+<link rel="stylesheet" href="css/tools-bridge.css">
 <link rel="stylesheet" href="css/markup.css">
 <style>
   /* Local test run only (not deployed: firebase.json ignores this page). */
@@ -25,9 +30,9 @@
 <body>
 <div class="app">
   <header>
-    <b>PDF markup · test run</b><span class="note">Local only · nothing is saved to the site</span>
+    <b>Editors · test run</b><span class="note">Local only · nothing is saved to the site</span>
     <span class="grow"></span>
-    <label class="file">Open PDF<input type="file" id="file" accept="application/pdf,.pdf"></label>
+    <label class="file">Open PDF, Word or Excel<input type="file" id="file" accept="application/pdf,.pdf,.docx,.xlsx"></label>
     <button id="draft" disabled>Save draft</button>
     <button id="dl" class="primary" disabled>Download marked PDF</button>
     <span id="status"></span>
@@ -35,7 +40,15 @@
   <div id="editor"><p class="empty">Open a PDF (up to 12 MB). Tools: text box (LINE Seed Sans TH, 11 pt, #990000), highlight text, draw, line, arrow, rectangle. Hold Shift for straight lines and squares. Select a mark to move it, change its width or colour, or delete it.</p></div>
 </div>
 <script type="module">
-import { openPdfEditor, MAX_BYTES } from './js/markup/pdf-markup.js';
+import { openPdfEditor } from './js/markup/pdf-markup.js';
+import { setFontDir } from './js/markup/pdf-realtext.js';
+import { openDocxEditor } from './js/markup/docx-edit.js';
+import { openXlsxEditor } from './js/markup/xlsx-edit.js';
+import { setRibbonLang } from './js/markup/ribbon.js';
+setFontDir('fonts/');
+// ?th=1: Thai ribbon labels, as the site shows them in Thai
+if (new URLSearchParams(location.search).get('th')) setRibbonLang((en, th) => th);
+const MAX_BYTES = 12 * 1024 * 1024; // this site's limit (its uploads)
 
 const $ = (s) => document.querySelector(s);
 const status = (t) => { $('#status').textContent = t; };
@@ -49,7 +62,11 @@ async function open(bytes, fileName) {
   status(`Opening ${fileName} (${mb(bytes.byteLength)})…`);
   const t0 = performance.now();
   try {
-    ed = await openPdfEditor($('#editor'), { bytes, name: fileName, draft });
+    $('#editor').classList.add('markup-page');
+    if (/\.docx$/i.test(fileName)) ed = await openDocxEditor($('#editor'), bytes);
+    else if (/\.xlsx$/i.test(fileName)) ed = await openXlsxEditor($('#editor'), bytes);
+    else ed = await openPdfEditor($('#editor'), { bytes, name: fileName, draft, editText: false, ocr: false, maxBytes: MAX_BYTES, onStatus: status });
+    window.__ed = ed;
     status(`${fileName} · ${mb(bytes.byteLength)} · opened in ${Math.round(performance.now() - t0)} ms${draft ? ' · draft restored' : ''}`);
     $('#draft').disabled = false; $('#dl').disabled = false;
   } catch (e) { status(e.message); console.error(e); }

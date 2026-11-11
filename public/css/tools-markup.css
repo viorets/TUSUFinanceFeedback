@@ -1,0 +1,114 @@
+/* PDF markup editor (js/pdf-markup.js). Text box font: LINE Seed Sans TH (public/fonts, SIL Open Font License). */
+@font-face { font-family: "LINE Seed Sans TH"; src: url("../fonts/LINESeedSansTH_Rg.ttf") format("truetype"); font-weight: 400; font-display: swap; }
+/* TH Sarabun New / PSK (SIPA): the same files are embedded in exported PDFs (js/pdf-realtext.js). A computer that has
+   the font installed uses its own copy. */
+@font-face { font-family: "TH Sarabun New"; src: local("TH Sarabun New"), url("../fonts/THSarabunNew-Regular.ttf") format("truetype"); font-weight: 400; font-style: normal; font-display: swap; }
+@font-face { font-family: "TH Sarabun New"; src: local("TH Sarabun New Bold"), url("../fonts/THSarabunNew-Bold.ttf") format("truetype"); font-weight: 700; font-style: normal; font-display: swap; }
+@font-face { font-family: "TH Sarabun New"; src: local("TH Sarabun New Italic"), url("../fonts/THSarabunNew-Italic.ttf") format("truetype"); font-weight: 400; font-style: italic; font-display: swap; }
+@font-face { font-family: "TH Sarabun New"; src: local("TH Sarabun New BoldItalic"), url("../fonts/THSarabunNew-BoldItalic.ttf") format("truetype"); font-weight: 700; font-style: italic; font-display: swap; }
+@font-face { font-family: "TH SarabunPSK"; src: url("../fonts/THSarabunPSK-Regular.ttf") format("truetype"); font-weight: 400; font-style: normal; font-display: swap; }
+@font-face { font-family: "TH SarabunPSK"; src: url("../fonts/THSarabunPSK-Bold.ttf") format("truetype"); font-weight: 700; font-style: normal; font-display: swap; }
+@font-face { font-family: "TH SarabunPSK"; src: url("../fonts/THSarabunPSK-Italic.ttf") format("truetype"); font-weight: 400; font-style: italic; font-display: swap; }
+@font-face { font-family: "TH SarabunPSK"; src: url("../fonts/THSarabunPSK-BoldItalic.ttf") format("truetype"); font-weight: 700; font-style: italic; font-display: swap; }
+
+/* Tools in one bar on top of the pages; it wraps onto a second row when the editor is narrow. */
+/* The bar is tinted glass (css/themes.css) floating over the pages, which scroll under it; --bar-h (js/view-tools.js
+   floatBar) keeps the first page clear of it. */
+.mk { position: relative; display: flex; flex-direction: column; height: 100%; min-height: 0; background: var(--surface-2, #e8eef0); }
+.mk-bar { position: absolute; top: 8px; left: 8px; right: 8px; z-index: 5; display: flex; flex-wrap: wrap; align-items: center; gap: 8px 12px; padding: 8px 12px;
+  font-size: 14px; border-radius: 16px; }
+.mk-tools { display: inline-flex; flex-wrap: wrap; gap: 2px; padding: 3px; border-radius: 22px; background: var(--tint, rgba(43, 171, 194, .12)); }
+.mk-bar button { border: 0; font: inherit; font-size: 14px; min-height: 40px; padding: 6px 14px; border-radius: 980px; cursor: pointer; color: var(--ink, #1d1d1f); background: var(--tint, rgba(43, 171, 194, .12)); }
+.mk-tools button { background: none; }
+.mk-bar button[aria-pressed="true"] { background: var(--primary, #006371); color: var(--on-primary, #fff); }
+.mk-bar button:disabled { opacity: .4; cursor: default; }
+.mk-bar button:focus-visible { outline: 2px solid var(--accent, #2babc2); outline-offset: 1px; }
+.mk-bar .mk-addf { padding: 6px 12px; min-width: 40px; } /* add a font from this computer */
+@media (hover: hover) { .mk-tools button:hover:not([aria-pressed="true"]) { background: var(--border, rgba(43, 171, 194, .18)); } }
+.mk-grow { flex: 1; }
+.mk-bar .vt-zoom button, .mk-bar .vt-acts button { border-radius: 10px; padding: 0; }
+
+/* Controls for the tool in use: text, highlight, shape (data-mode, set by the editor). */
+.mk-g { display: none; flex-wrap: wrap; align-items: center; gap: 8px 12px; }
+.mk[data-mode="text"] :is(.mk-g-text, .mk-g-color, .mk-g-hl), .mk[data-mode="highlight"] .mk-g-hl, .mk[data-mode="shape"] :is(.mk-g-shape, .mk-g-color) { display: flex; }
+/* "Highlight selection" (touch and Pencil select first): only with the Highlight tool. */
+.mk:not([data-tool="highlight"]) .mk-hl-btn { display: none; }
+.mk-ctl { display: inline-flex; align-items: center; gap: 8px; font-size: 13px; color: var(--ink-2, #3a3a3c); }
+.mk-ctl > span { display: flex; align-items: center; gap: 8px; }
+.mk-ctl input[type=range] { width: 110px; accent-color: var(--primary, #006371); }
+.mk-ctl input[type=color] { flex: none; width: 36px; height: 32px; padding: 0; border: 1px solid rgba(0, 0, 0, .15); border-radius: 6px; background: none; }
+.mk-ctl output { min-width: 2.8em; text-align: right; font-variant-numeric: tabular-nums; }
+.mk-ctl select, .mk-ctl input[type=number] { box-sizing: border-box; font: inherit; font-size: 16px; padding: 4px 6px; border: 1px solid var(--border-strong, rgba(0, 0, 0, .15)); border-radius: 6px; background: var(--surface, #fff); color: var(--ink, #1d1d1f); }
+.mk-ctl input[type=number] { width: 4.5em; }
+.mk-fmt { display: inline-grid; grid-template-columns: repeat(5, 40px); gap: 4px; }
+.mk-bar .mk-fmt button { padding: 0; font-size: 16px; border-radius: 10px; display: inline-flex; align-items: center; justify-content: center; }
+.mk-fmt [data-fmt="bold"] { font-weight: 700; }
+.mk-fmt [data-fmt="italic"] { font-style: italic; font-family: Georgia, serif; }
+.mk-fmt [data-fmt="underline"] { text-decoration: underline; }
+.mk-fmt [data-fmt="strikeThrough"] { text-decoration: line-through; }
+
+/* Full screen: the browser's, or the editor filling the window where that is not allowed. */
+.mk.mk-full { position: fixed; inset: 0; z-index: 10000; width: 100vw; height: 100vh; height: 100dvh; }
+
+/* Pages. A finger scrolls; two fingers zoom the pages (the editor's own zoom, not the browser's). Pages wider than the
+   view stay reachable on the left (auto margins centre them only while they fit). */
+.mk-pages { flex: 1; min-width: 0; min-height: 0; overflow: auto; padding: calc(var(--bar-h, 56px) + 24px) 16px 16px; scroll-padding-top: calc(var(--bar-h, 56px) + 16px); display: flex; flex-direction: column; align-items: flex-start; gap: 16px; touch-action: pan-x pan-y; }
+.mk-wait { color: var(--ink-2, #6e6e73); align-self: center; }
+.mk-page { position: relative; flex: none; margin: 0 auto; background: #fff; box-shadow: 0 2px 10px rgba(0, 0, 0, .12); touch-action: pan-x pan-y; }
+/* Touch (iPad, v2.13): no scrolling while drawing or when a finger starts on a text box or mark. */
+.mk:is([data-tool=pen], [data-tool=line], [data-tool=arrow], [data-tool=rect]) .mk-page, .mk[data-tool=select] :is(.mk-box, .mk-mark) { touch-action: none; }
+.mk-page canvas { position: absolute; inset: 0; width: 100%; height: 100%; }
+.mk-svg, .mk-hls, .mk-boxes { position: absolute; inset: 0; width: 100%; height: 100%; }
+/* Highlights: own layer, multiplied with the page, so the paper takes the colour and the ink stays dark. */
+.mk-hls { z-index: 1; pointer-events: none; mix-blend-mode: multiply; }
+.mk-svg { z-index: 2; pointer-events: none; overflow: visible; }
+.mk-mark { cursor: move; }
+.mk[data-tool="select"] .mk-mark * { pointer-events: visiblePainted; }
+.mk-mark line, .mk-mark polyline, .mk-mark rect:not(.mk-hl) { stroke-opacity: 1; }
+.mk-mark.on { filter: drop-shadow(0 0 2px #2babc2) drop-shadow(0 0 2px #2babc2); }
+
+/* Text boxes: rich text (b, i, u, strike, highlighted spans). */
+.mk-boxes { z-index: 2; pointer-events: none; }
+.mk-boxes .mk-box { pointer-events: auto; }
+.mk-box { position: absolute; white-space: pre; background: transparent; border: 0; outline: none; min-width: 1ch; cursor: move; padding: 0; margin: 0;
+  font-weight: 400; font-style: normal; -webkit-user-select: none; user-select: none; }
+.mk-box.on, .mk-box.editing { outline: 1px dashed #2babc2; outline-offset: 2px; } /* only on screen; never in the saved file */
+.mk[data-tool="text"] .mk-box { cursor: text; }
+.mk .mk-box.editing { cursor: text; -webkit-user-select: text; user-select: text; touch-action: auto; }
+
+/* pdf.js text layer: invisible text over the page, selectable only with the Highlight tool. */
+.textLayer { position: absolute; inset: 0; overflow: hidden; line-height: 1; opacity: 1; pointer-events: none; text-size-adjust: none; forced-color-adjust: none; transform-origin: 0 0; z-index: 1; }
+.textLayer span, .textLayer br { color: transparent; position: absolute; white-space: pre; cursor: text; transform-origin: 0% 0%; }
+.textLayer ::selection { background: rgba(255, 225, 77, .6); }
+.mk[data-tool="highlight"] .textLayer { pointer-events: auto; z-index: 3; }
+/* With the Highlight tool, text boxes sit above the text layer and their letters can be selected and highlighted. */
+.mk[data-tool="highlight"] .mk-boxes { z-index: 4; }
+.mk[data-tool="highlight"] .mk-box { cursor: text; -webkit-user-select: text; user-select: text; touch-action: auto; }
+.mk[data-tool="pen"] .mk-page, .mk[data-tool="line"] .mk-page, .mk[data-tool="arrow"] .mk-page, .mk[data-tool="rect"] .mk-page { cursor: crosshair; }
+.mk[data-tool="text"] .mk-page { cursor: text; }
+
+/* The editor page in the Feedback site (v2.12, views/markup.js). */
+.markup-page .mk-head { display: flex; flex-wrap: wrap; align-items: center; gap: 10px 16px; margin-bottom: 14px; padding: 14px 18px; }
+.markup-page .mk-head .grow { display: flex; flex-direction: column; gap: 2px; min-width: 0; flex: 1; }
+.markup-page .mk-head b { overflow-wrap: anywhere; }
+.markup-page .mk-head .actions { display: flex; flex-wrap: wrap; gap: 8px; }
+.markup-page .mk-root { height: calc(100dvh - var(--chrome-h, 120px) - 150px); min-height: 440px; border-radius: 14px; overflow: hidden; }
+.markup-page .mk-root:has(.mk-steps) { height: auto; min-height: 0; overflow: visible; }
+.mk-steps ol { margin: 0 0 12px; padding-left: 22px; line-height: 1.6; }
+.mk-steps li + li { margin-top: 10px; }
+.notice.orange { align-items: center; flex-wrap: wrap; background: rgba(255, 159, 10, .12); border: 1px solid rgba(255, 159, 10, .4); }
+.notice .grow { flex: 1; min-width: 200px; }
+.mk-steps { padding: 18px 22px; }
+.mk-steps .ic { vertical-align: -2px; }
+.mk-lock { display: flex; gap: 6px; align-items: center; }
+
+/* Edit text (v3): the original paragraph is covered with the page's own colour while it is being replaced. */
+.mk-cover { position: absolute; pointer-events: none; }
+.mk[data-tool="edit"] .mk-page { cursor: text; }
+.mk-box.mk-over { outline: 2px dashed #d97706; outline-offset: 2px; }
+/* Edit text caution: a line in the tool bar while the tool is on (no pop-up). */
+.mk-caution { display: none; flex-basis: 100%; align-items: center; gap: 8px; margin: 4px 0 0; padding: 6px 10px; border-radius: 10px; background: rgba(217, 119, 6, .12); color: #92400e; font-size: 13px; line-height: 1.4; }
+.mk-caution svg { flex: none; }
+.mk[data-tool="edit"] .mk-caution { display: flex; }
+:root[data-mode="dark"] .mk-caution { color: #fcd34d; background: rgba(251, 191, 36, .14); }
+@media (prefers-color-scheme: dark) { :root:not([data-mode="light"]) .mk-caution { color: #fcd34d; background: rgba(251, 191, 36, .14); } }

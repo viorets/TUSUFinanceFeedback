@@ -1,0 +1,94 @@
+/* View tools shared by the PDF, Excel and Word editors (js/view-tools.js): zoom control, icon buttons, HEX field. */
+.vt-zoom { display: inline-grid; grid-template-columns: 40px minmax(56px, 1fr) 40px; gap: 4px; }
+.vt-acts { display: inline-grid; grid-auto-flow: column; grid-auto-columns: 40px; gap: 4px; }
+/* Download format menu (Excel): opens under the bar's Download button, also in full screen. */
+.vt-menu { position: fixed; z-index: 1000; display: grid; min-width: 220px; padding: 6px; border-radius: 12px; }
+.vt-menu[hidden] { display: none; }
+/* Tips and shortcuts ("?" button, js/view-tools.js helpPop). */
+.vt-help { position: fixed; z-index: 1000; box-sizing: border-box; width: min(340px, calc(100vw - 16px)); max-height: min(70vh, 520px); overflow-y: auto; padding: 14px 16px; border-radius: 12px; color: var(--ink); font-size: 14px; line-height: 1.5; box-shadow: 0 8px 24px rgba(0, 0, 0, .18); outline: none; }
+.vt-help[hidden] { display: none; }
+.vt-help h3 { margin: 0 0 8px; font-size: 15px; }
+.vt-help ul { margin: 0; padding-left: 18px; }
+.vt-help li { margin: 0 0 6px; }
+.vt-help kbd { padding: 0 4px; border: 1px solid var(--border-strong); border-radius: 4px; font: 12px ui-monospace, Menlo, Consolas, monospace; background: var(--surface); }
+.vt-menu button { min-height: 40px; padding: 6px 12px; border: 0; border-radius: 8px; background: none; color: var(--ink); font: inherit; font-size: 14px; text-align: left; cursor: pointer; }
+.vt-menu button:hover, .vt-menu button:focus-visible { background: var(--tint); }
+.vt-menu small { display: block; color: var(--ink-2); font-size: 12px; }
+.vt-zoom button, .vt-acts button { min-width: 40px; min-height: 40px; padding: 0; border: 0; border-radius: 10px; font: inherit; font-size: 16px;
+  font-variant-numeric: tabular-nums; color: var(--ink); background: var(--tint); cursor: pointer; }
+.vt-zoom .vt-zpct { font-size: 13px; }
+.vt-ic { display: inline-flex; align-items: center; justify-content: center; }
+.vt-zoom button:disabled, .vt-acts button:disabled { opacity: .4; cursor: default; }
+.vt-zoom button:focus-visible, .vt-acts button:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+@media (hover: hover) { .vt-zoom button:hover:not(:disabled), .vt-acts button:hover:not(:disabled) { background: var(--border); } }
+
+/* Colour boxes can be scrubbed by dragging (js/hex-color.js): no page scrolling or pinch while a finger drags on one. */
+input[type="color"] { touch-action: none; }
+/* HEX field beside a colour box (js/hex-color.js). 16px so iPad Safari does not zoom in on focus. */
+.hex-in { box-sizing: border-box; width: 6.6em; min-width: 0; padding: 4px 6px; border: 1px solid var(--border-strong); border-radius: 6px; background: var(--surface);
+  color: var(--ink); font: 16px ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; text-transform: lowercase; }
+.hex-in[aria-invalid="true"] { border-color: var(--danger); background: var(--danger-tint); }
+
+/* Ribbon (js/ribbon.js): tabs, then the open tab's groups. Groups wrap onto more rows when the bar is narrow (iPad,
+   split screen), so every button stays in sight; nothing hides behind a sideways scroll. */
+.rb { min-width: 0; }
+.rb-tabs { display: flex; gap: 2px; margin-bottom: 4px; overflow-x: auto; scrollbar-width: none; }
+.rb-tab { flex: none; margin: 0; padding: 4px 12px; border: 0; border-radius: 8px; background: none; color: var(--ink-2); font: inherit; font-size: 13px; cursor: pointer; min-height: 30px; }
+.rb-tab[aria-selected="true"] { background: var(--primary); color: var(--on-primary); font-weight: 600; }
+.rb-tab:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+.rb-pan { display: flex; flex-wrap: wrap; align-items: stretch; row-gap: 6px; padding-bottom: 2px; }
+.rb-pan[hidden] { display: none; }
+.rb-grp { flex: none; display: flex; flex-direction: column; align-items: center; gap: 2px; padding: 0 8px; border-right: 1px solid var(--border); }
+.rb-grp:last-child { border-right: 0; }
+.rb-items { display: flex; align-items: center; gap: 3px; }
+.rb-glabel { font-size: 11px; color: var(--ink-2); line-height: 1; white-space: nowrap; }
+.rb-btn { display: inline-flex; align-items: center; justify-content: center; gap: 4px; min-width: 36px; height: 36px; margin: 0; padding: 0 6px; border: 0; border-radius: 8px;
+  background: none; color: var(--ink); font: inherit; font-size: 13px; cursor: pointer; }
+.rb-btn:hover:not(:disabled) { background: var(--tint); }
+.rb-btn[aria-pressed="true"] { background: var(--tint); box-shadow: inset 0 0 0 1px var(--border-strong); }
+.rb-btn:focus-visible, .rb-sel:focus-visible, .rb-in:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+.rb-btn:disabled { opacity: .4; cursor: default; }
+.rb-txt { white-space: nowrap; }
+.rb-sel, .rb-in { height: 34px; margin: 0; padding: 0 6px; border: 1px solid var(--border-strong); border-radius: 8px; background: var(--surface); color: var(--ink); font: inherit; font-size: 14px; }
+.rb-color { display: grid; grid-template: "icon hex" auto "box hex" auto / 30px auto; align-items: center; column-gap: 4px; margin: 0; color: var(--ink); cursor: pointer; }
+.rb-color > svg { grid-area: icon; justify-self: center; }
+.rb-color input[type="color"] { grid-area: box; width: 30px; height: 10px; padding: 0; border: 0; border-radius: 3px; cursor: pointer; }
+.rb-color .hex-in { grid-area: hex; width: 5.8em; height: 32px; padding: 2px 6px; }
+/* iPad: finger-sized, 16px text in fields (Safari zooms the page into anything smaller), and the zoom − / + buttons
+   give way to pinch, leaving the % button (back to 100%). */
+@media (pointer: coarse) {
+  .rb-btn { min-width: 40px; height: 40px; } .rb-sel, .rb-in { height: 40px; font-size: 16px; }
+  .vt-zoom { grid-template-columns: minmax(56px, auto); } .vt-zoom > [id$="-zout"], .vt-zoom > [id$="-zin"] { display: none; }
+}
+
+/* In an editor bar the ribbon's tabs share the top row with the view tools (zoom, draft, download, undo, full screen);
+   when both do not fit, the view tools move under the tabs (never over them). The open tab's groups get the whole
+   width below. */
+.xe-top, .de-top, .md-top { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 8px; min-width: 0; }
+:is(.xe-top, .de-top, .md-top) > .rb { display: contents; }
+:is(.xe-top, .de-top, .md-top) .rb-tabs { order: 0; flex: none; max-width: 100%; margin: 0; }
+:is(.xe-top, .de-top, .md-top) > .oe-tools { order: 1; margin-left: auto; flex-wrap: nowrap; }
+:is(.xe-top, .de-top, .md-top) .rb-pans { order: 2; flex: 1 0 100%; min-width: 0; }
+/* Clicking the open tab again folds the groups away (as in Office), leaving more of the sheet or page. */
+.rb.rb-min .rb-pans { display: none; }
+
+/* File tab (js/ribbon.js fileTab): set apart from the editing tabs, as in Office; "Saved 14:02" beside Save draft. */
+.rb-tab.rb-file { color: var(--primary); font-weight: 600; }
+.rb-tab.rb-file[aria-selected="true"] { color: var(--on-primary); }
+.rb-note { align-self: center; min-width: 0; padding: 0 4px; font-size: 12px; color: var(--ink-2); white-space: nowrap; font-variant-numeric: tabular-nums; }
+.rb-note:empty { display: none; }
+
+/* Alert window (js/view-tools.js noticeBox), after TUSUFinanceFeedback's Apple-style alert. */
+.vt-modal-back { position: fixed; inset: 0; z-index: 2000; display: grid; place-items: center; padding: 16px; background: rgba(0, 0, 0, .3); backdrop-filter: blur(4px); -webkit-backdrop-filter: blur(4px); }
+.vt-modal { box-sizing: border-box; width: 100%; max-width: 440px; max-height: calc(100dvh - 32px); overflow-y: auto; padding: 24px; border-radius: 20px; background: var(--surface); color: var(--ink); box-shadow: 0 24px 64px rgba(0, 0, 0, .22); }
+.vt-modal-ic { display: block; margin-bottom: 8px; color: #b45309; }
+.vt-modal h2 { margin: 0 0 8px; font-size: 18px; line-height: 1.35; }
+.vt-modal p { margin: 8px 0; color: var(--ink-2); font-size: 15px; line-height: 1.55; }
+.vt-modal ul { margin: 8px 0; padding-left: 20px; font-size: 15px; line-height: 1.55; }
+.vt-modal-acts { display: flex; flex-wrap: wrap; gap: 10px; justify-content: flex-end; margin-top: 20px; }
+.vt-modal-btn { min-height: 44px; padding: 0 18px; border: 1px solid var(--border); border-radius: 12px; background: var(--surface-2); color: var(--ink); font: inherit; font-weight: 600; cursor: pointer; }
+.vt-modal-btn.primary { border-color: transparent; background: var(--primary); color: var(--on-primary); }
+.vt-modal-btn:hover { filter: brightness(.96); }
+.vt-modal-btn:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+@media (prefers-color-scheme: dark) { :root:not([data-mode="light"]) .vt-modal-ic { color: #fbbf24; } }
+:root[data-mode="dark"] .vt-modal-ic { color: #fbbf24; }
