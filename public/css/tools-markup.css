@@ -110,5 +110,10 @@
 .mk-caution { display: none; flex-basis: 100%; align-items: center; gap: 8px; margin: 4px 0 0; padding: 6px 10px; border-radius: 10px; background: rgba(217, 119, 6, .12); color: #92400e; font-size: 13px; line-height: 1.4; }
 .mk-caution svg { flex: none; }
 .mk[data-tool="edit"] .mk-caution { display: flex; }
+/* Edit text: Edit / Markup (what new text looks like), beside the caution line */
+.mk-emode { display: none; padding: 3px; border-radius: 980px; background: var(--tint, rgba(43, 171, 194, .12)); }
+.mk[data-tool="edit"] .mk-emode { display: inline-flex; }
+.mk-bar .mk-emode button { background: none; min-height: 34px; padding: 4px 14px; }
+.mk-bar .mk-emode button[aria-pressed="true"] { background: var(--primary, #006371); color: var(--on-primary, #fff); }
 :root[data-mode="dark"] .mk-caution { color: #fcd34d; background: rgba(251, 191, 36, .14); }
 @media (prefers-color-scheme: dark) { :root:not([data-mode="light"]) .mk-caution { color: #fcd34d; background: rgba(251, 191, 36, .14); } }

@@ -101,6 +101,7 @@ function styleRange(runs, a, z, patch) {
 function runNode(r) {
   let n = document.createTextNode(r.t);
   const wrap = (tag) => { const e = document.createElement(tag); e.append(n); n = e; return e; };
+  if (r.c) wrap('span').style.color = r.c; // a colour of its own (Markup typing in Edit text)
   if (r.hl) wrap('span').style.backgroundColor = rgba(r.hl, r.ha ?? HL_OPACITY);
   if (r.s) wrap('strike');
   if (r.u) wrap('u');
@@ -112,6 +113,7 @@ function runNode(r) {
 function styleOf(el, box) {
   const r = {}; const cs = getComputedStyle(el);
   if (cs.fontWeight === 'bold' || parseInt(cs.fontWeight, 10) >= 600) r.b = 1;
+  if (el !== box && cs.color !== getComputedStyle(box).color) { const p = parseColor(cs.color); if (p) r.c = p.hex; } // not the box's own colour
   if (/italic|oblique/.test(cs.fontStyle)) r.i = 1;
   let bg = false;
   for (let e = el; e && e !== box; e = e.parentElement) {
@@ -179,6 +181,7 @@ export async function openPdfEditor(root, { bytes, name, draft = null, t = (en) 
       </div>
       <span class="mk-grow"></span>
       ${viewBar('mk', t, { open: true, help: true })}${iconBtn('mk-reset', t('Reset edits: remove every mark (Undo brings them back)', 'ล้างการแก้ไข: ลบเครื่องหมายทั้งหมด (เลิกทำเพื่อนำกลับมา)'), RESET_ICON)}
+      <span class="mk-emode" role="group" aria-label="${t('New text in Edit text', 'ข้อความใหม่ในการแก้ข้อความ')}"><button type="button" data-emode="edit" title="${t('New text takes the format of the paragraph', 'ข้อความใหม่ใช้รูปแบบเดิมของย่อหน้า')}">${t('Edit', 'แก้ไข')}</button><button type="button" data-emode="markup" title="${t('New text takes your text colour, so the changes stand out', 'ข้อความใหม่ใช้สีข้อความของคุณ ให้เห็นการแก้ไขชัด')}">${t('Markup', 'มาร์กอัป')}</button></span>
       <p class="mk-caution" role="note"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 9v4M12 17h.01"/><path d="M10.3 3.9 1.8 18a2 2 0 0 0 1.7 3h17a2 2 0 0 0 1.7-3L13.7 3.9a2 2 0 0 0-3.4 0z"/></svg><span>${t('Edit text: the text below an edit does not move. A longer edit can overlap it (amber outline); a shorter one leaves a gap.', 'แก้ข้อความ: ข้อความด้านล่างจะไม่เลื่อนตาม ถ้าแก้ให้ยาวขึ้นอาจทับข้อความด้านล่าง (กรอบสีส้ม) ถ้าสั้นลงจะเหลือช่องว่าง')}</span></p>
     </div><div class="mk-pages" id="mk-pages"><p class="mk-wait">${t('Loading…', 'กำลังโหลด…')}</p></div></div>`;
   const [pdfjs, PDFLib] = await loadLibs();
@@ -198,6 +201,7 @@ export async function openPdfEditor(root, { bytes, name, draft = null, t = (en) 
     tool: 'select', width: 2, textColor: defaults.textColor || TEXT.color, shapeColor: defaults.shapeColor || TEXT.color,
     hlColor: HIGHLIGHT, hlOpacity: HL_OPACITY, font: font0, size: textSize, zoom: 1,
     marks: draft ? structuredClone(draft) : [], undo: [], redo: [], sel: null, dirty: false,
+    markup: (() => { try { return localStorage.getItem('mk-edit-markup') === '1'; } catch { return false; } })(), // Edit text: Markup or Edit
   };
   const pages = []; // { el, canvas, hls, svg, boxes, text, page, base, fit, scale, w, h, gen, done, near, task }
   const avail = () => Math.max(280, pagesEl.clientWidth - 32);
@@ -391,6 +395,11 @@ export async function openPdfEditor(root, { bytes, name, draft = null, t = (en) 
     paint();
   };
   $('.mk-tools').onclick = (e) => { const b = e.target.closest('button[data-tool]'); if (b) setTool(b.dataset.tool); };
+  // Edit text: Edit (new text in the paragraph's own format) or Markup (new text in your text colour); kept in this browser
+  const showEmode = () => root.querySelectorAll('[data-emode]').forEach((b) => b.setAttribute('aria-pressed', String((b.dataset.emode === 'markup') === st.markup)));
+  root.querySelector('.mk-emode').onclick = (e) => { const b = e.target.closest('[data-emode]'); if (!b) return; st.markup = b.dataset.emode === 'markup'; try { localStorage.setItem('mk-edit-markup', st.markup ? '1' : '0'); } catch { /* not kept */ } showEmode(); };
+  root.querySelector('.mk-emode').addEventListener('pointerdown', (e) => e.preventDefault()); // keep the caret in the edit
+  showEmode();
   // A slider or colour drag on a picked mark is one undo step.
   let tweakId = null;
   const tweak = (m, f) => { if (tweakId !== m.id) { snapshot(); tweakId = m.id; } f(m); changed(); };
@@ -657,6 +666,11 @@ export async function openPdfEditor(root, { bytes, name, draft = null, t = (en) 
     };
     b.onpaste = (e) => { e.preventDefault(); exec('insertText', e.clipboardData?.getData('text/plain') || ''); };
     b.oninput = (e) => { if (e.inputType === 'insertText' && e.data === '>') arrowize(); updateFmt(); };
+    // Markup (Edit text): what is typed into a paragraph of the PDF takes your text colour; Edit keeps the paragraph's
+    b.onbeforeinput = (e) => {
+      if (!m.cover || !st.markup || !/^insert(Text|CompositionText|FromPaste|ReplacementText)$/.test(e.inputType)) return;
+      if (getSelection().isCollapsed) exec('foreColor', st.textColor);
+    };
     b.onblur = () => {
       b.onblur = null; b.classList.remove('editing'); b.contentEditable = 'false';
       m.runs = readRuns(b); m.text = m.runs.map((x) => x.t).join('');
@@ -832,9 +846,9 @@ async function textPng(m) {
   c.width = Math.ceil(W); c.height = Math.ceil(lh * lines.length + 2 * pad);
   const top = (i) => pad + i * lh + (lh - asc - desc) / 2; // top of the font box on line i
   lay.forEach((l, i) => l.forEach(({ r, x, w }) => { if (r.hl) { ctx.fillStyle = rgba(r.hl, r.ha ?? HL_OPACITY); ctx.fillRect(x, top(i), w, asc + desc); } }));
-  ctx.textBaseline = 'alphabetic'; ctx.fillStyle = m.color; const th = Math.max(k, px / 14);
+  ctx.textBaseline = 'alphabetic'; const th = Math.max(k, px / 14);
   lay.forEach((l, i) => l.forEach(({ r, x, w }) => {
-    const base = top(i) + asc; ctx.font = fontFor(r); ctx.fillText(r.t, x, base);
+    ctx.fillStyle = r.c || m.color; const base = top(i) + asc; ctx.font = fontFor(r); ctx.fillText(r.t, x, base);
     if (r.u) ctx.fillRect(x, base + px * 0.1, w, th);
     if (r.s) ctx.fillRect(x, base - px * 0.3, w, th);
   }));

@@ -134,12 +134,13 @@ export async function textWriter(pdf, PDFLib) {
         let cx = x;
         for (const part of await coverage(r.t, family, STYLE(r))) {
           ctx.font = css(r); const pw = ctx.measureText(part.t).width;
-          await place(pg, part.f, part.t, at(cx, base), size, color, PDFLib);
+          await place(pg, part.f, part.t, at(cx, base), size, r.c ? hexRgb(r.c) : color, PDFLib); // a run's own colour (Markup typing)
           cx += pw;
         }
         const th = Math.max(0.5, size / 14);
-        if (r.u) { const p = at(x, base + size * 0.1); pg.drawRectangle({ x: p.x, y: p.y - th, width: w, height: th, color: rgbOf(PDFLib, color) }); }
-        if (r.s) { const p = at(x, base - size * 0.3); pg.drawRectangle({ x: p.x, y: p.y - th, width: w, height: th, color: rgbOf(PDFLib, color) }); }
+        const rc = r.c ? hexRgb(r.c) : color;
+        if (r.u) { const p = at(x, base + size * 0.1); pg.drawRectangle({ x: p.x, y: p.y - th, width: w, height: th, color: rgbOf(PDFLib, rc) }); }
+        if (r.s) { const p = at(x, base - size * 0.3); pg.drawRectangle({ x: p.x, y: p.y - th, width: w, height: th, color: rgbOf(PDFLib, rc) }); }
         x += w;
       }
     }

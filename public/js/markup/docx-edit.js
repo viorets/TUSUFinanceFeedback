@@ -6,7 +6,9 @@
 // feedback colour (TYPED, v2.16.4), and it is written into the file as it is typed, so it shows in that colour at once.
 // The toolbar sets the font, size and colour of selected text, and adds text boxes, lines and arrows (Word shapes);
 // shapes and text boxes already in the file are shown, can be moved or deleted, and their text edited.
-// Headers and footers are not shown.
+// The text is shown in pages with each page's header and footer (typing there keeps the file's format), and page
+// numbers can be added (Word fields). New text: Markup (the feedback colour, TYPED) or Edit (the format of the text
+// before it). Pages, headers and footers and page numbers come from TUSU Finance Team Tools' Word editor.
 const JSZIP = 'https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js';
 const W = 'http://schemas.openxmlformats.org/wordprocessingml/2006/main';
 const A = 'http://schemas.openxmlformats.org/drawingml/2006/main';
@@ -249,12 +251,12 @@ export async function openDocxEditor(root, bytes, { t = (en) => en } = {}) {
 
   const items = []; // { p, div, text }: one per paragraph shown
   const divOf = new Map(); // w:p -> its div
-  function image(drawing) {
+  function image(drawing, relMap = rels) {
     const span = document.createElement('span'); span.className = 'de-img'; span.contentEditable = 'false';
     const ext = drawing.getElementsByTagNameNS(WP, 'extent')[0];
     const w = +ext?.getAttribute('cx') / EMU || 0; const h = +ext?.getAttribute('cy') / EMU || 0;
     const rid = drawing.getElementsByTagNameNS(A, 'blip')[0]?.getAttributeNS(R, 'embed');
-    const file = rid && rels[rid] && zip.file(rels[rid]);
+    const file = rid && relMap[rid] && zip.file(relMap[rid]);
     if (!file) return span;
     const img = document.createElement('img'); img.alt = ''; if (w) { img.width = w; img.height = h; }
     file.async('blob').then((b) => { img.src = URL.createObjectURL(b); });
@@ -551,6 +553,12 @@ export async function openDocxEditor(root, bytes, { t = (en) => en } = {}) {
         <button type="button" id="de-redo" disabled title="${t('Redo (Ctrl+Y)', 'ทำซ้ำ (Ctrl+Y)')}">${t('Redo', 'ทำซ้ำ')}</button>
         <button type="button" id="de-reset" title="${t('Back to the file as it opened: every edit, text box, line and arrow goes (Undo brings them back)', 'กลับไปเป็นไฟล์ตอนเปิด: ลบการแก้ไข กล่องข้อความ เส้น และลูกศรทั้งหมด (เลิกทำเพื่อนำกลับมา)')}">${t('Reset edits', 'ล้างการแก้ไข')}</button>
       </div>
+      <div class="de-group de-emode" role="group" aria-label="${t('New text', 'ข้อความใหม่')}"><span class="de-cap" aria-hidden="true">${t('New text:', 'ข้อความใหม่:')}</span>
+        <button type="button" data-emode="markup" aria-pressed="true" title="${t('Typed text in the feedback colour', 'ข้อความที่พิมพ์เป็นสีความเห็น')}">${t('Markup', 'มาร์กอัป')}</button><button type="button" data-emode="edit" aria-pressed="false" title="${t('Typed text takes the format of the text before it', 'ข้อความที่พิมพ์ใช้รูปแบบของข้อความก่อนหน้า')}">${t('Edit', 'แก้ไข')}</button>
+      </div>
+      <div class="de-group" role="group" aria-label="${t('Page', 'หน้า')}">
+        <button type="button" id="de-hf" aria-pressed="false" title="${t('Type in the headers and footers', 'พิมพ์ในหัวกระดาษและท้ายกระดาษ')}">${t('Header & footer', 'หัว/ท้ายกระดาษ')}</button><button type="button" id="de-pn" title="${t('Page numbers: format, first number, start and stop page', 'เลขหน้า: รูปแบบ เลขแรก หน้าเริ่มและหน้าสุดท้าย')}">${t('Page numbers', 'เลขหน้า')}</button>
+      </div>
       <span class="oe-note" id="de-note">${EDIT_NOTE}</span>
     </div><div class="oe-scroll de-doc"></div></div>`;
   const $ = (id) => root.querySelector(`#${id}`);
@@ -561,6 +569,7 @@ export async function openDocxEditor(root, bytes, { t = (en) => en } = {}) {
   const lineColor = () => pen.color;
   const lineWidth = () => pen.width;
   const note = (text) => { $('de-note').textContent = text; };
+  let markup = (() => { try { return localStorage.getItem('fb-de-markup') !== '0'; } catch { return true; } })(); // typed text in TYPED (Markup) or not (Edit)
   const capture = document.createElement('div'); capture.className = 'de-capture';
   page.append(layer, capture);
   // Fit to width: on a screen narrower than the page, the page is scaled down (pointer and layout measures are
@@ -623,7 +632,7 @@ export async function openDocxEditor(root, bytes, { t = (en) => en } = {}) {
   function commit(i) {
     const it = items[i]; const text = textOf(it.div);
     const typed = setText(it.p, text);
-    if (!it.div.closest('.de-shape')) for (const [s, e] of typed) for (const run of isolate(it.p, s, e)) SET.color(TYPED)(rPrOf(run));
+    if (markup && !it.div.closest('.de-shape')) for (const [s, e] of typed) for (const run of isolate(it.p, s, e)) SET.color(TYPED)(rPrOf(run));
     mergeRuns(it.p);
     pieces.set(it.p, collect(it.p));
     it.text = text; dirty = true;
@@ -646,7 +655,7 @@ export async function openDocxEditor(root, bytes, { t = (en) => en } = {}) {
     const scroller = root.querySelector('.de-doc'); const top = scroller.scrollTop;
     select(null); saved = null;
     items.length = 0; divOf.clear(); shapes.length = 0; shapeOf.clear(); counters.clear(); scanPieces();
-    page.replaceChildren(); layer.replaceChildren(); renderBlock(body, page); page.append(layer, capture);
+    page.replaceChildren(); layer.replaceChildren(); renderBlock(body, page); page.append(layer, capture); pagedLayers();
     items.forEach((it) => { it.text = textOf(it.div); }); shapes.forEach(draw);
     scroller.scrollTop = top; dirty = true; undoButtons();
   }
@@ -952,6 +961,371 @@ export async function openDocxEditor(root, bytes, { t = (en) => en } = {}) {
     return { keep, ins };
   }
 
+  // ---------- pages, headers and footers, page numbers (from TUSU Finance Team Tools' Word editor) ----------
+  // The text is laid out in pages as Word does it, block by block: a paragraph or a table row that would cross the
+  // bottom margin moves to the next page (with a transform, so typing into the file is untouched); page breaks, "page
+  // break before" and section breaks start a new page. The pages are drawn behind the text, inside the page element
+  // (so the fit-to-width scale applies to them too). Each page shows its section's header and footer, with PAGE,
+  // NUMPAGES, IF and = fields worked out per page. Typing in a header or footer keeps the file's format.
+  const GAP = 24; const W15 = (tw) => tw / 15;
+  const secSz = () => kid(kid(body, 'sectPr'), 'pgSz');
+  const PW = W15(+attr(secSz(), 'w') || 11906); const PG = W15(+attr(secSz(), 'h') || 16838);
+  const frames = document.createElement('div'); frames.className = 'de-frames'; frames.setAttribute('aria-hidden', 'true');
+  const hfLayer = document.createElement('div'); hfLayer.className = 'de-hfl';
+  page.classList.add('de-paged');
+  let pgT = 0; // the next layout of the pages, after a pause
+  function pagedLayers() { page.prepend(frames); page.append(hfLayer); schedulePaginate(); } // also after Undo redraws the page
+  pagedLayers();
+  const settingsXml = await text('word/settings.xml');
+  const evenOdd = /<w:evenAndOddHeaders(?![^>]*w:val="(?:0|false|off)")/.test(settingsXml || '');
+  let relsXml = await zip.file('word/_rels/document.xml.rels')?.async('string') || '<?xml version="1.0" encoding="UTF-8" standalone="yes"?><Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"></Relationships>';
+  let relsChanged = false;
+  function addRel(type, target) {
+    const ids = [...relsXml.matchAll(/Id="rId(\d+)"/g)].map((m) => +m[1]); const id = `rId${Math.max(0, ...ids) + 1}`;
+    relsXml = relsXml.replace('</Relationships>', `<Relationship Id="${id}" Type="${type}" Target="${target}"/></Relationships>`); relsChanged = true; return id;
+  }
+  async function addContentType(partName, type) {
+    let ct = await zip.file('[Content_Types].xml').async('string'); if (ct.includes(`PartName="${partName}"`)) return;
+    zip.file('[Content_Types].xml', ct.replace('</Types>', `<Override PartName="${partName}" ContentType="${type}"/></Types>`));
+  }
+  const relMap = (s) => {
+    const out = {};
+    for (const m of (s || '').matchAll(/<Relationship\b[^>]*>/g)) {
+      const id = /Id="([^"]+)"/.exec(m[0])?.[1]; const tg = /Target="([^"]+)"/.exec(m[0])?.[1];
+      if (id && tg && !/TargetMode="External"/.test(m[0])) out[id] = tg.startsWith('/') ? tg.slice(1) : `word/${tg}`.replace(/[^/]+\/\.\.\//g, '');
+    }
+    return out;
+  };
+  const parts = new Map(); // zip path -> { path, doc, root, rels, dirty }
+  async function loadPart(path) {
+    if (!path) return null; if (parts.has(path)) return parts.get(path);
+    const s = await zip.file(path)?.async('string'); if (!s) return null;
+    const doc = parse(s);
+    const part = { path, doc, root: doc.documentElement, rels: relMap(await zip.file(path.replace(/([^/]+)$/, '_rels/$1.rels'))?.async('string')), dirty: false };
+    parts.set(path, part); return part;
+  }
+
+  // Fields in a header or footer paragraph (complex and simple, nested); the text inside a field is its last result.
+  function hfSegments(p) {
+    const segs = []; const stack = []; const own = [];
+    const run = (r) => {
+      for (const c of r.children) {
+        if (c.namespaceURI !== W) continue;
+        if (c.localName === 'fldChar') {
+          const ty = attr(c, 'fldCharType');
+          if (ty === 'begin') stack.push({ code: [], res: '', phase: 'code', r, start: r });
+          else if (ty === 'separate') { if (stack.length) stack.at(-1).phase = 'res'; }
+          else if (ty === 'end') { const f = stack.pop(); if (!f) continue; f.stop = r; if (stack.length) { if (stack.at(-1).phase === 'code') stack.at(-1).code.push(f); } else segs.push({ f }); }
+        } else if (c.localName === 'instrText') { if (stack.at(-1)?.phase === 'code') stack.at(-1).code.push(c.textContent); }
+        else if (isPiece(c)) { if (stack.length) { if (stack.length === 1 && stack[0].phase === 'res') stack[0].res += pieceText(c); } else { segs.push({ el: c, r }); own.push(c); } }
+        else if (c.localName === 'drawing' && !stack.length) segs.push({ img: c, r });
+      }
+    };
+    const visit = (el) => {
+      for (const c of el.children) {
+        if (c.namespaceURI !== W) continue;
+        if (c.localName === 'r') run(c);
+        else if (c.localName === 'fldSimple') {
+          const f = { code: [attr(c, 'instr') || ''], res: [...c.getElementsByTagNameNS(W, 't')].map((x) => x.textContent).join(''), r: c.getElementsByTagNameNS(W, 'r')[0] || null, start: c, stop: c };
+          if (stack.length) { if (stack.at(-1).phase === 'code') stack.at(-1).code.push(f); } else segs.push({ f });
+        } else if (['hyperlink', 'ins', 'smartTag', 'sdt', 'sdtContent', 'customXml'].includes(c.localName)) visit(c);
+      }
+    };
+    visit(p); return { segs, pieces: own };
+  }
+  const FMT_SWITCH = { roman: 'lowerRoman', ROMAN: 'upperRoman', alphabetic: 'lowerLetter', ALPHABETIC: 'upperLetter', arabic: 'decimal', thaiarabic: 'thaiNumbers', thailetter: 'thaiLetters' };
+  function calc(s) {
+    const tk = s.match(/\d+(?:\.\d+)?|[-+*/()]/g) || []; let i = 0;
+    const prim = () => { const x = tk[i++]; if (x === '(') { const v = sum(); i++; return v; } if (x === '-') return -prim(); if (x === '+') return prim(); return x == null ? NaN : +x; };
+    const prod = () => { let v = prim(); while (tk[i] === '*' || tk[i] === '/') { const o = tk[i++]; const w = prim(); v = o === '*' ? v * w : v / w; } return v; };
+    const sum = () => { let v = prod(); while (tk[i] === '+' || tk[i] === '-') { const o = tk[i++]; const w = prod(); v = o === '+' ? v + w : v - w; } return v; };
+    const v = sum(); return Number.isFinite(v) ? v : null;
+  }
+  function ifValue(s) {
+    const tk = [...s.matchAll(/"([^"]*)"|(<=|>=|<>|=|<|>)|([^\s"<>=]+)/g)].map((m) => (m[1] != null ? { s: m[1] } : m[2] ? { op: m[2] } : { s: m[3] }));
+    const [a, op, b, yes, no] = tk; if (!a || !op?.op || !b) return '';
+    const nx = +a.s; const ny = +b.s; const num = a.s !== '' && b.s !== '' && !Number.isNaN(nx) && !Number.isNaN(ny);
+    const c = num ? nx - ny : a.s.localeCompare(b.s);
+    const ok = { '=': c === 0, '<>': c !== 0, '<': c < 0, '>': c > 0, '<=': c <= 0, '>=': c >= 0 }[op.op];
+    return (ok ? yes?.s : no?.s) ?? '';
+  }
+  function fieldValue(f, ctx) {
+    const code = f.code.map((x) => (typeof x === 'string' ? x : fieldValue(x, ctx))).join('').trim();
+    const sw = /\\\*\s*(\w+)/.exec(code); const fmt = (d) => (sw ? FMT_SWITCH[sw[1]] || FMT_SWITCH[sw[1].toLowerCase()] || d : d);
+    const bodyCode = code.replace(/\\[*#@!]\s*("[^"]*"|\S+)?/g, '').trim(); const name = (/^\S+/.exec(bodyCode)?.[0] || '').toUpperCase();
+    if (name === 'PAGE') return formatNumber(ctx.num, fmt(ctx.fmt));
+    if (name === 'NUMPAGES' || name === 'SECTIONPAGES') return formatNumber(ctx.pages, fmt('decimal'));
+    if (name.startsWith('=')) { const v = calc(bodyCode.slice(1)); return v == null ? '' : formatNumber(Math.round(v), fmt('decimal')); }
+    if (name === 'IF') return ifValue(bodyCode.slice(2));
+    return f.res;
+  }
+  function renderHfPara(p, ctx, part, list) {
+    const { p: pp, r: pr } = st.para(p);
+    const div = document.createElement('div'); div.className = 'de-hp'; div.dataset.j = list.push(p) - 1;
+    div.style.cssText = `${runCss(pr, false)};${paraCss(pp)}`;
+    for (const sg of hfSegments(p).segs) {
+      const rp = sg.r?.localName === 'r' ? st.run(sg.r, pr) : sg.f?.r ? st.run(sg.f.r, pr) : pr;
+      if (sg.f) { const s = document.createElement('span'); s.className = 'de-fld'; s.contentEditable = 'false'; s.textContent = fieldValue(sg.f, ctx); s.style.cssText = runCss(rp, THAI.test(s.textContent)); div.append(s); continue; }
+      if (sg.img) { const im = image(sg.img, part.rels); im.contentEditable = 'false'; div.append(im); continue; }
+      const tx = pieceText(sg.el);
+      if (tx === '\n') { div.append(document.createElement('br')); continue; }
+      const s = document.createElement('span'); s.style.cssText = runCss(rp, THAI.test(tx)); s.textContent = tx; div.append(s);
+    }
+    if (!div.childNodes.length) div.append(document.createElement('br'));
+    return div;
+  }
+  function renderHf(el, ctx, part, list, into) {
+    for (const c of el.children) {
+      if (c.namespaceURI !== W) continue;
+      if (c.localName === 'p') into.append(renderHfPara(c, ctx, part, list));
+      else if (c.localName === 'tbl') {
+        const tb = document.createElement('table'); tb.className = `de-tbl${st.tableBorders(c) ? ' de-borders' : ''}`; tb.style.width = '100%';
+        for (const tr of kids(c, 'tr')) { const row = tb.insertRow(); for (const tc of kids(tr, 'tc')) { const td = row.insertCell(); const w = kid(kid(tc, 'tcPr'), 'tcW'); if (attr(w, 'type') === 'dxa') td.style.width = `${W15(+attr(w, 'w'))}px`; renderHf(tc, ctx, part, list, td); } }
+        into.append(tb);
+      } else if (c.localName === 'sdt') renderHf(kid(c, 'sdtContent') || c, ctx, part, list, into);
+    }
+  }
+
+  // Sections, from the blocks on the page: a paragraph holding a sectPr ends its section; the body's ends the last.
+  const xmlOf = (el) => (el.classList.contains('de-p') ? items[+el.dataset.i]?.p : null);
+  function sections() {
+    const blocks = []; const sps = []; let s = 0;
+    for (const el of page.children) {
+      if (!el.classList.contains('de-p') && !el.classList.contains('de-tbl')) continue;
+      blocks.push({ el, sec: s });
+      const sp = el.classList.contains('de-p') && kid(kid(xmlOf(el), 'pPr'), 'sectPr'); if (sp) { sps.push(sp); s++; }
+    }
+    sps.push(kid(body, 'sectPr'));
+    const secs = [];
+    sps.forEach((sp, i) => {
+      const prev = secs[i - 1]; const mar = kid(sp, 'pgMar');
+      const refs = (tag) => { const o = { ...(prev?.[tag] || {}) }; for (const r of kids(sp, `${tag}Reference`)) o[attr(r, 'type') || 'default'] = rels[r.getAttributeNS(R, 'id')] || null; return o; };
+      const pn = kid(sp, 'pgNumType'); const tp = kid(sp, 'titlePg');
+      secs.push({ sp, header: refs('header'), footer: refs('footer'), titlePg: !!tp && on(tp), fmt: attr(pn, 'fmt') || 'decimal', start: attr(pn, 'start') != null ? +attr(pn, 'start') : null,
+        type: val(kid(sp, 'type')) || 'nextPage', top: W15(+attr(mar, 'top') || 1440), bottom: W15(+attr(mar, 'bottom') || 1440), hd: W15(+attr(mar, 'header') || 720), fd: W15(+attr(mar, 'footer') || 720),
+        left: W15(+attr(mar, 'left') || 1440), right: W15(+attr(mar, 'right') || 1440) });
+    });
+    return { blocks, secs };
+  }
+  function breaksOf(el) {
+    const p = el.classList.contains('de-p') && xmlOf(el); if (!p) return {};
+    const pbb = kid(kid(p, 'pPr'), 'pageBreakBefore');
+    return { before: !!pbb && on(pbb), after: [...p.getElementsByTagNameNS(W, 'br')].some((b) => attr(b, 'type') === 'page' && ancestor(b, 'p') === p) };
+  }
+  let pageList = []; let lastSecs = [];
+  function paginate() {
+    const { blocks, secs } = sections(); if (!blocks.length) return;
+    const units = [];
+    blocks.forEach(({ el, sec }, bi) => {
+      const newSec = bi > 0 && blocks[bi - 1].sec !== sec && secs[sec].type !== 'continuous';
+      const br = breaksOf(el);
+      if (el.tagName === 'TABLE') [...el.rows].forEach((tr, ri) => units.push({ el: tr, sec, force: ri === 0 && newSec }));
+      else units.push({ el, sec, force: newSec || br.before, after: br.after });
+    });
+    units.forEach((u) => { u.el.style.transform = ''; u.el.classList?.remove('de-pgtop'); });
+    const pr = page.getBoundingClientRect(); const z = pr.width / page.offsetWidth || 1;
+    const nat = units.map((u) => { const r = u.el.getBoundingClientRect(); return [(r.top - pr.top) / z, r.height / z]; });
+    const stride = PG + GAP; const cTop = (k, s) => k * stride + secs[s].top; const cBot = (k, s) => k * stride + PG - secs[s].bottom;
+    const pages = [{ sec: units[0].sec, used: false }]; let k = 0; let push = 0; let breakNext = false;
+    units.forEach((u, n) => {
+      let top = nat[n][0] + push; const h = nat[n][1];
+      const next = () => { k++; pages[k] = { sec: u.sec, used: false }; push += cTop(k, u.sec) - top; top = cTop(k, u.sec); };
+      if ((u.force || breakNext) && pages[k].used) next();
+      while (pages[k].used && top + h > cBot(k, pages[k].sec) + 0.5) next();
+      if (u.el.tagName === 'TR' && !pages[k].used && n && units[n - 1].el.parentElement === u.el.parentElement) u.el.classList.add('de-pgtop');
+      pages[k].used = true; breakNext = !!u.after;
+      if (push) u.el.style.transform = `translateY(${push}px)`;
+    });
+    let num = 0;
+    pages.forEach((pg, i) => {
+      const firstOfSec = i === 0 || pages[i - 1].sec !== pg.sec; const s = secs[pg.sec];
+      num = firstOfSec && s.start != null ? s.start : i === 0 ? 1 : num + 1;
+      Object.assign(pg, { num, fmt: s.fmt, first: firstOfSec });
+    });
+    pageList = pages; lastSecs = secs;
+    page.style.minHeight = `${pages.length * stride - GAP}px`;
+    frames.innerHTML = pages.map((_, i) => `<div class="de-pf" style="top:${i * stride}px;width:${PW}px;height:${PG}px"></div>`).join('');
+    drawHf(secs); layout();
+  }
+  function drawHf(secs) {
+    if (hfLayer.querySelector('.de-hfbox:focus')) return; // not while one is being typed in
+    const stride = PG + GAP; const total = pageList.length; const editing = page.classList.contains('de-hfedit');
+    hfLayer.replaceChildren();
+    pageList.forEach((pg, i) => {
+      const s = secs[pg.sec]; const type = pg.first && s.titlePg ? 'first' : evenOdd && pg.num % 2 === 0 ? 'even' : 'default';
+      for (const kind of ['header', 'footer']) {
+        const path = s[kind][type] ?? null;
+        const box = document.createElement('div'); box.className = `de-hfbox de-${kind}`; box.dataset.kind = kind; box.dataset.sec = pg.sec; box.dataset.type = type;
+        box.style.cssText = `left:${s.left}px;width:${PW - s.left - s.right}px;${kind === 'header' ? `top:${i * stride + s.hd}px` : `top:${i * stride + PG - s.fd}px;transform:translateY(-100%)`}`;
+        if (editing) { box.contentEditable = 'plaintext-only'; if (box.contentEditable !== 'plaintext-only') box.contentEditable = 'true'; }
+        box.setAttribute('aria-label', `${kind === 'header' ? t('Header', 'หัวกระดาษ') : t('Footer', 'ท้ายกระดาษ')}, ${t('page', 'หน้า')} ${i + 1}`);
+        const part = path && parts.get(path);
+        if (part) { box.dataset.path = path; const list = []; box._paras = list; renderHf(part.root, { num: pg.num, fmt: pg.fmt, pages: total }, part, list, box); }
+        hfLayer.append(box);
+      }
+    });
+  }
+  function schedulePaginate() { clearTimeout(pgT); pgT = setTimeout(() => requestAnimationFrame(paginate), 120); }
+  for (const path of Object.values(rels)) if (/\/(header|footer)\d*\.xml$/.test(path)) await loadPart(path);
+  document.fonts?.ready.then(paginate); paginate();
+  // the text changed (typing, Undo, Save redrawing a paragraph): lay the pages out again; not for the layers' own changes
+  new MutationObserver((ms) => { if (ms.some((m) => { const el = m.target.nodeType === 1 ? m.target : m.target.parentElement; return !el?.closest('.de-frames, .de-hfl, .de-layer'); })) schedulePaginate(); })
+    .observe(page, { childList: true, subtree: true, characterData: true });
+
+  // ---------- typing in headers and footers (their text keeps the file's format) ----------
+  const hfBtn = root.querySelector('#de-hf'); const pnBtn = root.querySelector('#de-pn');
+  function hfMode(onOff) {
+    page.classList.toggle('de-hfedit', onOff); hfBtn.setAttribute('aria-pressed', String(onOff));
+    hfBtn.textContent = onOff ? t('Close header & footer', 'ปิดหัว/ท้ายกระดาษ') : t('Header & footer', 'หัว/ท้ายกระดาษ');
+    paginate();
+    note(onOff ? t('Header & footer: type in them (the text keeps its format). Tap Close header & footer when done.', 'หัว/ท้ายกระดาษ: พิมพ์ได้เลย (ข้อความคงรูปแบบเดิม) แตะ ปิดหัว/ท้ายกระดาษ เมื่อเสร็จ') : EDIT_NOTE);
+  }
+  hfBtn.onclick = () => hfMode(!page.classList.contains('de-hfedit'));
+  hfLayer.addEventListener('keydown', (e) => { if (e.key === 'Escape') { e.preventDefault(); e.target.blur?.(); hfMode(false); } else if (e.key === 'Enter') { e.preventDefault(); document.execCommand('insertLineBreak'); } });
+  let hfBusy = Promise.resolve();
+  hfLayer.addEventListener('input', (e) => { const b = e.target.closest('.de-hfbox'); if (b) hfBusy = hfBusy.then(() => commitBox(b)).catch((err) => note(err.message)); });
+  hfLayer.addEventListener('focusout', (e) => { const b = e.target.closest?.('.de-hfbox'); if (b && !b.contains(e.relatedTarget)) setTimeout(() => { if (!hfLayer.querySelector('.de-hfbox:focus')) paginate(); }, 0); });
+  async function commitBox(b) {
+    let part = parts.get(b.dataset.path);
+    if (!part) { part = await newPart(b.dataset.kind, +b.dataset.sec, b.dataset.type); b.dataset.path = part.path; b._paras = [kid(part.root, 'p')]; }
+    const n = getSelection().anchorNode; const d = (n?.nodeType === 3 ? n.parentElement : n)?.closest?.('.de-hp');
+    const targets = d && b.contains(d) ? [[b._paras[+d.dataset.j], d]] : !b.querySelector('.de-hp') ? [[b._paras[0], b]] : [];
+    for (const [p, div] of targets) if (p) commitHfPara(p, div);
+    part.dirty = true; dirty = true;
+  }
+  function commitHfPara(p, div) {
+    const gaps = [[]];
+    const walk = (nd) => { for (const c of nd.childNodes) { if (c.nodeType === 3) gaps.at(-1).push(c.data.replace(/ /g, ' ')); else if (c.classList?.contains('de-fld')) gaps.push([]); else if (c.nodeName === 'BR') { if (!(c === nd.lastChild && nd === div)) gaps.at(-1).push('\n'); } else if (!c.classList?.contains('de-img')) walk(c); } };
+    walk(div);
+    const texts = gaps.map((g) => g.join(''));
+    const fileGaps = [[]]; const fields = [];
+    hfSegments(p).segs.forEach((s) => { if (s.f) { fields.push(s.f); fileGaps.push([]); } else if (s.el) fileGaps.at(-1).push(s.el); });
+    if (fileGaps.length !== texts.length) return;
+    texts.forEach((tx, i) => {
+      const els = fileGaps[i]; if (tx === els.map(pieceText).join('')) return;
+      if (els.length || !fields.length) { pieces.set(p, els); setText(p, tx); return; } // the file's format, not TYPED
+      const f = fields[i] || fields[i - 1];
+      const run = xml.createElementNS(W, 'w:r'); const rp = f.r?.localName === 'r' && kid(f.r, 'rPr'); if (rp) run.append(rp.cloneNode(true)); run.append(...textPieces(tx));
+      if (fields[i]) f.start.before(run); else f.stop.after(run);
+    });
+  }
+  async function newPart(kind, secIndex, type = 'default') {
+    let n = 1; while (zip.file(`word/${kind}${n}.xml`)) n++;
+    const name = `${kind}${n}.xml`; const tag = kind === 'header' ? 'hdr' : 'ftr';
+    zip.file(`word/${name}`, `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>\r\n<w:${tag} xmlns:w="${W}" xmlns:r="${R}"><w:p/></w:${tag}>`);
+    await addContentType(`/word/${name}`, `application/vnd.openxmlformats-officedocument.wordprocessingml.${kind}+xml`);
+    const rid = addRel(`http://schemas.openxmlformats.org/officeDocument/2006/relationships/${kind}`, name); rels[rid] = `word/${name}`;
+    const sp = sections().secs[secIndex].sp;
+    kids(sp, `${kind}Reference`).filter((r) => (attr(r, 'type') || 'default') === type).forEach((r) => r.remove());
+    const ref = xml.createElementNS(W, `w:${kind}Reference`); ref.setAttributeNS(W, 'w:type', type); ref.setAttributeNS(R, 'r:id', rid); sp.prepend(ref);
+    const part = await loadPart(`word/${name}`); part.dirty = true; dirty = true; return part;
+  }
+
+  // ---------- page numbers: Word fields (PAGE inside IF and = fields), so Word numbers every page itself ----------
+  const PN_FMT = [['decimal', '1, 2, 3', 'Arabic'], ['lowerRoman', 'i, ii, iii', 'roman'], ['upperRoman', 'I, II, III', 'ROMAN'], ['lowerLetter', 'a, b, c', 'alphabetic'], ['upperLetter', 'A, B, C', 'ALPHABETIC'], ['thaiNumbers', '๑, ๒, ๓', 'ThaiArabic'], ['none', t('No page numbers', 'ไม่มีเลขหน้า'), '']];
+  const PN_MARK = '_TusuPageNumber';
+  function pnFields(o) {
+    const sw = PN_FMT.find(([f]) => f === o.fmt)[2]; const off = o.first - o.from; const plus = `${off < 0 ? '-' : '+'} ${Math.abs(off)}`;
+    const ph = () => ({ code: ['PAGE \\* Arabic'], res: String(o.from) });
+    const number = off ? { code: ['= ', ph(), ` ${plus} \\* ${sw}`], res: formatNumber(o.first, o.fmt) } : { code: [`PAGE \\* ${sw}`], res: formatNumber(o.first, o.fmt) };
+    const total = !o.total ? null : o.to ? formatNumber(o.first + o.to - o.from, o.fmt) : { code: ['= ', { code: ['NUMPAGES \\* Arabic'], res: '1' }, ` ${plus} \\* ${sw}`], res: '' };
+    let seq = [o.before, number, ...(total ? [o.of, total] : [])].filter((x) => x !== '');
+    if (o.from > 1) seq = [{ code: ['IF ', ph(), ` >= ${o.from} "`, ...seq, '" ""'], res: formatNumber(o.first, o.fmt) }];
+    if (o.to) seq = [{ code: ['IF ', ph(), ` <= ${o.to} "`, ...seq, '" ""'], res: formatNumber(o.first, o.fmt) }];
+    return seq;
+  }
+  function pnRuns(doc, seq) {
+    const out = [];
+    const mk = (name, attrs = {}, textC = null) => { const e = doc.createElementNS(W, `w:${name}`); Object.entries(attrs).forEach(([k2, v]) => e.setAttributeNS(W, `w:${k2}`, v)); if (textC != null) { e.setAttributeNS(XML_NS, 'xml:space', 'preserve'); e.textContent = textC; } return e; };
+    const run = (child) => { const r = mk('r'); r.append(child); out.push(r); };
+    const field = (f) => { run(mk('fldChar', { fldCharType: 'begin' })); f.code.forEach((c) => { if (typeof c === 'string') run(mk('instrText', {}, c)); else field(c); }); run(mk('fldChar', { fldCharType: 'separate' })); if (f.res) run(mk('t', {}, f.res)); run(mk('fldChar', { fldCharType: 'end' })); };
+    seq.forEach((x) => (typeof x === 'string' ? run(mk('t', {}, x)) : field(x)));
+    return out;
+  }
+  const PN_ONLY = /^[\s\-–—|/·.()]*(?:page|หน้า(?:ที่)?)?[\s\-–—|/·.()]*(?:of|จาก)?[\s\-–—|/·.()]*$/i;
+  const codeText = (f) => f.code.map((c) => (typeof c === 'string' ? c : codeText(c))).join('');
+  async function applyPageNumbers(o) {
+    checkpoint();
+    const { secs } = sections(); const kind = o.where;
+    if (o.fmt !== 'none') secs.forEach((s) => { const pn = kid(s.sp, 'pgNumType'); if (!pn) return; pn.removeAttributeNS(W, 'start'); pn.removeAttributeNS(W, 'fmt'); if (!pn.attributes.length) pn.remove(); });
+    const paths = new Set(); secs.forEach((s) => { if (s[kind].default) paths.add(s[kind].default); if (evenOdd && s[kind].even) paths.add(s[kind].even); });
+    if (!secs[0][kind].default && o.fmt !== 'none') paths.add((await newPart(kind, 0)).path);
+    let kept = 0;
+    for (const path of paths) {
+      const part = await loadPart(path); if (!part) continue;
+      for (const p of kids(part.root, 'p')) {
+        const ours = [...p.getElementsByTagNameNS(W, 'bookmarkStart')].some((b) => attr(b, 'name') === PN_MARK);
+        const { segs } = hfSegments(p); const hasPage = segs.some((s) => s.f && /\bPAGE\b/i.test(codeText(s.f)));
+        const own = segs.filter((s) => s.el).map((s) => pieceText(s.el)).join('');
+        if (ours || (hasPage && PN_ONLY.test(own))) p.remove(); else if (hasPage) kept++;
+      }
+      if (o.fmt !== 'none') {
+        const d = part.doc; const p = d.createElementNS(W, 'w:p'); const pPr = d.createElementNS(W, 'w:pPr');
+        const jc = d.createElementNS(W, 'w:jc'); jc.setAttributeNS(W, 'w:val', o.align); pPr.append(jc); p.append(pPr);
+        const id = String(2147000000 + Math.floor(Math.random() * 400000));
+        const bs = d.createElementNS(W, 'w:bookmarkStart'); bs.setAttributeNS(W, 'w:id', id); bs.setAttributeNS(W, 'w:name', PN_MARK);
+        const be = d.createElementNS(W, 'w:bookmarkEnd'); be.setAttributeNS(W, 'w:id', id);
+        p.append(bs, ...pnRuns(d, pnFields(o)), be);
+        if (kind === 'header') part.root.prepend(p); else part.root.append(p);
+      }
+      if (!kids(part.root, 'p').length && !kids(part.root, 'tbl').length) part.root.append(part.doc.createElementNS(W, 'w:p'));
+      part.dirty = true;
+    }
+    dirty = true; paginate();
+    note(o.fmt === 'none' ? t('Page numbers removed', 'ลบเลขหน้าแล้ว') : t(`Page numbers added in the ${kind}`, `เพิ่มเลขหน้าใน${kind === 'header' ? 'หัวกระดาษ' : 'ท้ายกระดาษ'}แล้ว`) + (kept ? t(` (${kept} line(s) with a number and other text kept)`, ` (คงบรรทัดที่มีเลขหน้าและข้อความอื่นไว้ ${kept} บรรทัด)`) : ''));
+  }
+  const pop = document.createElement('div'); pop.className = 'de-pop'; pop.hidden = true; pop.setAttribute('role', 'dialog'); pop.setAttribute('aria-labelledby', 'de-pn-title'); root.querySelector('.oe').append(pop);
+  function pnDialog() {
+    const n = Math.max(1, pageList.length);
+    pop.innerHTML = `<form class="de-sform"><div class="de-shead"><b id="de-pn-title">${t('Page numbers', 'เลขหน้า')}</b><button type="button" data-x aria-label="${t('Close', 'ปิด')}">✕</button></div>
+      <div class="de-srow"><label>${t('Where', 'ตำแหน่ง')} <select name="where"><option value="footer">${t('Footer', 'ท้ายกระดาษ')}</option><option value="header">${t('Header', 'หัวกระดาษ')}</option></select></label>
+        <label>${t('Align', 'จัดแนว')} <select name="align"><option value="center">${t('Centre', 'กึ่งกลาง')}</option><option value="right">${t('Right', 'ขวา')}</option><option value="left">${t('Left', 'ซ้าย')}</option></select></label></div>
+      <label>${t('Format', 'รูปแบบ')} <select name="fmt">${PN_FMT.map(([f, l]) => `<option value="${f}">${l}</option>`).join('')}</select></label>
+      <label>${t('Text before', 'ข้อความนำหน้า')} <input name="before" type="text" placeholder="หน้า / Page" maxlength="20"></label>
+      <label class="de-chk"><input name="total" type="checkbox"> ${t('Show the total (of N)', 'แสดงจำนวนหน้าทั้งหมด (จาก N)')}</label>
+      <div class="de-srow"><label>${t('Start on page', 'เริ่มที่หน้า')} <input name="from" type="number" min="1" max="${n}" value="1"></label><label>${t('First number', 'เลขแรก')} <input name="first" type="number" min="0" max="9999" value="1"></label></div>
+      <label>${t('Stop after page', 'หยุดหลังหน้า')} <input name="to" type="number" min="1" max="${n}" placeholder="${t('to the end', 'จนจบ')}"></label>
+      <p class="de-pnprev" aria-live="polite"></p>
+      <p class="de-pnnote">${t('Pages before the start page and after the stop page have no number. Word works the numbers out when it opens the file.', 'หน้าก่อนหน้าเริ่มและหลังหน้าหยุดจะไม่มีเลข Word คำนวณเลขหน้าเองเมื่อเปิดไฟล์')}</p>
+      <div class="de-srow"><button type="submit" class="btn primary">${t('Apply', 'ใช้')}</button></div></form>`;
+    const f = pop.querySelector('form');
+    const close = () => { pop.hidden = true; pop.onkeydown = null; pnBtn.focus(); };
+    pop.querySelector('[data-x]').onclick = close;
+    pop.onkeydown = (e) => { if (e.key === 'Escape') { e.preventDefault(); close(); } };
+    const preview = () => {
+      const E = f.elements; const fmt = E.fmt.value; const out = pop.querySelector('.de-pnprev');
+      if (fmt === 'none') { out.textContent = t('The page numbers this tool wrote will be taken out.', 'จะลบเลขหน้าที่เครื่องมือนี้ใส่ไว้'); return; }
+      const from = Math.max(1, Math.round(+E.from.value || 1)); const first = Math.max(0, Math.round(+E.first.value || 0)); const to = E.to.value ? Math.max(from, Math.round(+E.to.value)) : 0;
+      const before = E.before.value.replace(/"/g, ''); const pre = before && !/\s$/.test(before) ? `${before} ` : before;
+      const tot = E.total.checked ? `${/[฀-๿]/.test(before) ? ' จาก ' : ' of '}${formatNumber(first + (to || n) - from, fmt)}` : '';
+      out.textContent = `${t('On page', 'หน้า')} ${from}: ${pre}${formatNumber(first, fmt)}${tot}`;
+    };
+    f.addEventListener('input', preview); preview();
+    f.onsubmit = async (e) => {
+      e.preventDefault(); const E = f.elements; const from = Math.max(1, Math.round(+E.from.value || 1)); const to = E.to.value ? Math.max(from, Math.round(+E.to.value)) : 0;
+      const before = E.before.value.replace(/"/g, ''); const thai = /[฀-๿]/.test(before);
+      close();
+      try { await applyPageNumbers({ where: E.where.value, align: E.align.value, fmt: E.fmt.value, before: before && !/\s$/.test(before) ? `${before} ` : before, total: E.total.checked, of: thai ? ' จาก ' : ' of ', from, first: Math.max(0, Math.round(+E.first.value || 0)), to }); }
+      catch (err) { note(err.message); }
+    };
+    pop.hidden = false;
+    const r = pnBtn.getBoundingClientRect(); const bx = root.querySelector('.oe').getBoundingClientRect();
+    pop.style.left = `${Math.max(8, Math.min(r.left - bx.left, bx.width - 330))}px`; pop.style.top = `${r.bottom - bx.top + 8}px`;
+    f.elements.where.focus();
+  }
+  pnBtn.onclick = pnDialog;
+
+  // ---------- Edit / Markup: what typed text looks like ----------
+  // Markup (as before): typed text is in the feedback colour (TYPED). Edit: it takes the format of the text before it.
+  // Kept in this browser.
+  function showMode() { root.querySelectorAll('[data-emode]').forEach((b) => b.setAttribute('aria-pressed', String((b.dataset.emode === 'markup') === markup))); }
+  root.querySelector('.de-emode').onclick = (e) => {
+    const b = e.target.closest('[data-emode]'); if (!b) return; markup = b.dataset.emode === 'markup';
+    try { localStorage.setItem('fb-de-markup', markup ? '1' : '0'); } catch { /* not kept */ }
+    showMode(); note(markup ? t('Markup: typed text is in the feedback colour', 'มาร์กอัป: ข้อความที่พิมพ์เป็นสีความเห็น') : t('Edit: typed text takes the format of the text before it', 'แก้ไข: ข้อความที่พิมพ์ใช้รูปแบบของข้อความก่อนหน้า'));
+  };
+  showMode();
+
   return {
     isDirty: () => changed.size > 0 || dirty,
     async save() {
@@ -968,6 +1342,12 @@ export async function openDocxEditor(root, bytes, { t = (en) => en } = {}) {
       let out = new XMLSerializer().serializeToString(xml);
       if (!out.startsWith('<?xml')) out = `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>\r\n${out}`;
       zip.file('word/document.xml', out);
+      for (const pt of parts.values()) { // headers and footers typed in or given page numbers
+        if (!pt.dirty) continue;
+        let px = new XMLSerializer().serializeToString(pt.doc); if (!px.startsWith('<?xml')) px = `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>\r\n${px}`;
+        zip.file(pt.path, px); pt.dirty = false;
+      }
+      if (relsChanged) zip.file('word/_rels/document.xml.rels', relsXml);
       return zip.generateAsync({ type: 'arraybuffer', compression: 'DEFLATE' });
     },
   };

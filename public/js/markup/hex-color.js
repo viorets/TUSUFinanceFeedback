@@ -55,7 +55,7 @@ export function pairHex(input) {
   scrub(input);
   const f = document.createElement('input');
   f.type = 'text'; f.className = 'hex-in'; f.maxLength = 7; f.spellcheck = false;
-  f.autocomplete = 'off'; f.setAttribute('autocapitalize', 'off'); f.setAttribute('aria-label', 'HEX colour');
+  f.autocomplete = 'off'; f.setAttribute('autocapitalize', 'off'); f.setAttribute('aria-label', `${input.getAttribute('aria-label') || input.title || input.closest('label')?.title || 'Colour'}: HEX`); // each one says which colour
   f.placeholder = '#rrggbb';
   input.after(f);
   const sync = () => { f.value = input.value; f.removeAttribute('aria-invalid'); };

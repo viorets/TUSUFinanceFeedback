@@ -58,6 +58,7 @@ input[type="color"] { touch-action: none; }
    give way to pinch, leaving the % button (back to 100%). */
 @media (pointer: coarse) {
   .rb-btn { min-width: 40px; height: 40px; } .rb-sel, .rb-in { height: 40px; font-size: 16px; }
+  .rb-tab { min-height: 40px; } .rb-color { grid-template-columns: 40px auto; } .rb-color input[type="color"] { width: 40px; height: 16px; } .rb-color .hex-in { height: 40px; }
   .vt-zoom { grid-template-columns: minmax(56px, auto); } .vt-zoom > [id$="-zout"], .vt-zoom > [id$="-zin"] { display: none; }
 }
 
