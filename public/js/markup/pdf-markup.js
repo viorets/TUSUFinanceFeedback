@@ -12,7 +12,7 @@ import { normHex, pairHex } from './hex-color.js';
 import { addFontFile, fontStack, loadUserFonts, siteFont, textWriter } from './pdf-realtext.js';
 import { damagedThai, madeByCanva, pageParagraphs } from './pdf-text.js';
 // pdf-redact.js (Edit text) and pdf-ocr.js (scanned pages) load only when used: the Feedback site leaves both out.
-import { ICON, clampZoom, floatBar, fullScreen, pinchZoom, viewBar, zoomAround } from './view-tools.js';
+import { ICON, clampZoom, floatBar, fullScreen, iconBtn, pinchZoom, viewBar, zoomAround } from './view-tools.js';
 
 const PDFJS_BASE = Promise.withResolvers ? 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/4.4.168/' : 'https://cdn.jsdelivr.net/npm/pdfjs-dist@4.4.168/legacy/build/';
 const PDFJS = `${PDFJS_BASE}pdf.min.mjs`;
@@ -33,6 +33,7 @@ const HIGHLIGHT = '#ffe14d';
 const HL_OPACITY = 0.45; // highlights from older drafts have no colour or opacity: these
 const MAX_CANVAS_PX = 8e6; // pixels per page canvas (iPad Safari: 16.7M per canvas, ~384 MB for all canvases)
 // Typed arrows: the text before the caret is replaced when ">" is typed. "—>" is "-->" after iPad smart punctuation.
+const RESET_ICON = '<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 12a9 9 0 1 0 3-6.7"/><path d="M3 4v5h5"/><path d="m9.5 9.5 5 5M14.5 9.5l-5 5"/></svg>';
 const ARROWS = { '-->': '→', '==>': '➜', '—>': '→' };
 const TOOLS = [
   ['select', 'Select', 'เลือก'], ['edit', 'Edit text', 'แก้ข้อความ'], ['text', 'Text box', 'กล่องข้อความ'], ['highlight', 'Highlight', 'ไฮไลต์'],
@@ -177,7 +178,7 @@ export async function openPdfEditor(root, { bytes, name, draft = null, t = (en) 
         <label class="mk-ctl">${t('Opacity', 'ความทึบ')} <span><input type="range" id="mk-o" min="10" max="100" step="5" value="${HL_OPACITY * 100}"><output id="mk-ov">${HL_OPACITY * 100}%</output></span></label>
       </div>
       <span class="mk-grow"></span>
-      ${viewBar('mk', t, { open: true, help: true })}
+      ${viewBar('mk', t, { open: true, help: true })}${iconBtn('mk-reset', t('Reset edits: remove every mark (Undo brings them back)', 'ล้างการแก้ไข: ลบเครื่องหมายทั้งหมด (เลิกทำเพื่อนำกลับมา)'), RESET_ICON)}
       <p class="mk-caution" role="note"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 9v4M12 17h.01"/><path d="M10.3 3.9 1.8 18a2 2 0 0 0 1.7 3h17a2 2 0 0 0 1.7-3L13.7 3.9a2 2 0 0 0-3.4 0z"/></svg><span>${t('Edit text: the text below an edit does not move. A longer edit can overlap it (amber outline); a shorter one leaves a gap.', 'แก้ข้อความ: ข้อความด้านล่างจะไม่เลื่อนตาม ถ้าแก้ให้ยาวขึ้นอาจทับข้อความด้านล่าง (กรอบสีส้ม) ถ้าสั้นลงจะเหลือช่องว่าง')}</span></p>
     </div><div class="mk-pages" id="mk-pages"><p class="mk-wait">${t('Loading…', 'กำลังโหลด…')}</p></div></div>`;
   const [pdfjs, PDFLib] = await loadLibs();
@@ -329,6 +330,7 @@ export async function openPdfEditor(root, { bytes, name, draft = null, t = (en) 
     $('#mk-o').value = op; $('#mk-ov').textContent = `${op}%`;
     $('#mk-undo').disabled = !st.undo.length;
     $('#mk-redo').disabled = !st.redo.length;
+    $('#mk-reset').disabled = !st.marks.length;
     updateFmt();
   }
   // Is style key k on every character of the selection in the open box (the caret's character when nothing is selected)?
@@ -442,7 +444,9 @@ export async function openPdfEditor(root, { bytes, name, draft = null, t = (en) 
   const undo = () => { editingBox()?.blur(); if (!st.undo.length) return; st.redo.push(JSON.stringify(st.marks)); st.marks = JSON.parse(st.undo.pop()); st.sel = null; changed(); };
   const redo = () => { editingBox()?.blur(); if (!st.redo.length) return; st.undo.push(JSON.stringify(st.marks)); st.marks = JSON.parse(st.redo.pop()); st.sel = null; changed(); };
   const del = () => { editingBox()?.blur(); if (!st.sel) return; snapshot(); st.marks = st.marks.filter((m) => m.id !== st.sel); st.sel = null; changed(); };
-  $('#mk-undo').onclick = undo; $('#mk-redo').onclick = redo; $('#mk-del').onclick = del;
+  // Reset edits (from TUSUFinanceFeedback v2.16): every mark goes in one step; Undo brings them back.
+  const reset = () => { editingBox()?.blur(); if (!st.marks.length) return; snapshot(); st.marks = []; st.sel = null; changed(); };
+  $('#mk-undo').onclick = undo; $('#mk-redo').onclick = redo; $('#mk-del').onclick = del; $('#mk-reset').onclick = reset;
 
   // ---------- zoom ----------
   // z: zoom against "fit to width"; (cx, cy): the screen point that stays put (the cursor or the pinch centre).

@@ -75,7 +75,7 @@ $('#dl').onclick = async () => {
   const t0 = performance.now();
   try {
     const out = await ed.exportPdf();
-    if (out.byteLength > MAX_BYTES) { status(`Marked PDF is ${mb(out.byteLength)}: over the 12 MB limit`); return; }
+    if (out.byteLength > 12 * 1024 * 1024) { status(`Marked PDF is ${mb(out.byteLength)}: over the 12 MB limit`); return; } // this site's limit
     const a = document.createElement('a');
     a.href = URL.createObjectURL(new Blob([out], { type: 'application/pdf' }));
     a.download = name.replace(/\.pdf$/i, '') + ' (marked).pdf';
