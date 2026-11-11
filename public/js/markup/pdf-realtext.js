@@ -23,6 +23,7 @@ export const FACES = {
   'TH Sarabun New': { r: 'THSarabunNew-Regular.ttf', b: 'THSarabunNew-Bold.ttf', i: 'THSarabunNew-Italic.ttf', bi: 'THSarabunNew-BoldItalic.ttf', fallback: 'Sarabun' },
   'TH SarabunPSK': { r: 'THSarabunPSK-Regular.ttf', b: 'THSarabunPSK-Bold.ttf', i: 'THSarabunPSK-Italic.ttf', bi: 'THSarabunPSK-BoldItalic.ttf', fallback: 'TH Sarabun New' },
   EucrosiaUPC: { local: ['EucrosiaUPC', 'EucrosiaUPC-Bold', 'EucrosiaUPC-Italic', 'EucrosiaUPC-BoldItalic'], fallback: 'TH Sarabun New' },
+  'Angsana New': { local: ['AngsanaNew', 'AngsanaNew-Bold', 'AngsanaNew-Italic', 'AngsanaNew-BoldItalic'], fallback: 'TH Sarabun New' },
   'Times New Roman': { std: ['TimesRoman', 'TimesRomanBold', 'TimesRomanItalic', 'TimesRomanBoldItalic'], fallback: 'TH Sarabun New' },
   Arial: { std: ['Helvetica', 'HelveticaBold', 'HelveticaOblique', 'HelveticaBoldOblique'], fallback: 'TH Sarabun New' },
 };
@@ -43,13 +44,33 @@ const fetchFont = (file) => {
   if (!bytesCache.has(file)) bytesCache.set(file, fetch(FONT_DIR + file).then((r) => { if (!r.ok) throw new Error(`Font ${file} is missing`); return r.arrayBuffer(); }));
   return bytesCache.get(file);
 };
-// EucrosiaUPC from this computer (Chrome/Edge, after the user allows "fonts"); null when not possible.
+// EucrosiaUPC or Angsana New from this computer (Chrome/Edge, after the user allows "fonts"); null when not possible.
 async function localFont(names) {
   try {
     if (!window.queryLocalFonts) return null;
     const all = await window.queryLocalFonts({ postscriptNames: names });
-    return all.length ? Object.fromEntries(await Promise.all(all.map(async (f) => [f.postscriptName, await (await f.blob()).arrayBuffer()]))) : null;
+    return all.length ? Object.fromEntries(await Promise.all(all.map(async (f) => [f.postscriptName, await pickFont(await (await f.blob()).arrayBuffer(), f.postscriptName)]))) : null;
   } catch { return null; }
+}
+// Font collections (.ttc: Angsana New and AngsanaUPC in one file on Windows) -> one font file per font. pdf-lib
+// embeds single fonts only, so each font's table directory is written with its tables copied after it.
+const isCollection = (buf) => new TextDecoder('latin1').decode(new Uint8Array(buf, 0, 4)) === 'ttcf';
+export function splitCollection(buf) {
+  if (!isCollection(buf)) return [buf];
+  const u8 = new Uint8Array(buf); const dv = new DataView(buf);
+  return Array.from({ length: dv.getUint32(8) }, (_, k) => {
+    const o = dv.getUint32(12 + 4 * k); const n = dv.getUint16(o + 4); let size = 12 + 16 * n; const tables = [];
+    for (let i = 0; i < n; i++) { const p = o + 12 + 16 * i; const t = { p, off: dv.getUint32(p + 8), len: dv.getUint32(p + 12), at: size }; tables.push(t); size += (t.len + 3) & ~3; }
+    const out = new Uint8Array(size); const ov = new DataView(out.buffer); out.set(u8.subarray(o, o + 12), 0);
+    tables.forEach((t, i) => { out.set(u8.subarray(t.p, t.p + 8), 12 + 16 * i); ov.setUint32(12 + 16 * i + 8, t.at); ov.setUint32(12 + 16 * i + 12, t.len); out.set(u8.subarray(t.off, t.off + t.len), t.at); });
+    return out.buffer;
+  });
+}
+// The font of a file or collection with this PostScript name.
+async function pickFont(buf, psName) {
+  if (!isCollection(buf)) return buf;
+  const fk = await loadFontkit();
+  return splitCollection(buf).find((b) => { try { return fk.create(new Uint8Array(b)).postscriptName === psName; } catch { return false; } }) || buf;
 }
 
 const STYLE = (r) => (r.b && r.i ? 3 : r.b ? 1 : r.i ? 2 : 0);
@@ -58,7 +79,7 @@ const KEYS = ['r', 'b', 'i', 'bi'];
 // One writer per exported PDF: embeds each face once (subset), draws text boxes. notes: things to tell the user.
 export async function textWriter(pdf, PDFLib) {
   const fontkit = await loadFontkit(); pdf.registerFontkit(fontkit);
-  const faces = new Map(); const notes = new Set(); let eucrosia;
+  const faces = new Map(); const notes = new Set(); const locals = new Map(); // family -> its faces from this computer
   // -> { font, alt, synthB, synthI, std } for family + style, or null if the family cannot be embedded
   async function face(family, st) {
     const key = `${family}|${st}`;
@@ -68,10 +89,11 @@ export async function textWriter(pdf, PDFLib) {
       if (f.std) return { std: true, font: await pdf.embedFont(PDFLib.StandardFonts[f.std[st]]), family };
       let bytes; let synthB = false; let synthI = false;
       if (f.local && !f.files) {
-        eucrosia ??= await localFont(f.local);
-        bytes = eucrosia?.[f.local[st]] || eucrosia?.[f.local[st & 1]] || eucrosia?.[f.local[0]];
+        if (!locals.has(family)) locals.set(family, await localFont(f.local));
+        const got = locals.get(family);
+        bytes = got?.[f.local[st]] || got?.[f.local[st & 1]] || got?.[f.local[0]];
         if (!bytes) { notes.add(`${family} is not available here, so TH Sarabun New was used`); return face(f.fallback, st); }
-        synthB = !!(st & 1) && !eucrosia[f.local[st]] && !eucrosia[f.local[1]]; synthI = !!(st & 2) && !eucrosia[f.local[st]];
+        synthB = !!(st & 1) && !got[f.local[st]] && !got[f.local[1]]; synthI = !!(st & 2) && !got[f.local[st]];
       } else {
         const src = f.files || f; // a user's font: its bytes; a site font: its file names
         const want = KEYS[st]; const file = src[want] || (st & 1 && src.b) || (st & 2 && src.i) || src.r;
@@ -223,15 +245,20 @@ async function registerFont(family, key, bytes) {
 // A .ttf or .otf file -> { family, key } (key: r, b, i, bi from its own style name). The site's own fonts stay as
 // they are ({ family, site: true }); EucrosiaUPC and new families are added.
 export async function addFontFile(file) {
-  const fk = await loadFontkit(); const bytes = await file.arrayBuffer(); let font;
-  try { font = fk.create(new Uint8Array(bytes)); } catch { throw new Error(`${file.name} is not a font file (.ttf or .otf).`); }
-  if (font.fonts) throw new Error(`${file.name} holds several fonts (.ttc): choose a single .ttf or .otf file.`);
-  const family = (font.familyName || file.name.replace(/\.[^.]+$/, '')).trim(); const sub = String(font.subfamilyName || '').toLowerCase();
-  const key = /bold/.test(sub) && /italic|oblique/.test(sub) ? 'bi' : /bold/.test(sub) ? 'b' : /italic|oblique/.test(sub) ? 'i' : 'r';
-  if (FACES[family] && !FACES[family].user && !FACES[family].local) return { family, site: true };
-  await registerFont(family, key, bytes);
-  try { await dbDo('readwrite', (s) => s.put(bytes, `${family}|${key}`)); } catch { /* storage off: the font lasts until the page closes */ }
-  return { family, key };
+  const fk = await loadFontkit(); const all = splitCollection(await file.arrayBuffer()); let last = null;
+  for (const bytes of all) {
+    let font; try { font = fk.create(new Uint8Array(bytes)); } catch { throw new Error(`${file.name} is not a font file (.ttf, .otf or .ttc).`); }
+    const family = (font.familyName || file.name.replace(/\.[^.]+$/, '')).trim();
+    const ps = String(font.postscriptName || ''); const sub = String(font.subfamilyName || '').toLowerCase();
+    // the style from the PostScript name (AngsanaNew-BoldItalic) first: style names can be in another language
+    const bold = /-.*bold|bold$/i.test(ps) || (!/-/.test(ps) && /bold/.test(sub)); const ital = /-.*(italic|oblique)/i.test(ps) || (!/-/.test(ps) && /italic|oblique/.test(sub));
+    const key = bold && ital ? 'bi' : bold ? 'b' : ital ? 'i' : 'r';
+    if (FACES[family] && !FACES[family].user && !FACES[family].local) { last = last || { family, site: true }; continue; }
+    await registerFont(family, key, bytes);
+    try { await dbDo('readwrite', (s) => s.put(bytes, `${family}|${key}`)); } catch { /* storage off: the font lasts until the page closes */ }
+    if (!last || last.site) last = { family, key, more: all.length > 1 ? all.length : 0 };
+  }
+  return last;
 }
 // Fonts added before, from this browser's storage. Resolves the families now usable.
 export async function loadUserFonts() {

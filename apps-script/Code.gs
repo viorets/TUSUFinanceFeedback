@@ -573,8 +573,8 @@ function allocated_() {
 
 // PDF editor defaults (v2.13, Settings "Markup Defaults": JSON { size, textColor, shapeColor, font }): new text
 // boxes start at this size, colour and font; new shapes (draw, line, arrow, rectangle) at shapeColor. size falls
-// back to the v2.12 key "Markup Text Size". Keep MARKUP_FONTS in step with FONTS in pdf-markup.js.
-const MARKUP_FONTS = ['LINE Seed Sans TH', 'Noto Sans Thai', 'Sarabun', 'TH Sarabun New', 'TH SarabunPSK', 'EucrosiaUPC', 'Times New Roman', 'Arial', 'Georgia'];
+// back to the v2.12 key "Markup Text Size". Keep MARKUP_FONTS in step with public/js/markup-fonts.js.
+const MARKUP_FONTS = ['LINE Seed Sans TH', 'TH Sarabun New', 'TH SarabunPSK', 'Angsana New'];
 const HEX_COLOR = /^#[0-9a-f]{6}$/i;
 function markupDefaults_() {
   const get = function (k) { const r = settings_().filter(function (x) { return x['Key'] === k; })[0]; return r ? r['Value'] : ''; };

@@ -27,7 +27,7 @@ export const TEXT = { font: 'LINE Seed Sans TH', size: 11, color: '#990000', lin
 // Fonts a text box can use (js/pdf-realtext.js FACES: files and the fallback for letters a font lacks). All but
 // Georgia are written into the PDF as real text; Georgia boxes stay a picture. EucrosiaUPC and Times New Roman are
 // the computer's own fonts on screen.
-export const FONTS = ['LINE Seed Sans TH', 'Noto Sans Thai', 'Sarabun', 'TH Sarabun New', 'TH SarabunPSK', 'EucrosiaUPC', 'Times New Roman', 'Arial', 'Georgia'];
+export const FONTS = ['LINE Seed Sans TH', 'Noto Sans Thai', 'Sarabun', 'TH Sarabun New', 'TH SarabunPSK', 'EucrosiaUPC', 'Angsana New', 'Times New Roman', 'Arial', 'Georgia'];
 const fontOf = (m) => m.font || TEXT.font; // text boxes from v2.12 drafts have no font: the old default
 const HIGHLIGHT = '#ffe14d';
 const HL_OPACITY = 0.45; // highlights from older drafts have no colour or opacity: these
@@ -154,18 +154,19 @@ const exec = (cmd, v = null) => { try { return document.execCommand(cmd, false, 
 // t(en, th) translates labels. Resolves an editor handle { marks(), isDirty(), exportPdf() }.
 // defaults (admin console, v2.13): { size, textColor, shapeColor, font } of new text boxes and shapes; TEXT where not given.
 // editText: the Edit text tool (and its OCR of scanned or damaged pages, when ocr is on). Feedback turns both off.
-export async function openPdfEditor(root, { bytes, name, draft = null, t = (en) => en, onDraft = () => {}, onStatus = () => {}, defaults = {}, maxBytes = MAX_BYTES, editText = true, ocr = true }) {
+export async function openPdfEditor(root, { bytes, name, draft = null, t = (en) => en, onDraft = () => {}, onStatus = () => {}, defaults = {}, maxBytes = MAX_BYTES, editText = true, ocr = true, fonts = FONTS }) {
   const textSize = defaults.size || TEXT.size;
-  const userFonts = (await loadUserFonts()).filter((f) => !FONTS.includes(f)); // fonts added from this computer before
-  const fontOptions = (sel) => [...FONTS, ...userFonts].map((f) => `<option ${f === sel ? 'selected' : ''}>${f}</option>`).join('');
-  const font0 = FONTS.includes(defaults.font) || userFonts.includes(defaults.font) ? defaults.font : TEXT.font;
+  // fonts: the font menu (Feedback shows four); fonts added from this computer before come after them
+  const userFonts = (await loadUserFonts()).filter((f) => !fonts.includes(f));
+  const fontOptions = (sel) => [...fonts, ...userFonts].map((f) => `<option ${f === sel ? 'selected' : ''}>${f}</option>`).join('');
+  const font0 = fonts.includes(defaults.font) || userFonts.includes(defaults.font) ? defaults.font : fonts.includes(TEXT.font) ? TEXT.font : fonts[0];
   const limit = Math.round(maxBytes / 1048576);
   if (bytes.byteLength > maxBytes) throw new Error(t(`This file is over ${limit} MB, so it cannot be marked. Open it in Drive instead.`, `ไฟล์ใหญ่เกิน ${limit} MB จึงทำเครื่องหมายไม่ได้ กรุณาเปิดใน Drive`));
   root.innerHTML = `<div class="mk" data-tool="select"><div class="mk-bar" role="toolbar" aria-label="${t('PDF tools', 'เครื่องมือ PDF')}">
       <div class="mk-tools">${TOOLS.filter(([k]) => editText || k !== 'edit').map(([k, en, th]) => `<button type="button" data-tool="${k}" aria-pressed="false">${t(en, th)}</button>`).join('')}</div>
       <div class="mk-g mk-g-text">
         <div class="mk-fmt" role="group" aria-label="${t('Text format', 'รูปแบบตัวอักษร')}">${FMT.map(([cmd, , face, en, th]) => `<button type="button" data-fmt="${cmd}" aria-pressed="false" title="${t(en, th)}" aria-label="${t(en, th)}">${face}</button>`).join('')}</div>
-        <label class="mk-ctl">${t('Font', 'แบบอักษร')} <select id="mk-f">${fontOptions(font0)}</select></label><button type="button" class="mk-addf" id="mk-addf" title="${t('Add a font from this computer (.ttf, .otf)', 'เพิ่มแบบอักษรจากเครื่องนี้ (.ttf, .otf)')}" aria-label="${t('Add a font from this computer', 'เพิ่มแบบอักษรจากเครื่องนี้')}">＋</button><input type="file" id="mk-ffile" accept=".ttf,.otf,font/ttf,font/otf" multiple hidden>
+        <label class="mk-ctl">${t('Font', 'แบบอักษร')} <select id="mk-f">${fontOptions(font0)}</select></label><button type="button" class="mk-addf" id="mk-addf" title="${t('Add a font from this computer (.ttf, .otf, .ttc)', 'เพิ่มแบบอักษรจากเครื่องนี้ (.ttf, .otf, .ttc)')}" aria-label="${t('Add a font from this computer', 'เพิ่มแบบอักษรจากเครื่องนี้')}">＋</button><input type="file" id="mk-ffile" accept=".ttf,.otf,.ttc,font/ttf,font/otf,font/collection" multiple hidden>
         <label class="mk-ctl">${t('Text size', 'ขนาดตัวอักษร')} <span><input type="number" id="mk-s" min="6" max="72" step="1" value="${textSize}"> pt</span></label>
       </div>
       <div class="mk-g mk-g-shape"><label class="mk-ctl">${t('Width', 'ความหนา')} <span><input type="range" id="mk-w" min="1" max="12" step="0.5" value="2"><output id="mk-wv">2</output></span></label></div>
@@ -426,7 +427,7 @@ export async function openPdfEditor(root, { bytes, name, draft = null, t = (en) 
       try {
         const r = await addFontFile(f); last = r.family;
         if (r.site) onStatus(t(`${r.family} is already one of the site's fonts.`, `${r.family} มีอยู่ในเว็บแล้ว`));
-        else { if (!FONTS.includes(r.family) && !userFonts.includes(r.family)) userFonts.push(r.family); onStatus(t(`Font added: ${r.family} (kept in this browser only)`, `เพิ่มแบบอักษรแล้ว: ${r.family} (เก็บไว้ในเบราว์เซอร์นี้เท่านั้น)`)); }
+        else { if (!fonts.includes(r.family) && !userFonts.includes(r.family)) userFonts.push(r.family); onStatus(t(`Font added: ${r.family} (kept in this browser only)`, `เพิ่มแบบอักษรแล้ว: ${r.family} (เก็บไว้ในเบราว์เซอร์นี้เท่านั้น)`)); }
       } catch (err) { onStatus(err.message); }
     }
     $('#mk-f').innerHTML = fontOptions(last || st.font);

@@ -14,6 +14,7 @@ import { tr } from '../i18n.js';
 import { $, esc, icon, toast, busy, errorBox, confirmBox, dateTimeFmt } from '../ui.js';
 import { call, upload } from '../api.js';
 import { sendMarked } from '../project.js';
+import { MARKUP_FONTS } from '../markup-fonts.js';
 
 const MIME = {
   pdf: 'application/pdf',
@@ -74,7 +75,7 @@ async function openPdf(el) {
   st.ed = await openPdfEditor($('[data-root]', el), {
     bytes: await bytesOf(out.data), name: st.name, draft: useLocal ? local.marks : out.draft?.marks || null, t: tr,
     onDraft: (marks) => writeLocal({ marks, base: st.draft?.at || '' }), defaults: out.defaults,
-    editText: false, ocr: false, maxBytes: 12 * 1024 * 1024, onStatus: (m) => status(el, esc(m)),
+    editText: false, ocr: false, maxBytes: 12 * 1024 * 1024, fonts: MARKUP_FONTS, onStatus: (m) => status(el, esc(m)),
   });
   if (local && !useLocal) writeLocal(null); // made on an older draft: the newer draft on the server is shown
   status(el, useLocal ? tr('Unsaved marks from this device were restored', 'กู้คืนเครื่องหมายที่ยังไม่บันทึกจากเครื่องนี้แล้ว') : draftLine());

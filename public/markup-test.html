@@ -45,6 +45,7 @@ import { setFontDir } from './js/markup/pdf-realtext.js';
 import { openDocxEditor } from './js/markup/docx-edit.js';
 import { openXlsxEditor } from './js/markup/xlsx-edit.js';
 import { setRibbonLang } from './js/markup/ribbon.js';
+import { MARKUP_FONTS } from './js/markup-fonts.js';
 setFontDir('fonts/');
 // ?th=1: Thai ribbon labels, as the site shows them in Thai
 if (new URLSearchParams(location.search).get('th')) setRibbonLang((en, th) => th);
@@ -65,7 +66,7 @@ async function open(bytes, fileName) {
     $('#editor').classList.add('markup-page');
     if (/\.docx$/i.test(fileName)) ed = await openDocxEditor($('#editor'), bytes);
     else if (/\.xlsx$/i.test(fileName)) ed = await openXlsxEditor($('#editor'), bytes);
-    else ed = await openPdfEditor($('#editor'), { bytes, name: fileName, draft, editText: false, ocr: false, maxBytes: MAX_BYTES, onStatus: status });
+    else ed = await openPdfEditor($('#editor'), { bytes, name: fileName, draft, editText: false, ocr: false, maxBytes: MAX_BYTES, fonts: MARKUP_FONTS, onStatus: status });
     window.__ed = ed;
     status(`${fileName} · ${mb(bytes.byteLength)} · opened in ${Math.round(performance.now() - t0)} ms${draft ? ' · draft restored' : ''}`);
     $('#draft').disabled = false; $('#dl').disabled = false;

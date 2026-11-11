@@ -652,12 +652,13 @@ export async function pageParagraphs(page, items = null) {
         const last = v.segs.at(-1); const gap = last.y - seg.y;
         return !v.closed && v.single && Math.abs(last.size - seg.size) < seg.size * 0.15 && gap > 0 && gap < Math.max(seg.size * 1.9, pitch * 1.35)
           && seg.x < v.x2 && seg.x2 > v.x
-          && (Math.abs(seg.x - v.left) < seg.size * 3 || (v.segs.length === 1 && seg.x < v.left && v.left - seg.x < seg.size * 6)); // or under an indented first line
+          && (Math.abs(seg.x - v.left) < seg.size * 3 || (v.segs.length === 1 && seg.x < v.left && v.left - seg.x < seg.size * 6)) // or under an indented first line
+          && !(v.list && seg.x < v.left - seg.size * 0.5); // a list item goes on only under its marker, not back at the margin
       });
       if (u) {
         const last = u.segs.at(-1);
         u.segs.push(seg); u.x = Math.min(u.x, seg.x); u.x2 = Math.max(u.x2, seg.x2); u.left = Math.min(u.left, seg.x);
-      } else units.push({ segs: [seg], x: seg.x, x2: seg.x2, left: seg.x, single: ln.cells.length === 1 });
+      } else units.push({ segs: [seg], x: seg.x, x2: seg.x2, left: seg.x, single: ln.cells.length === 1, list: LIST.test(c.text) });
       // a line that stops well short of the text's right edge ends its paragraph (a last line, a salutation)
       if (ln.cells.length === 1 && seg.x2 < right - seg.size * 4) (u || units.at(-1)).closed = true;
     }
